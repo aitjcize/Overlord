@@ -13,6 +13,11 @@ overlord:
 
 overlordd: overlord
 	GOPATH=$(GOPATH) $(GO) install $</cmd/$@
+	rm -rf $(FACTORY)/go/bin/app
+	cp -r app $(FACTORY)/go/bin
 
 ghost: overlord
 	GOPATH=$(GOPATH) $(GO) install $</cmd/$@
+
+clean:
+	rm -rf $(FACTORY)/go/pkg $(FACTORY)/go/bin
