@@ -230,6 +230,8 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 			if err == io.EOF {
 				log.Println("SpawnPTYServer: connection dropped")
 				return nil
+			} else {
+				return err
 			}
 		case s := <-stop_conn:
 			if s {
@@ -285,6 +287,8 @@ func (self *Ghost) SpawnLogcatServer(res *Response) error {
 			if err == io.EOF {
 				cmd.Process.Kill()
 				return errors.New("SpawnLogcatServer: connection dropped")
+			} else {
+				return err
 			}
 		}
 	}
@@ -368,6 +372,8 @@ func (self *Ghost) Listen() error {
 		case err := <-read_err_chan:
 			if err == io.EOF {
 				return errors.New("Connection dropped")
+			} else {
+				return err
 			}
 		case <-ping_ticker.C:
 			self.Ping()

@@ -232,8 +232,10 @@ func (self *ConnServer) Listen() {
 		case err := <-read_err_chan:
 			if err == io.EOF {
 				log.Printf("connection dropped: %s\n", self.mid)
-				return
+			} else {
+				log.Printf("unknown network error for %s: %s\n", self.mid, err.Error())
 			}
+			return
 		case msg := <-self.bridge:
 			self.handleOverlordRequest(msg)
 		case <-ticker.C:

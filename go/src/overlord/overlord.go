@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	WEBSERVER_ADDR = "localhost:9000"
-	LD_INTERVAL    = 5
+	WEBSERVER_ADDR    = "localhost:9000"
+	LD_INTERVAL       = 5
+	KEEP_ALIVE_PERIOD = 1
 )
 
 type SpawnTerminalCmd struct {
@@ -183,18 +184,24 @@ func (self *Overlord) handleConnection(conn net.Conn) {
 
 // Socket server main routine.
 func (self *Overlord) ServSocket(port int) {
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
-	ln, err := net.Listen("tcp", addr)
+	addr_str := fmt.Sprintf("0.0.0.0:%d", port)
+	addr, err := net.ResolveTCPAddr("tcp", addr_str)
+	if err != nil {
+		panic(err)
+	}
+	ln, err := net.ListenTCP("tcp", addr)
 	if err != nil {
 		panic(err)
 	}
 	log.Printf("Overlord started, listening at %s", addr)
 	for {
-		conn, err := ln.Accept()
+		conn, err := ln.AcceptTCP()
 		if err != nil {
 			panic(err)
 		}
 		log.Printf("Incomming connection from %s\n", conn.RemoteAddr())
+		conn.SetKeepAlive(true)
+		conn.SetKeepAlivePeriod(KEEP_ALIVE_PERIOD * time.Second)
 		self.handleConnection(conn)
 	}
 }

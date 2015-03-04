@@ -18,7 +18,6 @@ const (
 	DEBUG_RPC            = false
 	SEP                  = "\r\n"
 	BUFSIZ               = 8192
-	CONN_TIMEOUT_SECS    = 5  // Time for determine the connection timeouts
 	REQUEST_TIMEOUT_SECS = 60 // Number of seconds before request timeouts
 	TIMEOUT_CHECK_SECS   = 3  // The time between checking for timeout
 )
@@ -170,11 +169,9 @@ func (self *RPCCore) SpawnReaderRoutine() (chan string, chan error) {
 	go func() {
 		buf := make([]byte, BUFSIZ)
 		for {
-			self.Conn.SetReadDeadline(time.Now().Add(time.Second * CONN_TIMEOUT_SECS))
 			n, err := self.Conn.Read(buf)
 			if err != nil {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
-					read_err_chan <- err
 					continue
 				}
 				read_err_chan <- err
