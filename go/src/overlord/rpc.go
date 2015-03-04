@@ -119,13 +119,13 @@ func (self *RPCCore) SendMessage(msg Message) error {
 		return errors.New("SendMessage failed, connection not established")
 	}
 	var err error
-	var msg_bytes []byte
+	var msgBytes []byte
 
-	if msg_bytes, err = msg.Marshal(); err == nil {
+	if msgBytes, err = msg.Marshal(); err == nil {
 		if DEBUG_RPC {
-			log.Printf("-----> %s\n", string(msg_bytes))
+			log.Printf("-----> %s\n", string(msgBytes))
 		}
-		_, err = self.Conn.Write(append(msg_bytes, []byte(SEP)...))
+		_, err = self.Conn.Write(append(msgBytes, []byte(SEP)...))
 	}
 	return err
 }
@@ -163,8 +163,8 @@ func (self *RPCCore) handleResponse(res *Response) error {
 // send the content from the socket, and the second channel send an error
 // object if there is one.
 func (self *RPCCore) SpawnReaderRoutine() (chan string, chan error) {
-	read_chan := make(chan string)
-	read_err_chan := make(chan error, 1)
+	readChan := make(chan string)
+	readErrChan := make(chan error, 1)
 
 	go func() {
 		buf := make([]byte, BUFSIZ)
@@ -174,24 +174,24 @@ func (self *RPCCore) SpawnReaderRoutine() (chan string, chan error) {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
 					continue
 				}
-				read_err_chan <- err
+				readErrChan <- err
 				return
 			}
-			read_chan <- string(buf[:n])
+			readChan <- string(buf[:n])
 		}
 	}()
 
-	return read_chan, read_err_chan
+	return readChan, readErrChan
 }
 
 // Parses a single JSON string into a Message object.
-func (self *RPCCore) ParseMessage(msg_json string) (Message, error) {
+func (self *RPCCore) ParseMessage(msgJson string) (Message, error) {
 	var req Request
 	var res Response
 
-	err := json.Unmarshal([]byte(msg_json), &req)
+	err := json.Unmarshal([]byte(msgJson), &req)
 	if err != nil || len(req.Name) == 0 {
-		err := json.Unmarshal([]byte(msg_json), &res)
+		err := json.Unmarshal([]byte(msgJson), &res)
 		if err != nil {
 			err = errors.New("mal-formed JSON request, ignored")
 		} else {
@@ -210,7 +210,7 @@ func (self *RPCCore) ParseMessage(msg_json string) (Message, error) {
 func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 	var reqs []*Request
 	var writeback string
-	var msgs_json []string
+	var msgsJson []string
 
 	self.ReadBuffer += buffer
 
@@ -219,24 +219,24 @@ func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 		if idx == -1 {
 			return nil
 		}
-		msgs_json = []string{self.ReadBuffer[:idx]}
+		msgsJson = []string{self.ReadBuffer[:idx]}
 		self.ReadBuffer = self.ReadBuffer[idx+2:]
 	} else {
 		msgs := strings.Split(self.ReadBuffer, SEP)
 		if len(msgs) > 0 {
 			self.ReadBuffer = msgs[len(msgs)-1]
-			msgs_json = msgs[:len(msgs)-1]
+			msgsJson = msgs[:len(msgs)-1]
 		} else {
 			return nil
 		}
 	}
 
-	for _, msg_json := range msgs_json {
+	for _, msgJson := range msgsJson {
 		if DEBUG_RPC {
-			log.Printf("<----- " + msg_json)
+			log.Printf("<----- " + msgJson)
 		}
-		if msg, err := self.ParseMessage(msg_json); err != nil {
-			writeback += msg_json + SEP
+		if msg, err := self.ParseMessage(msgJson); err != nil {
+			writeback += msgJson + SEP
 			log.Printf("Message parse failed: %s\n", err)
 			continue
 		} else {

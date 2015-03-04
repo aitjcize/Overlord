@@ -184,8 +184,8 @@ func (self *Overlord) handleConnection(conn net.Conn) {
 
 // Socket server main routine.
 func (self *Overlord) ServSocket(port int) {
-	addr_str := fmt.Sprintf("0.0.0.0:%d", port)
-	addr, err := net.ResolveTCPAddr("tcp", addr_str)
+	addrStr := fmt.Sprintf("0.0.0.0:%d", port)
+	addr, err := net.ResolveTCPAddr("tcp", addrStr)
 	if err != nil {
 		panic(err)
 	}
@@ -339,8 +339,8 @@ func (self *Overlord) ServHTTP(addr, app string) {
 			return
 		}
 
-		result_json := <-output
-		w.Write(result_json)
+		resultJson := <-output
+		w.Write(resultJson)
 	}
 
 	// List all agents connected to the Overlord.
@@ -389,8 +389,8 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		}
 	}
 
-	app_dir := filepath.Join(filepath.Dir(os.Args[0]), "app", app)
-	if _, err := os.Stat(app_dir); os.IsNotExist(err) {
+	appDir := filepath.Join(filepath.Dir(os.Args[0]), "app", app)
+	if _, err := os.Stat(appDir); os.IsNotExist(err) {
 		log.Fatalf("App `%s' does not exist\n", app)
 	}
 
@@ -407,7 +407,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 
 	http.Handle("/api/", r)
 	http.Handle("/api/socket.io/", self.ioserver)
-	http.Handle("/", http.FileServer(http.Dir(app_dir)))
+	http.Handle("/", http.FileServer(http.Dir(appDir)))
 
 	err := http.ListenAndServe(WEBSERVER_ADDR, nil)
 	if err != nil {
@@ -433,7 +433,7 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	}
 }
 
-func overlord_usage() {
+func overlordUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -442,7 +442,7 @@ func overlord_usage() {
 func (self *Overlord) Serv() {
 	var app = flag.String("app", "dashboard", "name of app to launch.")
 
-	flag.Usage = overlord_usage
+	flag.Usage = overlordUsage
 	flag.Parse()
 
 	go self.ServSocket(OVERLORD_PORT)

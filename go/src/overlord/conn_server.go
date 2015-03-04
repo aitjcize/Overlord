@@ -29,27 +29,27 @@ const (
 type ConnServer struct {
 	*RPCCore
 	ovl         *Overlord         // Overlord handle
-	registered  bool              // Whether we are registered or not
 	mode        int               // Client mode, see constants.go for definition
 	bridge      chan interface{}  // channel for receiving commmand from overlord
-	stop_listen chan bool         // Stop the Listen() loop
 	cid         string            // Client ID
 	mid         string            // Machine ID
-	wsconn      *websocket.Conn   // WebSocket for Shell and Logcat
+	registered  bool              // Whether we are registered or not
+	wsConn      *websocket.Conn   // WebSocket for Shell and Logcat
 	logFormat   int               // Log format, see constants.go for definition
-	slogWsconns []*websocket.Conn // WebSockets for Simple-logcat
+	slogWsConns []*websocket.Conn // WebSockets for Simple-logcat
 	slogHistory string            // Log buffer for logcat
-	last_ping   int64             // Last time the client pinged
+	stopListen  chan bool         // Stop the Listen() loop
+	lastPing    int64             // Last time the client pinged
 }
 
 func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 	return &ConnServer{
-		RPCCore:     NewRPCCore(conn),
-		ovl:         ovl,
-		mode:        NONE,
-		bridge:      make(chan interface{}),
-		stop_listen: make(chan bool, 1),
-		registered:  false,
+		RPCCore:    NewRPCCore(conn),
+		ovl:        ovl,
+		mode:       NONE,
+		bridge:     make(chan interface{}),
+		stopListen: make(chan bool, 1),
+		registered: false,
 	}
 }
 
@@ -60,8 +60,8 @@ func (self *ConnServer) Terminate() {
 	if self.Conn != nil {
 		self.Conn.Close()
 	}
-	if self.wsconn != nil {
-		self.wsconn.Close()
+	if self.wsConn != nil {
+		self.wsConn.Close()
 	}
 }
 
@@ -77,11 +77,11 @@ func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 // Forwards the input from Websocket to TCP socket.
 func (self *ConnServer) forwardWSTerminalInput() {
 	defer func() {
-		self.stop_listen <- true
+		self.stopListen <- true
 	}()
 
 	for {
-		mt, payload, err := self.wsconn.ReadMessage()
+		mt, payload, err := self.wsConn.ReadMessage()
 		if err != nil {
 			if err == io.EOF {
 				log.Println("WebSocket connection terminated")
@@ -108,11 +108,11 @@ func (self *ConnServer) forwardWSTerminalInput() {
 func (self *ConnServer) monitorLogcatWS() {
 	defer func() {
 		log.Println("WebSocket connection terminated")
-		self.stop_listen <- true
+		self.stopListen <- true
 	}()
 
 	for {
-		_, _, err := self.wsconn.ReadMessage()
+		_, _, err := self.wsConn.ReadMessage()
 		if err != nil {
 			return
 		}
@@ -122,18 +122,18 @@ func (self *ConnServer) monitorLogcatWS() {
 
 // Forward the PTY output to WebSocket.
 func (self *ConnServer) forwardTerminalOutput(buffer string) {
-	if self.wsconn == nil {
-		self.stop_listen <- true
+	if self.wsConn == nil {
+		self.stopListen <- true
 	}
-	self.wsconn.WriteMessage(websocket.TextMessage, B64Encode(buffer))
+	self.wsConn.WriteMessage(websocket.TextMessage, B64Encode(buffer))
 }
 
 // Forward the logcat output to WebSocket.
 func (self *ConnServer) forwardLogcatOutput(buffer string) {
-	if self.wsconn == nil {
-		self.stop_listen <- true
+	if self.wsConn == nil {
+		self.stopListen <- true
 	}
-	self.writeLogToWS(self.wsconn, buffer)
+	self.writeLogToWS(self.wsConn, buffer)
 }
 
 // Forward the logcat output to WebSocket.
@@ -143,15 +143,15 @@ func (self *ConnServer) forwardSimpleLogcatOutput(buffer string) {
 		self.slogHistory = self.slogHistory[l-LOG_BUFSIZ : l]
 	}
 
-	var alive_wsconns []*websocket.Conn
-	for _, conn := range self.slogWsconns[:] {
+	var aliveWsConns []*websocket.Conn
+	for _, conn := range self.slogWsConns[:] {
 		if err := self.writeLogToWS(conn, buffer); err == nil {
-			alive_wsconns = append(alive_wsconns, conn)
+			aliveWsConns = append(aliveWsConns, conn)
 		} else {
 			conn.Close()
 		}
 	}
-	self.slogWsconns = alive_wsconns
+	self.slogWsConns = aliveWsConns
 }
 
 func (self *ConnServer) ProcessRequests(reqs []*Request) error {
@@ -174,7 +174,7 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
 		self.writeLogToWS(v.Conn, self.slogHistory)
-		self.slogWsconns = append(self.slogWsconns, v.Conn)
+		self.slogWsConns = append(self.slogWsConns, v.Conn)
 	case ShellCmd:
 		self.ExecuteCommand(v)
 	}
@@ -183,14 +183,14 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 // Main routine for listen to socket messages.
 func (self *ConnServer) Listen() {
 	var reqs []*Request
-	read_chan, read_err_chan := self.SpawnReaderRoutine()
+	readChan, readErrChan := self.SpawnReaderRoutine()
 	ticker := time.NewTicker(time.Duration(TIMEOUT_CHECK_SECS * time.Second))
 
 	defer self.Terminate()
 
 	for {
 		select {
-		case buffer := <-read_chan:
+		case buffer := <-readChan:
 			switch self.mode {
 			case TERMINAL:
 				self.forwardTerminalOutput(buffer)
@@ -229,7 +229,7 @@ func (self *ConnServer) Listen() {
 					}
 				}
 			}
-		case err := <-read_err_chan:
+		case err := <-readErrChan:
 			if err == io.EOF {
 				log.Printf("connection dropped: %s\n", self.mid)
 			} else {
@@ -243,12 +243,12 @@ func (self *ConnServer) Listen() {
 				log.Println(err)
 			}
 
-			if self.mode == AGENT && self.last_ping != 0 &&
-				time.Now().Unix()-self.last_ping > PING_RECV_TIMEOUT {
+			if self.mode == AGENT && self.lastPing != 0 &&
+				time.Now().Unix()-self.lastPing > PING_RECV_TIMEOUT {
 				log.Printf("Client %s timeout\n", self.mid)
 				return
 			}
-		case s := <-self.stop_listen:
+		case s := <-self.stopListen:
 			if s {
 				return
 			}
@@ -259,7 +259,7 @@ func (self *ConnServer) Listen() {
 // Request handlers
 
 func (self *ConnServer) handlePingRequest(req *Request) error {
-	self.last_ping = time.Now().Unix()
+	self.lastPing = time.Now().Unix()
 	res := NewResponse(req.Rid, "pong", nil)
 	return self.SendResponse(res)
 }
@@ -290,13 +290,13 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	self.mode = args.Mode
 	self.logFormat = args.Format
 
-	self.wsconn, err = self.ovl.Register(self)
+	self.wsConn, err = self.ovl.Register(self)
 	if err != nil {
 		return RegistrationFailedError(err)
 	}
 
 	self.registered = true
-	self.last_ping = time.Now().Unix()
+	self.lastPing = time.Now().Unix()
 	res := NewResponse(req.Rid, SUCCESS, nil)
 	return self.SendResponse(res)
 }

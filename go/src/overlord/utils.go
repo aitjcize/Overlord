@@ -39,9 +39,9 @@ func GetGateWayIP() ([]string, error) {
 		}
 		fields := strings.Split(line, "\t")
 		if len(fields) >= 3 {
-			gateway_hex := fields[2]
-			if gateway_hex != "00000000" {
-				h, err := hex.DecodeString(gateway_hex)
+			gatewayHex := fields[2]
+			if gatewayHex != "00000000" {
+				h, err := hex.DecodeString(gatewayHex)
 				if err != nil {
 					continue
 				}
@@ -80,8 +80,8 @@ func GetMachineID() (string, error) {
 			if iface.Name() == "lo" {
 				continue
 			}
-			addr_path := fmt.Sprintf("/sys/class/net/%s/address", iface.Name())
-			f, err := os.Open(addr_path)
+			addrPath := fmt.Sprintf("/sys/class/net/%s/address", iface.Name())
+			f, err := os.Open(addrPath)
 			if err != nil {
 				break
 			}

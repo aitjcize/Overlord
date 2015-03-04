@@ -33,17 +33,16 @@ const (
 
 type Ghost struct {
 	*RPCCore
-	addrs           []string    // List of possible Overlord addresses
-	mid             string      // Machine ID
-	cid             string      // Client ID
-	mode            int         // mode, see constants.go
-	reset           bool        // Whether or not to reset the connection
-	quit            bool        // Whether or not to quit the connection
-	read_chan       chan string // The incoming data channel
-	read_err_chan   chan error  // The incoming data error channel
-	pause_lan_disc  bool        // Stop LAN discovery
-	udp_conn        *net.Conn   // LAN discovery UDP connection
-	logcat_filename string      // The filename to cat when we are in logcat mode
+	addrs          []string    // List of possible Overlord addresses
+	mid            string      // Machine ID
+	cid            string      // Client ID
+	mode           int         // mode, see constants.go
+	reset          bool        // Whether or not to reset the connection
+	quit           bool        // Whether or not to quit the connection
+	readChan       chan string // The incoming data channel
+	readErrChan    chan error  // The incoming data error channel
+	pauseLanDisc   bool        // Stop LAN discovery
+	logcatFilename string      // The filename to cat when we are in logcat mode
 }
 
 func NewGhost(addrs []string, mode int) *Ghost {
@@ -52,14 +51,14 @@ func NewGhost(addrs []string, mode int) *Ghost {
 		panic(err)
 	}
 	return &Ghost{
-		RPCCore:        NewRPCCore(nil),
-		addrs:          addrs,
-		mid:            mid,
-		cid:            uuid.New(),
-		mode:           mode,
-		reset:          false,
-		quit:           false,
-		pause_lan_disc: false,
+		RPCCore:      NewRPCCore(nil),
+		addrs:        addrs,
+		mid:          mid,
+		cid:          uuid.New(),
+		mode:         mode,
+		reset:        false,
+		quit:         false,
+		pauseLanDisc: false,
 	}
 }
 
@@ -69,7 +68,7 @@ func (self *Ghost) SetCid(cid string) *Ghost {
 }
 
 func (self *Ghost) SetFilename(filename string) *Ghost {
-	self.logcat_filename = filename
+	self.logcatFilename = filename
 	return self
 }
 
@@ -128,24 +127,24 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 	log.Printf("Received shell command: %s, executing\n", params.Cmd)
 
 	var (
-		res     *Response
-		cmd     *exec.Cmd
-		output  []byte
-		err_msg string
+		res    *Response
+		cmd    *exec.Cmd
+		output []byte
+		errMsg string
 	)
 
-	cmd_path, err := exec.LookPath(params.Cmd)
+	cmdPath, err := exec.LookPath(params.Cmd)
 	if err == nil {
 		log.Printf("Executing command: %s %s\n", params.Cmd, params.Args)
-		cmd = exec.Command(cmd_path, params.Args...)
+		cmd = exec.Command(cmdPath, params.Args...)
 		output, err = cmd.CombinedOutput()
 	} else {
-		err_msg = err.Error()
-		log.Printf("shell command error: %s\n", err_msg)
+		errMsg = err.Error()
+		log.Printf("shell command error: %s\n", errMsg)
 	}
 
 	res = NewResponse(req.Rid, SUCCESS,
-		map[string]interface{}{"output": string(output), "err_msg": err_msg})
+		map[string]interface{}{"output": string(output), "err_msg": errMsg})
 	return self.SendResponse(res)
 }
 
@@ -174,7 +173,7 @@ func (self *Ghost) ProcessRequests(reqs []*Request) error {
 }
 
 func (self *Ghost) Ping() error {
-	ping_handler := func(res *Response) error {
+	pingHandler := func(res *Response) error {
 		if res == nil {
 			self.reset = true
 			return errors.New("Ping timeout")
@@ -183,7 +182,7 @@ func (self *Ghost) Ping() error {
 	}
 	req := NewRequest("ping", nil)
 	req.SetTimeout(PING_TIMEOUT)
-	return self.SendRequest(req, ping_handler)
+	return self.SendRequest(req, pingHandler)
 }
 
 // Spawn a PTY server and forward I/O to the TCP socket.
@@ -214,26 +213,26 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 		log.Println("SpawnPTYServer: terminated")
 	}()
 
-	stop_conn := make(chan bool, 1)
+	stopConn := make(chan bool, 1)
 
 	go func() {
 		io.Copy(self.Conn, tty)
 		cmd.Wait()
-		stop_conn <- true
+		stopConn <- true
 	}()
 
 	for {
 		select {
-		case buffer := <-self.read_chan:
+		case buffer := <-self.readChan:
 			tty.Write([]byte(buffer))
-		case err := <-self.read_err_chan:
+		case err := <-self.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnPTYServer: connection dropped")
 				return nil
 			} else {
 				return err
 			}
-		case s := <-stop_conn:
+		case s := <-stopConn:
 			if s {
 				return nil
 			}
@@ -258,7 +257,7 @@ func (self *Ghost) SpawnLogcatServer(res *Response) error {
 		return err
 	}
 
-	cmd := exec.Command(tail, "-n", "+0", "-f", self.logcat_filename)
+	cmd := exec.Command(tail, "-n", "+0", "-f", self.logcatFilename)
 	stdout, err1 := cmd.StdoutPipe()
 	stderr, err2 := cmd.StderrPipe()
 	if err1 != nil || err2 != nil {
@@ -281,9 +280,9 @@ func (self *Ghost) SpawnLogcatServer(res *Response) error {
 	// goroutine.
 	for {
 		select {
-		case _ = <-self.read_chan:
+		case _ = <-self.readChan:
 			continue
-		case err := <-self.read_err_chan:
+		case err := <-self.readErrChan:
 			if err == io.EOF {
 				cmd.Process.Kill()
 				return errors.New("SpawnLogcatServer: connection dropped")
@@ -316,7 +315,7 @@ func (self *Ghost) Register() error {
 					return errors.New("Register request timeout")
 				} else {
 					log.Printf("Registered with Overlord at %s", addr)
-					self.pause_lan_disc = true
+					self.pauseLanDisc = true
 				}
 				return nil
 			}
@@ -346,21 +345,21 @@ func (self *Ghost) Reset() {
 
 // Main routine for listen to socket messages.
 func (self *Ghost) Listen() error {
-	read_chan, read_err_chan := self.SpawnReaderRoutine()
-	ping_ticker := time.NewTicker(time.Duration(PING_INTERVAL * time.Second))
-	req_ticker := time.NewTicker(time.Duration(TIMEOUT_CHECK_SECS * time.Second))
+	readChan, readErrChan := self.SpawnReaderRoutine()
+	pingTicker := time.NewTicker(time.Duration(PING_INTERVAL * time.Second))
+	reqTicker := time.NewTicker(time.Duration(TIMEOUT_CHECK_SECS * time.Second))
 
-	self.read_chan = read_chan
-	self.read_err_chan = read_err_chan
+	self.readChan = readChan
+	self.readErrChan = readErrChan
 
 	defer func() {
 		self.Conn.Close()
-		self.pause_lan_disc = false
+		self.pauseLanDisc = false
 	}()
 
 	for {
 		select {
-		case buffer := <-read_chan:
+		case buffer := <-readChan:
 			reqs := self.ParseRequests(buffer, false)
 			if self.quit {
 				return nil
@@ -369,15 +368,15 @@ func (self *Ghost) Listen() error {
 				log.Println(err)
 				continue
 			}
-		case err := <-read_err_chan:
+		case err := <-readErrChan:
 			if err == io.EOF {
 				return errors.New("Connection dropped")
 			} else {
 				return err
 			}
-		case <-ping_ticker.C:
+		case <-pingTicker.C:
 			self.Ping()
-		case <-req_ticker.C:
+		case <-reqTicker.C:
 			err := self.ScanForTimeoutRequests()
 			if self.reset {
 				return err
@@ -405,14 +404,14 @@ func (self *Ghost) StartLanDiscovery() {
 		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT * time.Second))
 		_, remote, err := conn.ReadFrom(buf)
 
-		if self.pause_lan_disc {
+		if self.pauseLanDisc {
 			log.Println("LAN discovery: paused")
 			ticker := time.NewTicker(READ_TIMEOUT * time.Second)
 		waitLoop:
 			for {
 				select {
 				case <-ticker.C:
-					if !self.pause_lan_disc {
+					if !self.pauseLanDisc {
 						break waitLoop
 					}
 				}
@@ -428,19 +427,19 @@ func (self *Ghost) StartLanDiscovery() {
 		// LAN discovery packet format: "OVERLOARD :port"
 		data := strings.Split(string(buf), " ")
 		parts := strings.Split(remote.String(), ":")
-		remote_addr := parts[0] + data[1]
+		remoteAddr := parts[0] + data[1]
 
 		if data[0] == "OVERLORD" {
 			found := false
 			for _, addr := range self.addrs {
-				if addr == remote_addr {
+				if addr == remoteAddr {
 					found = true
 					break
 				}
 			}
 			if !found {
-				log.Printf("LAN discovery: got overlord address %s", remote_addr)
-				self.addrs = append(self.addrs, remote_addr)
+				log.Printf("LAN discovery: got overlord address %s", remoteAddr)
+				self.addrs = append(self.addrs, remoteAddr)
 			}
 		}
 	}
@@ -494,7 +493,7 @@ func (self *Ghost) Start() {
 	}
 }
 
-func ghost_usage() {
+func ghostUsage() {
 	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
 	flag.PrintDefaults()
 	os.Exit(2)
@@ -505,7 +504,7 @@ var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
 func StartGhost() {
 	var addrs []string
 
-	flag.Usage = ghost_usage
+	flag.Usage = ghostUsage
 	flag.Parse()
 	args := flag.Args()
 
