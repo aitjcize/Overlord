@@ -5,9 +5,23 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"os"
 	"overlord"
 )
 
+var app = flag.String("app", "dashboard", "name of app to launch.")
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
+	flag.PrintDefaults()
+	os.Exit(2)
+}
+
 func main() {
-	overlord.StartOverlord()
+	flag.Usage = usage
+	flag.Parse()
+
+	overlord.StartOverlord(*app)
 }

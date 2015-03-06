@@ -8,7 +8,6 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/googollee/go-socket.io"
 	"github.com/gorilla/mux"
@@ -85,8 +84,8 @@ func NewOverlord() *Overlord {
 // Register a client.
 func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	msg, err := json.Marshal(map[string]interface{}{
-		"mid": conn.mid,
-		"cid": conn.cid,
+		"mid": conn.Mid,
+		"cid": conn.Cid,
 	})
 	if err != nil {
 		return nil, err
@@ -94,42 +93,42 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 
 	var wsconn *websocket.Conn
 
-	switch conn.mode {
+	switch conn.Mode {
 	case AGENT:
-		if _, ok := self.agents[conn.mid]; ok {
-			return nil, errors.New("Register: duplicate machine ID: " + conn.mid)
+		if _, ok := self.agents[conn.Mid]; ok {
+			return nil, errors.New("Register: duplicate machine ID: " + conn.Mid)
 		}
 
-		self.agents[conn.mid] = conn
+		self.agents[conn.Mid] = conn
 		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
 	case TERMINAL, LOGCAT:
-		if ctx, ok := self.wsctxs[conn.cid]; !ok {
-			return nil, errors.New("Register: client " + conn.cid +
+		if ctx, ok := self.wsctxs[conn.Cid]; !ok {
+			return nil, errors.New("Register: client " + conn.Cid +
 				" registered without context")
 		} else {
 			wsconn = ctx.Conn
 		}
 	case SLOGCAT:
-		if _, ok := self.slogcats[conn.mid]; !ok {
-			self.slogcats[conn.mid] = make(map[string]*ConnServer)
+		if _, ok := self.slogcats[conn.Mid]; !ok {
+			self.slogcats[conn.Mid] = make(map[string]*ConnServer)
 		}
-		if _, ok := self.slogcats[conn.mid][conn.cid]; ok {
-			return nil, errors.New("Register: duplicate client ID: " + conn.cid)
+		if _, ok := self.slogcats[conn.Mid][conn.Cid]; ok {
+			return nil, errors.New("Register: duplicate client ID: " + conn.Cid)
 		}
-		self.slogcats[conn.mid][conn.cid] = conn
+		self.slogcats[conn.Mid][conn.Cid] = conn
 		self.ioserver.BroadcastTo("monitor", "slogcat joined", string(msg))
 	default:
 		return nil, errors.New("Register: Unknown client mode")
 	}
 
 	var id string
-	if conn.mode == AGENT {
-		id = conn.mid
+	if conn.Mode == AGENT {
+		id = conn.Mid
 	} else {
-		id = conn.cid
+		id = conn.Cid
 	}
 
-	log.Printf("%s %s registered\n", ModeStr(conn.mode), id)
+	log.Printf("%s %s registered\n", ModeStr(conn.Mode), id)
 
 	return wsconn, nil
 }
@@ -137,39 +136,39 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 // Unregister a client.
 func (self *Overlord) Unregister(conn *ConnServer) {
 	msg, err := json.Marshal(map[string]interface{}{
-		"mid": conn.mid,
-		"cid": conn.cid,
+		"mid": conn.Mid,
+		"cid": conn.Cid,
 	})
 
 	if err != nil {
 		panic(err)
 	}
 
-	switch conn.mode {
+	switch conn.Mode {
 	case AGENT:
 		self.ioserver.BroadcastTo("monitor", "agent left", string(msg))
-		delete(self.agents, conn.mid)
+		delete(self.agents, conn.Mid)
 	case SLOGCAT:
-		if _, ok := self.slogcats[conn.mid]; ok {
+		if _, ok := self.slogcats[conn.Mid]; ok {
 			self.ioserver.BroadcastTo("monitor", "slogcat left", string(msg))
-			delete(self.slogcats[conn.mid], conn.cid)
-			if len(self.slogcats[conn.mid]) == 0 {
-				delete(self.slogcats, conn.mid)
+			delete(self.slogcats[conn.Mid], conn.Cid)
+			if len(self.slogcats[conn.Mid]) == 0 {
+				delete(self.slogcats, conn.Mid)
 			}
 		}
 	default:
-		if _, ok := self.wsctxs[conn.cid]; ok {
-			delete(self.wsctxs, conn.cid)
+		if _, ok := self.wsctxs[conn.Cid]; ok {
+			delete(self.wsctxs, conn.Cid)
 		}
 	}
 
 	var id string
-	if conn.mode == AGENT {
-		id = conn.mid
+	if conn.Mode == AGENT {
+		id = conn.Mid
 	} else {
-		id = conn.cid
+		id = conn.Cid
 	}
-	log.Printf("%s %s unregistered\n", ModeStr(conn.mode), id)
+	log.Printf("%s %s unregistered\n", ModeStr(conn.Mode), id)
 }
 
 func (self *Overlord) AddWebsocketContext(wc *WebSocketContext) {
@@ -258,7 +257,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		if agent, ok := self.agents[mid]; ok {
 			wc := NewWebsocketContext(conn)
 			self.AddWebsocketContext(wc)
-			agent.bridge <- SpawnTerminalCmd{wc.Sid}
+			agent.Bridge <- SpawnTerminalCmd{wc.Sid}
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
@@ -284,7 +283,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 			if filename, ok := r.URL.Query()["filename"]; ok {
 				wc := NewWebsocketContext(conn)
 				self.AddWebsocketContext(wc)
-				agent.bridge <- SpawnLogcatCmd{wc.Sid, filename[0]}
+				agent.Bridge <- SpawnLogcatCmd{wc.Sid, filename[0]}
 			} else {
 				WebSocketSendError(conn, "No filename specified for logcat request "+mid)
 			}
@@ -310,7 +309,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		// Check if it wants to connect to a simple logcat session
 		if logcats, ok := self.slogcats[mid]; ok {
 			if logcat, ok := logcats[cid]; ok {
-				logcat.bridge <- ConnectLogcatCmd{conn}
+				logcat.Bridge <- ConnectLogcatCmd{conn}
 			} else {
 				WebSocketSendError(conn, "No client with cid "+cid)
 			}
@@ -333,7 +332,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 
 		output := make(chan []byte)
 		if agent, ok := self.agents[mid]; ok {
-			agent.bridge <- ShellCmd{command, output}
+			agent.Bridge <- ShellCmd{command, output}
 		} else {
 			w.Write([]byte(fmt.Sprintf(`{"error": "No client with mid %s", "output": ""}`, mid)))
 			return
@@ -343,6 +342,20 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		w.Write(resultJson)
 	}
 
+	// Get agent properties as JSON
+	AgentPropertiesHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		jsonResult, err := json.Marshal(self.agents[mid].Properties)
+		if err != nil {
+			w.Write([]byte(`{"error": "` + err.Error() + `"}`))
+			return
+		}
+		w.Write(jsonResult)
+	}
+
 	// List all agents connected to the Overlord.
 	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -350,8 +363,8 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		idx := 0
 		for _, agent := range self.agents {
 			data[idx] = map[string]string{
-				"mid": agent.mid,
-				"cid": agent.cid,
+				"mid": agent.Mid,
+				"cid": agent.Cid,
 			}
 			idx++
 		}
@@ -401,7 +414,11 @@ func (self *Overlord) ServHTTP(addr, app string) {
 	r.HandleFunc("/api/pty/{mid}", PtyHandler)
 	r.HandleFunc("/api/log/{mid}", LogcatHandler)
 	r.HandleFunc("/api/slog/{mid}/{cid}", SimpleLogcatHandler)
-	r.HandleFunc("/api/shell/{mid}", ShellHandler)
+
+	// Agent methods
+	r.HandleFunc("/api/agent/shell/{mid}", ShellHandler)
+	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
+
 	r.HandleFunc("/api/agents/list", AgentsListHandler)
 	r.HandleFunc("/api/slogcats/list", SimpleLogcatsListHandler)
 
@@ -433,20 +450,9 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	}
 }
 
-func overlordUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
-	flag.PrintDefaults()
-	os.Exit(2)
-}
-
-func (self *Overlord) Serv() {
-	var app = flag.String("app", "dashboard", "name of app to launch.")
-
-	flag.Usage = overlordUsage
-	flag.Parse()
-
+func (self *Overlord) Serv(app string) {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR, *app)
+	go self.ServHTTP(WEBSERVER_ADDR, app)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -460,7 +466,7 @@ func (self *Overlord) Serv() {
 	}
 }
 
-func StartOverlord() {
+func StartOverlord(app string) {
 	ovl := NewOverlord()
-	ovl.Serv()
+	ovl.Serv(app)
 }

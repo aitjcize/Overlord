@@ -8,10 +8,10 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/kr/pty"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"os"
@@ -33,16 +33,17 @@ const (
 
 type Ghost struct {
 	*RPCCore
-	addrs          []string    // List of possible Overlord addresses
-	mid            string      // Machine ID
-	cid            string      // Client ID
-	mode           int         // mode, see constants.go
-	reset          bool        // Whether or not to reset the connection
-	quit           bool        // Whether or not to quit the connection
-	readChan       chan string // The incoming data channel
-	readErrChan    chan error  // The incoming data error channel
-	pauseLanDisc   bool        // Stop LAN discovery
-	logcatFilename string      // The filename to cat when we are in logcat mode
+	addrs          []string               // List of possible Overlord addresses
+	mid            string                 // Machine ID
+	cid            string                 // Client ID
+	mode           int                    // mode, see constants.go
+	properties     map[string]interface{} // Client properties
+	reset          bool                   // Whether to reset the connection
+	quit           bool                   // Whether to quit the connection
+	readChan       chan string            // The incoming data channel
+	readErrChan    chan error             // The incoming data error channel
+	pauseLanDisc   bool                   // Stop LAN discovery
+	logcatFilename string                 // filename to cat in logcat mode
 }
 
 func NewGhost(addrs []string, mode int) *Ghost {
@@ -56,6 +57,7 @@ func NewGhost(addrs []string, mode int) *Ghost {
 		mid:          mid,
 		cid:          uuid.New(),
 		mode:         mode,
+		properties:   make(map[string]interface{}),
 		reset:        false,
 		quit:         false,
 		pauseLanDisc: false,
@@ -72,6 +74,19 @@ func (self *Ghost) SetFilename(filename string) *Ghost {
 	return self
 }
 
+func (self *Ghost) LoadPropertiesFromFile(filename string) {
+	bytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		log.Printf("LoadPropertiesFromFile: %s\n", err)
+		return
+	}
+
+	if err := json.Unmarshal(bytes, &self.properties); err != nil {
+		log.Printf("LoadPropertiesFromFile: %s\n", err)
+		return
+	}
+}
+
 func (self *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestParams struct {
 		Sid string `json:"sid"`
@@ -85,7 +100,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 	go func() {
 		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
 		g := NewGhost(self.addrs, TERMINAL).SetCid(params.Sid)
-		g.Start()
+		g.Start(false)
 	}()
 
 	res := NewResponse(req.Rid, SUCCESS, nil)
@@ -106,7 +121,7 @@ func (self *Ghost) handleLogcatRequest(req *Request) error {
 	go func() {
 		log.Printf("Received logcat command: %s, Logcat %s spawned\n", params.Filename, params.Sid)
 		g := NewGhost(self.addrs, LOGCAT).SetCid(params.Sid).SetFilename(params.Filename)
-		g.Start()
+		g.Start(false)
 	}()
 
 	res := NewResponse(req.Rid, SUCCESS, nil)
@@ -304,9 +319,10 @@ func (self *Ghost) Register() error {
 			log.Println("Connection established, registering...")
 			self.Conn = conn
 			req := NewRequest("register", map[string]interface{}{
-				"mid":  self.mid,
-				"cid":  self.cid,
-				"mode": self.mode,
+				"mid":        self.mid,
+				"cid":        self.cid,
+				"mode":       self.mode,
+				"properties": self.properties,
 			})
 
 			registered := func(res *Response) error {
@@ -468,13 +484,13 @@ func (self *Ghost) ScanGateway() {
 }
 
 // Bootstrap and start the client.
-func (self *Ghost) Start() {
+func (self *Ghost) Start(noLanDisc bool) {
 	log.Printf("%s started\n", ModeStr(self.mode))
 	log.Printf("MID: %s\n", self.mid)
 	log.Printf("CID: %s\n", self.cid)
 	// Only control channel should perform LAN discovery
 
-	if !*noLanDisc && self.mode == AGENT {
+	if !noLanDisc {
 		go self.StartLanDiscovery()
 	}
 
@@ -493,20 +509,8 @@ func (self *Ghost) Start() {
 	}
 }
 
-func ghostUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
-	flag.PrintDefaults()
-	os.Exit(2)
-}
-
-var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
-
-func StartGhost() {
+func StartGhost(args []string, noLanDisc bool, propFile string) {
 	var addrs []string
-
-	flag.Usage = ghostUsage
-	flag.Parse()
-	args := flag.Args()
 
 	if len(args) >= 1 {
 		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OVERLORD_PORT))
@@ -514,7 +518,10 @@ func StartGhost() {
 	addrs = append(addrs, fmt.Sprintf("%s:%d", OVERLORD_IP, OVERLORD_PORT))
 
 	g := NewGhost(addrs, AGENT)
-	go g.Start()
+	if propFile != "" {
+		g.LoadPropertiesFromFile(propFile)
+	}
+	go g.Start(noLanDisc)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
 

@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -28,29 +29,41 @@ const (
 // them.
 type ConnServer struct {
 	*RPCCore
-	ovl         *Overlord         // Overlord handle
-	mode        int               // Client mode, see constants.go for definition
-	bridge      chan interface{}  // channel for receiving commmand from overlord
-	cid         string            // Client ID
-	mid         string            // Machine ID
-	registered  bool              // Whether we are registered or not
-	wsConn      *websocket.Conn   // WebSocket for Shell and Logcat
-	logFormat   int               // Log format, see constants.go for definition
-	slogWsConns []*websocket.Conn // WebSockets for Simple-logcat
-	slogHistory string            // Log buffer for logcat
-	stopListen  chan bool         // Stop the Listen() loop
-	lastPing    int64             // Last time the client pinged
+	Mode        int                    // Client mode, see constants.go
+	Bridge      chan interface{}       // Channel for overlord commmand
+	Cid         string                 // Client ID
+	Mid         string                 // Machine ID
+	Properties  map[string]interface{} // Client properties
+	ovl         *Overlord              // Overlord handle
+	registered  bool                   // Whether we are registered or not
+	wsConn      *websocket.Conn        // WebSocket for Shell and Logcat
+	logFormat   int                    // Log format, see constants.go
+	slogWsConns []*websocket.Conn      // WebSockets for Simple-logcat
+	slogHistory string                 // Log buffer for logcat
+	stopListen  chan bool              // Stop the Listen() loop
+	lastPing    int64                  // Last time the client pinged
 }
 
 func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 	return &ConnServer{
 		RPCCore:    NewRPCCore(conn),
+		Mode:       NONE,
+		Bridge:     make(chan interface{}),
+		Properties: make(map[string]interface{}),
 		ovl:        ovl,
-		mode:       NONE,
-		bridge:     make(chan interface{}),
 		stopListen: make(chan bool, 1),
 		registered: false,
 	}
+}
+
+func (self *ConnServer) SetProperties(prop map[string]interface{}) {
+	if prop != nil {
+		self.Properties = prop
+	}
+
+	addr := self.Conn.RemoteAddr().String()
+	parts := strings.Split(addr, ":")
+	self.Properties["ip"] = strings.Join(parts[:len(parts)-1], ":")
 }
 
 func (self *ConnServer) Terminate() {
@@ -191,7 +204,7 @@ func (self *ConnServer) Listen() {
 	for {
 		select {
 		case buffer := <-readChan:
-			switch self.mode {
+			switch self.Mode {
 			case TERMINAL:
 				self.forwardTerminalOutput(buffer)
 			case LOGCAT:
@@ -214,7 +227,7 @@ func (self *ConnServer) Listen() {
 
 				// If self.mode changed, means we just got a registration message and
 				// are in a different mode.
-				switch self.mode {
+				switch self.Mode {
 				case TERMINAL:
 					// Start a goroutine to forward the WebSocket Input
 					go self.forwardWSTerminalInput()
@@ -231,21 +244,21 @@ func (self *ConnServer) Listen() {
 			}
 		case err := <-readErrChan:
 			if err == io.EOF {
-				log.Printf("connection dropped: %s\n", self.mid)
+				log.Printf("connection dropped: %s\n", self.Mid)
 			} else {
-				log.Printf("unknown network error for %s: %s\n", self.mid, err.Error())
+				log.Printf("unknown network error for %s: %s\n", self.Mid, err.Error())
 			}
 			return
-		case msg := <-self.bridge:
+		case msg := <-self.Bridge:
 			self.handleOverlordRequest(msg)
 		case <-ticker.C:
 			if err := self.ScanForTimeoutRequests(); err != nil {
 				log.Println(err)
 			}
 
-			if self.mode == AGENT && self.lastPing != 0 &&
+			if self.Mode == AGENT && self.lastPing != 0 &&
 				time.Now().Unix()-self.lastPing > PING_RECV_TIMEOUT {
-				log.Printf("Client %s timeout\n", self.mid)
+				log.Printf("Client %s timeout\n", self.Mid)
 				return
 			}
 		case s := <-self.stopListen:
@@ -266,10 +279,11 @@ func (self *ConnServer) handlePingRequest(req *Request) error {
 
 func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	type RequestArgs struct {
-		Cid    string `json:"cid"`
-		Mid    string `json:"mid"`
-		Mode   int    `json:"mode"`
-		Format int    `json:"format"`
+		Cid        string                 `json:"cid"`
+		Mid        string                 `json:"mid"`
+		Mode       int                    `json:"mode"`
+		Format     int                    `json:"format"`
+		Properties map[string]interface{} `json:"properties"`
 	}
 
 	var args RequestArgs
@@ -285,10 +299,11 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	}
 
 	var err error
-	self.cid = args.Cid
-	self.mid = args.Mid
-	self.mode = args.Mode
+	self.Cid = args.Cid
+	self.Mid = args.Mid
+	self.Mode = args.Mode
 	self.logFormat = args.Format
+	self.SetProperties(args.Properties)
 
 	self.wsConn, err = self.ovl.Register(self)
 	if err != nil {

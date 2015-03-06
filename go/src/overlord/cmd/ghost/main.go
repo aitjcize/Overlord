@@ -5,9 +5,25 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"os"
 	"overlord"
 )
 
+var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
+var propFile = flag.String("prop-file", "", "file containing the JSON representation of client properties")
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
+	flag.PrintDefaults()
+	os.Exit(2)
+}
+
 func main() {
-	overlord.StartGhost()
+	flag.Usage = usage
+	flag.Parse()
+	args := flag.Args()
+
+	overlord.StartGhost(args, *noLanDisc, *propFile)
 }

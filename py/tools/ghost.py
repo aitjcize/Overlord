@@ -5,6 +5,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import argparse
 import fcntl
 import json
 import logging
@@ -77,12 +78,20 @@ class Ghost(object):
     self._sock = None
     self._machine_id = self.GetMachineID()
     self._client_id = sid if sid is not None else str(uuid.uuid4())
+    self._properties = {}
     self._logcat_filename = filename
     self._buf = ''
     self._requests = {}
     self._reset = False
     self._last_ping = 0
     self._queue = Queue.Queue()
+
+  def LoadPropertiesFromFile(self, filename):
+    try:
+      with open(filename, 'r') as f:
+        self._properties = json.loads(f.read())
+    except Exception as e:
+      logging.exception('LoadPropertiesFromFile: ' + str(e))
 
   def SpawnGhost(self, mode, sid, filename=None):
     """Spawn a child ghost with specific mode.
@@ -93,7 +102,7 @@ class Ghost(object):
     pid = os.fork()
     if pid == 0:
       g = Ghost(self._overlord_addrs, mode, sid, filename)
-      g.Start()
+      g.Start(True)
       sys.exit(0)
     else:
       return pid
@@ -131,7 +140,7 @@ class Ghost(object):
     try:
       p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
                            'cut -d " " -f 2', stdout=subprocess.PIPE,
-                           shell=True)
+                           stderr=subprocess.PIPE, shell=True)
       stdout, _ = p.communicate()
       if stdout == '':
         raise RuntimeError("empty mlb number")
@@ -374,8 +383,10 @@ class Ghost(object):
         # Machine ID may change if MAC address is used (USB-ethernet dongle
         # plugged/unplugged)
         self._machine_id = self.GetMachineID()
-        self.SendRequest('register', {'mode': self._mode, 'mid': self._machine_id,
-                                      'cid': self._client_id}, handler)
+        self.SendRequest('register',
+                         {'mode': self._mode, 'mid': self._machine_id,
+                          'cid': self._client_id,
+                          'properties': self._properties}, handler)
       except socket.error:
         pass
       else:
@@ -429,12 +440,12 @@ class Ghost(object):
       if addr not in self._overlord_addrs:
         self._overlord_addrs.append(addr)
 
-  def Start(self):
+  def Start(self, no_lan_disc=False):
     logging.info('%s started', self.MODE_NAME[self._mode])
     logging.info('MID: %s', self._machine_id)
     logging.info('CID: %s', self._client_id)
 
-    if self._mode == Ghost.AGENT:
+    if not no_lan_disc:
       t = threading.Thread(target=self.StartLanDiscovery)
       t.daemon = True
       t.start()
@@ -467,12 +478,23 @@ def main():
   logger = logging.getLogger()
   logger.setLevel(logging.INFO)
 
+  parser = argparse.ArgumentParser()
+  parser.add_argument('--no-lan-disc', dest='no_lan_disc', action='store_true',
+                      default=False, help='disable LAN discovery')
+  parser.add_argument("--prop-file", dest="prop_file", type=str, default=None,
+                      help='file containing the JSON representation of client '
+                           'properties')
+  parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,
+                      nargs='*', help='overlord server address')
+  args = parser.parse_args()
+
   addrs = [('localhost', _OVERLORD_PORT)]
-  if len(sys.argv) > 1:
-    addrs += [(x, _OVERLORD_PORT) for x in sys.argv[1:]]
+  addrs += [(x, _OVERLORD_PORT) for x in args.overlord_ip]
 
   g = Ghost(addrs)
-  g.Start()
+  if args.prop_file:
+    g.LoadPropertiesFromFile(args.prop_file)
+  g.Start(args.no_lan_disc)
 
 
 if __name__ == '__main__':
