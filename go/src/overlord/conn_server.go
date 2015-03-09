@@ -5,7 +5,6 @@
 package overlord
 
 import (
-	"code.google.com/p/go-shlex"
 	"encoding/json"
 	"errors"
 	"github.com/gorilla/websocket"
@@ -24,24 +23,24 @@ const (
 )
 
 // Since Shell and Logcat are initiated by Overlord, there is only one observer,
-// i.e. the one who requested the connection. On the other hand, Simple-logcat
+// i.e. the one who requested the connection. On the other hand, logcat
 // could have multiple observers, so we need to broadcast the result to all of
 // them.
 type ConnServer struct {
 	*RPCCore
-	Mode        int                    // Client mode, see constants.go
-	Bridge      chan interface{}       // Channel for overlord commmand
-	Cid         string                 // Client ID
-	Mid         string                 // Machine ID
-	Properties  map[string]interface{} // Client properties
-	ovl         *Overlord              // Overlord handle
-	registered  bool                   // Whether we are registered or not
-	wsConn      *websocket.Conn        // WebSocket for Shell and Logcat
-	logFormat   int                    // Log format, see constants.go
-	slogWsConns []*websocket.Conn      // WebSockets for Simple-logcat
-	slogHistory string                 // Log buffer for logcat
-	stopListen  chan bool              // Stop the Listen() loop
-	lastPing    int64                  // Last time the client pinged
+	Mode       int                    // Client mode, see constants.go
+	Bridge     chan interface{}       // Channel for overlord commmand
+	Cid        string                 // Client ID
+	Mid        string                 // Machine ID
+	Properties map[string]interface{} // Client properties
+	ovl        *Overlord              // Overlord handle
+	registered bool                   // Whether we are registered or not
+	wsConn     *websocket.Conn        // WebSocket for Shell and Logcat
+	logFormat  int                    // Log format, see constants.go
+	logWsConns []*websocket.Conn      // WebSockets for logcat
+	logHistory string                 // Log buffer for logcat
+	stopListen chan bool              // Stop the Listen() loop
+	lastPing   int64                  // Last time the client pinged
 }
 
 func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
@@ -88,7 +87,7 @@ func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 }
 
 // Forwards the input from Websocket to TCP socket.
-func (self *ConnServer) forwardWSTerminalInput() {
+func (self *ConnServer) forwardWSInput() {
 	defer func() {
 		self.stopListen <- true
 	}()
@@ -117,22 +116,6 @@ func (self *ConnServer) forwardWSTerminalInput() {
 	return
 }
 
-// Forwards the input from Websocket to TCP socket.
-func (self *ConnServer) monitorLogcatWS() {
-	defer func() {
-		log.Println("WebSocket connection terminated")
-		self.stopListen <- true
-	}()
-
-	for {
-		_, _, err := self.wsConn.ReadMessage()
-		if err != nil {
-			return
-		}
-	}
-	return
-}
-
 // Forward the PTY output to WebSocket.
 func (self *ConnServer) forwardTerminalOutput(buffer string) {
 	if self.wsConn == nil {
@@ -142,7 +125,7 @@ func (self *ConnServer) forwardTerminalOutput(buffer string) {
 }
 
 // Forward the logcat output to WebSocket.
-func (self *ConnServer) forwardLogcatOutput(buffer string) {
+func (self *ConnServer) forwardShellOutput(buffer string) {
 	if self.wsConn == nil {
 		self.stopListen <- true
 	}
@@ -150,21 +133,21 @@ func (self *ConnServer) forwardLogcatOutput(buffer string) {
 }
 
 // Forward the logcat output to WebSocket.
-func (self *ConnServer) forwardSimpleLogcatOutput(buffer string) {
-	self.slogHistory += buffer
-	if l := len(self.slogHistory); l > LOG_BUFSIZ {
-		self.slogHistory = self.slogHistory[l-LOG_BUFSIZ : l]
+func (self *ConnServer) forwardLogcatOutput(buffer string) {
+	self.logHistory += buffer
+	if l := len(self.logHistory); l > LOG_BUFSIZ {
+		self.logHistory = self.logHistory[l-LOG_BUFSIZ : l]
 	}
 
 	var aliveWsConns []*websocket.Conn
-	for _, conn := range self.slogWsConns[:] {
+	for _, conn := range self.logWsConns[:] {
 		if err := self.writeLogToWS(conn, buffer); err == nil {
 			aliveWsConns = append(aliveWsConns, conn)
 		} else {
 			conn.Close()
 		}
 	}
-	self.slogWsConns = aliveWsConns
+	self.logWsConns = aliveWsConns
 }
 
 func (self *ConnServer) ProcessRequests(reqs []*Request) error {
@@ -182,14 +165,12 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 	switch v := obj.(type) {
 	case SpawnTerminalCmd:
 		self.SpawnTerminal(v.Sid)
-	case SpawnLogcatCmd:
-		self.SpawnLogcat(v.Sid, v.Filename)
+	case SpawnShellCmd:
+		self.SpawnShell(v.Sid, v.Command)
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
-		self.writeLogToWS(v.Conn, self.slogHistory)
-		self.slogWsConns = append(self.slogWsConns, v.Conn)
-	case ShellCmd:
-		self.ExecuteCommand(v)
+		self.writeLogToWS(v.Conn, self.logHistory)
+		self.logWsConns = append(self.logWsConns, v.Conn)
 	}
 }
 
@@ -207,10 +188,10 @@ func (self *ConnServer) Listen() {
 			switch self.Mode {
 			case TERMINAL:
 				self.forwardTerminalOutput(buffer)
+			case SHELL:
+				self.forwardShellOutput(buffer)
 			case LOGCAT:
 				self.forwardLogcatOutput(buffer)
-			case SLOGCAT:
-				self.forwardSimpleLogcatOutput(buffer)
 			default:
 				// Only Parse the first message if we are not registered, since
 				// if we are in logcat mode, we want to preserve the rest of the
@@ -228,16 +209,14 @@ func (self *ConnServer) Listen() {
 				// If self.mode changed, means we just got a registration message and
 				// are in a different mode.
 				switch self.Mode {
-				case TERMINAL:
+				case TERMINAL, SHELL:
 					// Start a goroutine to forward the WebSocket Input
-					go self.forwardWSTerminalInput()
+					go self.forwardWSInput()
 				case LOGCAT:
-					go self.monitorLogcatWS()
-				case SLOGCAT:
-					// A simple-logcat client does not wait for ACK before sending
+					// A logcat client does not wait for ACK before sending
 					// stream, so we need to forward the remaining content of the buffer
 					if self.ReadBuffer != "" {
-						self.forwardSimpleLogcatOutput(self.ReadBuffer)
+						self.forwardLogcatOutput(self.ReadBuffer)
 						self.ReadBuffer = ""
 					}
 				}
@@ -345,46 +324,21 @@ func (self *ConnServer) SpawnTerminal(sid string) {
 	self.SendRequest(req, handler)
 }
 
-// Spawn a remote Logcat connection (a ghost with mode LOGCAT).
+// Spawn a remote shell command connection (a ghost with mode SHELL).
 // sid is the session ID, which will be used as the client ID of the new ghost.
-// filename is the name of the file that you want to log.
-func (self *ConnServer) SpawnLogcat(sid string, filename string) {
+// command is the command to execute.
+func (self *ConnServer) SpawnShell(sid string, command string) {
 	handler := func(res *Response) error {
 		if res == nil {
-			return errors.New("SpawnLogcat: command timeout ")
+			return errors.New("SpawnShell: command timeout ")
 		}
 		if res.Response != SUCCESS {
-			return errors.New("SpawnLogcat failed: " + res.Response)
+			return errors.New("SpawnShell failed: " + res.Response)
 		}
 		return nil
 	}
 
-	req := NewRequest("logcat", map[string]interface{}{
-		"sid": sid, "filename": filename})
-	self.SendRequest(req, handler)
-}
-
-// Execute a remote command.
-// If timeout is 0, the default timeout value REQUEST_TIMEOUT_SECS is used.
-func (self *ConnServer) ExecuteCommand(cmd ShellCmd) {
-	handler := func(res *Response) error {
-		if res == nil {
-			return errors.New("ExecuteCommand: timeout")
-		}
-
-		cmd.Output <- res.Params
-		return nil
-	}
-
-	parts, err := shlex.Split(cmd.Command)
-	if err != nil {
-		cmd.Output <- []byte(`{"output": "", "err_msg": "parse error: ` + err.Error() + `"}`)
-		return
-	}
 	req := NewRequest("shell", map[string]interface{}{
-		"cmd":  parts[0],
-		"args": parts[1:],
-	})
-
+		"sid": sid, "command": command})
 	self.SendRequest(req, handler)
 }

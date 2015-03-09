@@ -18,8 +18,8 @@ const (
 	NONE = iota
 	AGENT
 	TERMINAL
+	SHELL
 	LOGCAT
-	SLOGCAT
 )
 
 // Logcat format
@@ -38,7 +38,7 @@ func ModeStr(mode int) string {
 		NONE:     "None",
 		AGENT:    "Agent",
 		TERMINAL: "Terminal",
+		SHELL:    "Shell",
 		LOGCAT:   "Logcat",
-		SLOGCAT:  "Simple-Logcat",
 	}[mode]
 }

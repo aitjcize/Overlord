@@ -234,7 +234,7 @@ var TerminalWindow = React.createClass({
     var mid = this.props.data.mid;
     var el = document.getElementById("terminal-" + mid);
     var $el = $(el);
-    var ws_url = "ws://" + window.location.host + "/api/pty/" + mid;
+    var ws_url = "ws://" + window.location.host + "/api/agent/pty/" + mid;
     var sock = new WebSocket(ws_url);
     this.sock = sock;
 

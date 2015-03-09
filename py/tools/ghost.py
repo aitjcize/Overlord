@@ -49,17 +49,17 @@ class Ghost(object):
   Ghost provide terminal/shell/logcat functionality and manages the client
   side connectivity.
   """
-  NONE, AGENT, SHELL, LOGCAT, SLOGCAT = range(5)
+  NONE, AGENT, TERMINAL, SHELL, LOGCAT = range(5)
 
   MODE_NAME = {
       NONE: 'NONE',
       AGENT: 'Agent',
+      TERMINAL: 'Terminal',
       SHELL: 'Shell',
-      LOGCAT: 'Logcat',
-      SLOGCAT: 'Simple-Logcat'
+      LOGCAT: 'Logcat'
       }
 
-  def __init__(self, overlord_addrs, mode=AGENT, sid=None, filename=None):
+  def __init__(self, overlord_addrs, mode=AGENT, sid=None, command=None):
     """Constructor.
 
     Args:
@@ -67,11 +67,11 @@ class Ghost(object):
       mode: client mode, either AGENT, SHELL or LOGCAT
       sid: session id. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
-      filename: the filename to cat when we are in LOGCAT mode.
+      shell: the command to execute when we are in SHELL mode.
     """
-    assert mode in [Ghost.AGENT, Ghost.SHELL, Ghost.LOGCAT]
-    if mode == Ghost.LOGCAT:
-      assert filename is not None
+    assert mode in [Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL]
+    if mode == Ghost.SHELL:
+      assert command is not None
 
     self._overlord_addrs = overlord_addrs
     self._mode = mode
@@ -79,7 +79,7 @@ class Ghost(object):
     self._machine_id = self.GetMachineID()
     self._client_id = sid if sid is not None else str(uuid.uuid4())
     self._properties = {}
-    self._logcat_filename = filename
+    self._shell_command = command
     self._buf = ''
     self._requests = {}
     self._reset = False
@@ -93,7 +93,7 @@ class Ghost(object):
     except Exception as e:
       logging.exception('LoadPropertiesFromFile: ' + str(e))
 
-  def SpawnGhost(self, mode, sid, filename=None):
+  def SpawnGhost(self, mode, sid, command=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
@@ -101,7 +101,7 @@ class Ghost(object):
     """
     pid = os.fork()
     if pid == 0:
-      g = Ghost(self._overlord_addrs, mode, sid, filename)
+      g = Ghost(self._overlord_addrs, mode, sid, command)
       g.Start(True)
       sys.exit(0)
     else:
@@ -224,11 +224,11 @@ class Ghost(object):
         logging.info('SpawnPTYServer: terminated')
         sys.exit(0)
 
-  def SpawnLogcatServer(self, _):
-    """Spawn a Logcat server and forward output to the TCP socket."""
-    logging.info('SpawnLogcatServer: started')
+  def SpawnShellServer(self, _):
+    """Spawn a shell server and forward input/output from/to the TCP socket."""
+    logging.info('SpawnShellServer: started')
 
-    p = subprocess.Popen('tail -n +0 -f "%s"' % self._logcat_filename,
+    p = subprocess.Popen(self._shell_command, stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          shell=True)
 
@@ -242,6 +242,10 @@ class Ghost(object):
     try:
       while True:
         rd, _, _ = select.select([p.stdout, p.stderr, self._sock], [], [])
+        p.poll()
+
+        if p.returncode != None:
+          raise RuntimeError("process complete")
 
         if p.stdout in rd:
           self._sock.send(p.stdout.read(_BUFSIZE))
@@ -253,9 +257,10 @@ class Ghost(object):
           ret = self._sock.recv(_BUFSIZE)
           if len(ret) == 0:
             raise RuntimeError("socket closed")
+          p.stdin.write(ret)
     except (OSError, socket.error, RuntimeError):
       self._sock.close()
-      logging.info('SpawnLogcatServer: terminated')
+      logging.info('SpawnShellServer: terminated')
       sys.exit(0)
 
 
@@ -267,28 +272,13 @@ class Ghost(object):
     self._last_ping = self.Timestamp()
     self.SendRequest('ping', {}, timeout_handler, 5)
 
-  def HandleShellRequest(self, msg):
-    params = msg['params']
-    stdout = stderr = err_msg = ""
-    try:
-      p = subprocess.Popen([params['cmd']] + params['args'],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-      stdout, stderr = p.communicate()
-    except Exception as e:
-      err_msg = str(e)
-
-    self.SendResponse(msg, RESPONSE_SUCCESS,
-                      {'output': stdout + stderr, 'err_msg': err_msg})
-
   def HandleRequest(self, msg):
-    if msg['name'] == 'shell':
-      self.HandleShellRequest(msg)
-    elif msg['name'] == 'terminal':
-      self.SpawnGhost(self.SHELL, msg['params']['sid'])
+    if msg['name'] == 'terminal':
+      self.SpawnGhost(self.TERMINAL, msg['params']['sid'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
-    elif msg['name'] == 'logcat':
-      self.SpawnGhost(self.LOGCAT, msg['params']['sid'],
-                      msg['params']['filename'])
+    elif msg['name'] == 'shell':
+      self.SpawnGhost(self.SHELL, msg['params']['sid'],
+                      msg['params']['command'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
 
   def HandleResponse(self, response):
@@ -376,8 +366,8 @@ class Ghost(object):
         logging.info('Connection established, registering...')
         handler = {
             Ghost.AGENT: registered,
-            Ghost.SHELL: self.SpawnPTYServer,
-            Ghost.LOGCAT: self.SpawnLogcatServer
+            Ghost.TERMINAL: self.SpawnPTYServer,
+            Ghost.SHELL: self.SpawnShellServer
             }[self._mode]
 
         # Machine ID may change if MAC address is used (USB-ethernet dongle

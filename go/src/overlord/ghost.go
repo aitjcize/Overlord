@@ -5,6 +5,7 @@
 package overlord
 
 import (
+	"code.google.com/p/go-shlex"
 	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
@@ -33,17 +34,17 @@ const (
 
 type Ghost struct {
 	*RPCCore
-	addrs          []string               // List of possible Overlord addresses
-	mid            string                 // Machine ID
-	cid            string                 // Client ID
-	mode           int                    // mode, see constants.go
-	properties     map[string]interface{} // Client properties
-	reset          bool                   // Whether to reset the connection
-	quit           bool                   // Whether to quit the connection
-	readChan       chan string            // The incoming data channel
-	readErrChan    chan error             // The incoming data error channel
-	pauseLanDisc   bool                   // Stop LAN discovery
-	logcatFilename string                 // filename to cat in logcat mode
+	addrs        []string               // List of possible Overlord addresses
+	mid          string                 // Machine ID
+	cid          string                 // Client ID
+	mode         int                    // mode, see constants.go
+	properties   map[string]interface{} // Client properties
+	reset        bool                   // Whether to reset the connection
+	quit         bool                   // Whether to quit the connection
+	readChan     chan string            // The incoming data channel
+	readErrChan  chan error             // The incoming data error channel
+	pauseLanDisc bool                   // Stop LAN discovery
+	shellCommand string                 // filename to cat in logcat mode
 }
 
 func NewGhost(addrs []string, mode int) *Ghost {
@@ -69,8 +70,8 @@ func (self *Ghost) SetCid(cid string) *Ghost {
 	return self
 }
 
-func (self *Ghost) SetFilename(filename string) *Ghost {
-	self.logcatFilename = filename
+func (self *Ghost) SetCommand(command string) *Ghost {
+	self.shellCommand = command
 	return self
 }
 
@@ -100,28 +101,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 	go func() {
 		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
 		g := NewGhost(self.addrs, TERMINAL).SetCid(params.Sid)
-		g.Start(false)
-	}()
-
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
-}
-
-func (self *Ghost) handleLogcatRequest(req *Request) error {
-	type RequestParams struct {
-		Sid      string `json:"sid"`
-		Filename string `json:"filename"`
-	}
-
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
-		return err
-	}
-
-	go func() {
-		log.Printf("Received logcat command: %s, Logcat %s spawned\n", params.Filename, params.Sid)
-		g := NewGhost(self.addrs, LOGCAT).SetCid(params.Sid).SetFilename(params.Filename)
-		g.Start(false)
+		g.Start(true)
 	}()
 
 	res := NewResponse(req.Rid, SUCCESS, nil)
@@ -130,8 +110,8 @@ func (self *Ghost) handleLogcatRequest(req *Request) error {
 
 func (self *Ghost) handleShellRequest(req *Request) error {
 	type RequestParams struct {
-		Cmd  string   `json:"cmd"`
-		Args []string `json:"args"`
+		Sid string `json:"sid"`
+		Cmd string `json:"command"`
 	}
 
 	var params RequestParams
@@ -139,27 +119,13 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 		return err
 	}
 
-	log.Printf("Received shell command: %s, executing\n", params.Cmd)
+	go func() {
+		log.Printf("Received shell command: %s, shell %s spawned\n", params.Cmd, params.Sid)
+		g := NewGhost(self.addrs, SHELL).SetCid(params.Sid).SetCommand(params.Cmd)
+		g.Start(true)
+	}()
 
-	var (
-		res    *Response
-		cmd    *exec.Cmd
-		output []byte
-		errMsg string
-	)
-
-	cmdPath, err := exec.LookPath(params.Cmd)
-	if err == nil {
-		log.Printf("Executing command: %s %s\n", params.Cmd, params.Args)
-		cmd = exec.Command(cmdPath, params.Args...)
-		output, err = cmd.CombinedOutput()
-	} else {
-		errMsg = err.Error()
-		log.Printf("shell command error: %s\n", errMsg)
-	}
-
-	res = NewResponse(req.Rid, SUCCESS,
-		map[string]interface{}{"output": string(output), "err_msg": errMsg})
+	res := NewResponse(req.Rid, SUCCESS, nil)
 	return self.SendResponse(res)
 }
 
@@ -170,8 +136,6 @@ func (self *Ghost) handleRequest(req *Request) error {
 		err = self.handleShellRequest(req)
 	case "terminal":
 		err = self.handleTerminalRequest(req)
-	case "logcat":
-		err = self.handleLogcatRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
@@ -257,52 +221,68 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 	return nil
 }
 
-// Spawn a Logcat server and forward output to the TCP socket.
-func (self *Ghost) SpawnLogcatServer(res *Response) error {
-	log.Println("SpawnLogcatServer: started")
+// Spawn a Shell server and forward input/output from/to the TCP socket.
+func (self *Ghost) SpawnShellServer(res *Response) error {
+	log.Println("SpawnShellServer: started")
+
+	var err error
 
 	defer func() {
+		if err != nil {
+			self.Conn.Write([]byte(err.Error()))
+		}
 		self.quit = true
 		self.Conn.Close()
-		log.Println("SpawnLogcatServer: terminated")
+		log.Println("SpawnShellServer: terminated")
 	}()
 
-	tail, err := exec.LookPath("tail")
+	parts, err := shlex.Split(self.shellCommand)
+	cmd_name, err := exec.LookPath(parts[0])
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(tail, "-n", "+0", "-f", self.logcatFilename)
-	stdout, err1 := cmd.StdoutPipe()
-	stderr, err2 := cmd.StderrPipe()
-	if err1 != nil || err2 != nil {
+	cmd := exec.Command(cmd_name, parts[1:]...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
 		return err
 	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	stopConn := make(chan bool, 1)
 
 	go io.Copy(self.Conn, stdout)
 	go func() {
 		io.Copy(self.Conn, stderr)
 		cmd.Wait()
+		stopConn <- true
 	}()
 
-	if err := cmd.Start(); err != nil {
+	if err = cmd.Start(); err != nil {
 		return err
 	}
 
-	// For monitoring the connection status.
-	// If we get a read error, it's most likely the connection is closed.
-	// In that case we can kill the "tail" command and terminate the io.Copy
-	// goroutine.
 	for {
 		select {
-		case _ = <-self.readChan:
-			continue
+		case buf := <-self.readChan:
+			stdin.Write([]byte(buf))
 		case err := <-self.readErrChan:
 			if err == io.EOF {
 				cmd.Process.Kill()
-				return errors.New("SpawnLogcatServer: connection dropped")
+				return errors.New("SpawnShellServer: connection dropped")
 			} else {
 				return err
+			}
+		case s := <-stopConn:
+			if s {
+				return nil
 			}
 		}
 	}
@@ -342,8 +322,8 @@ func (self *Ghost) Register() error {
 				handler = registered
 			case TERMINAL:
 				handler = self.SpawnPTYServer
-			case LOGCAT:
-				handler = self.SpawnLogcatServer
+			case SHELL:
+				handler = self.SpawnShellServer
 			}
 			err = self.SendRequest(req, handler)
 			return nil
@@ -521,7 +501,7 @@ func StartGhost(args []string, noLanDisc bool, propFile string) {
 	if propFile != "" {
 		g.LoadPropertiesFromFile(propFile)
 	}
-	go g.Start(noLanDisc)
+	go g.Start(false)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
 

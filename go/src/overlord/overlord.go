@@ -31,9 +31,9 @@ type SpawnTerminalCmd struct {
 	Sid string
 }
 
-type SpawnLogcatCmd struct {
-	Sid      string
-	Filename string
+type SpawnShellCmd struct {
+	Sid     string
+	Command string
 }
 
 type ConnectLogcatCmd struct {
@@ -41,11 +41,6 @@ type ConnectLogcatCmd struct {
 }
 
 type TerminateCmd struct {
-}
-
-type ShellCmd struct {
-	Command string
-	Output  chan []byte
 }
 
 // WebSocketContext is used for maintaining the session information of
@@ -68,16 +63,16 @@ func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 
 type Overlord struct {
 	agents   map[string]*ConnServer            // Normal ghost agents
-	slogcats map[string]map[string]*ConnServer // Simple logcat clients
+	logcats  map[string]map[string]*ConnServer // logcat clients
 	wsctxs   map[string]*WebSocketContext      // (cid, WebSocketContext) mapping
 	ioserver *socketio.Server
 }
 
 func NewOverlord() *Overlord {
 	return &Overlord{
-		agents:   make(map[string]*ConnServer),
-		slogcats: make(map[string]map[string]*ConnServer),
-		wsctxs:   make(map[string]*WebSocketContext),
+		agents:  make(map[string]*ConnServer),
+		logcats: make(map[string]map[string]*ConnServer),
+		wsctxs:  make(map[string]*WebSocketContext),
 	}
 }
 
@@ -101,22 +96,22 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 
 		self.agents[conn.Mid] = conn
 		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
-	case TERMINAL, LOGCAT:
+	case TERMINAL, SHELL:
 		if ctx, ok := self.wsctxs[conn.Cid]; !ok {
 			return nil, errors.New("Register: client " + conn.Cid +
 				" registered without context")
 		} else {
 			wsconn = ctx.Conn
 		}
-	case SLOGCAT:
-		if _, ok := self.slogcats[conn.Mid]; !ok {
-			self.slogcats[conn.Mid] = make(map[string]*ConnServer)
+	case LOGCAT:
+		if _, ok := self.logcats[conn.Mid]; !ok {
+			self.logcats[conn.Mid] = make(map[string]*ConnServer)
 		}
-		if _, ok := self.slogcats[conn.Mid][conn.Cid]; ok {
+		if _, ok := self.logcats[conn.Mid][conn.Cid]; ok {
 			return nil, errors.New("Register: duplicate client ID: " + conn.Cid)
 		}
-		self.slogcats[conn.Mid][conn.Cid] = conn
-		self.ioserver.BroadcastTo("monitor", "slogcat joined", string(msg))
+		self.logcats[conn.Mid][conn.Cid] = conn
+		self.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
 	default:
 		return nil, errors.New("Register: Unknown client mode")
 	}
@@ -148,12 +143,12 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 	case AGENT:
 		self.ioserver.BroadcastTo("monitor", "agent left", string(msg))
 		delete(self.agents, conn.Mid)
-	case SLOGCAT:
-		if _, ok := self.slogcats[conn.Mid]; ok {
-			self.ioserver.BroadcastTo("monitor", "slogcat left", string(msg))
-			delete(self.slogcats[conn.Mid], conn.Cid)
-			if len(self.slogcats[conn.Mid]) == 0 {
-				delete(self.slogcats, conn.Mid)
+	case LOGCAT:
+		if _, ok := self.logcats[conn.Mid]; ok {
+			self.ioserver.BroadcastTo("monitor", "logcat left", string(msg))
+			delete(self.logcats[conn.Mid], conn.Cid)
+			if len(self.logcats[conn.Mid]) == 0 {
+				delete(self.logcats, conn.Mid)
 			}
 		}
 	default:
@@ -263,11 +258,35 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		}
 	}
 
-	// Log stream request handler.
-	// There are two different kinds of logcat connections: the normal logcat
-	// and the simple-logcat. For the normal logcat request, we first create a
-	// WebSocketContext to store the connection, then send a command to
-	// ConnServer to client to spawn a logcat connection.
+	// Shell command request handler.
+	// We first create a WebSocketContext to store the connection, then send a
+	// command to ConnServer to client to spawn a shell connection.
+	ShellHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Shell request from %s\n", r.RemoteAddr)
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			panic(err)
+		}
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		if agent, ok := self.agents[mid]; ok {
+			if command, ok := r.URL.Query()["command"]; ok {
+				wc := NewWebsocketContext(conn)
+				self.AddWebsocketContext(wc)
+				agent.Bridge <- SpawnShellCmd{wc.Sid, command[0]}
+			} else {
+				WebSocketSendError(conn, "No command specified for shell request "+mid)
+			}
+		} else {
+			WebSocketSendError(conn, "No client with mid "+mid)
+		}
+	}
+
+	// Logcat request handler.
+	// We directly send the WebSocket connection to ConnServer for forwarding
+	// the log stream.
 	LogcatHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Logcat request from %s\n", r.RemoteAddr)
 
@@ -278,36 +297,9 @@ func (self *Overlord) ServHTTP(addr, app string) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		// The is a normal logcat request
-		if agent, ok := self.agents[mid]; ok {
-			if filename, ok := r.URL.Query()["filename"]; ok {
-				wc := NewWebsocketContext(conn)
-				self.AddWebsocketContext(wc)
-				agent.Bridge <- SpawnLogcatCmd{wc.Sid, filename[0]}
-			} else {
-				WebSocketSendError(conn, "No filename specified for logcat request "+mid)
-			}
-		} else {
-			WebSocketSendError(conn, "No client with mid "+mid)
-		}
-	}
-
-	// Simple-logcat request handler
-	// We directly send the WebSocket connection to ConnServer for forwarding
-	// the log stream.
-	SimpleLogcatHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Logcat request from %s\n", r.RemoteAddr)
-
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			panic(err)
-		}
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
 		cid := vars["cid"]
-		// Check if it wants to connect to a simple logcat session
-		if logcats, ok := self.slogcats[mid]; ok {
+
+		if logcats, ok := self.logcats[mid]; ok {
 			if logcat, ok := logcats[cid]; ok {
 				logcat.Bridge <- ConnectLogcatCmd{conn}
 			} else {
@@ -316,30 +308,6 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
-	}
-
-	// Shell command request handler.
-	// We create a channel and send it to ConnServer, then wait on the channel
-	// for result. ConnServer command the remote client to execute the command,
-	// then send the result using the channel passed from Overlord.
-	ShellHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Shell request from %s\n", r.RemoteAddr)
-		w.Header().Set("Content-Type", "application/json")
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-		command := r.FormValue("command")
-
-		output := make(chan []byte)
-		if agent, ok := self.agents[mid]; ok {
-			agent.Bridge <- ShellCmd{command, output}
-		} else {
-			w.Write([]byte(fmt.Sprintf(`{"error": "No client with mid %s", "output": ""}`, mid)))
-			return
-		}
-
-		resultJson := <-output
-		w.Write(resultJson)
 	}
 
 	// Get agent properties as JSON
@@ -377,14 +345,14 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		}
 	}
 
-	// List all simple-logcat clients connected to the Overlord.
-	SimpleLogcatsListHandler := func(w http.ResponseWriter, r *http.Request) {
+	// List all logcat clients connected to the Overlord.
+	LogcatsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]interface{}, len(self.slogcats))
+		data := make([]map[string]interface{}, len(self.logcats))
 		idx := 0
-		for mid, slogcats := range self.slogcats {
+		for mid, logcats := range self.logcats {
 			var cids []string
-			for cid, _ := range slogcats {
+			for cid, _ := range logcats {
 				cids = append(cids, cid)
 			}
 			data[idx] = map[string]interface{}{
@@ -411,16 +379,16 @@ func (self *Overlord) ServHTTP(addr, app string) {
 
 	// Register the request handlers and start the WebServer.
 	r := mux.NewRouter()
-	r.HandleFunc("/api/pty/{mid}", PtyHandler)
-	r.HandleFunc("/api/log/{mid}", LogcatHandler)
-	r.HandleFunc("/api/slog/{mid}/{cid}", SimpleLogcatHandler)
+	// Logcat
+	r.HandleFunc("/api/log/{mid}/{cid}", LogcatHandler)
 
 	// Agent methods
+	r.HandleFunc("/api/agent/pty/{mid}", PtyHandler)
 	r.HandleFunc("/api/agent/shell/{mid}", ShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 
 	r.HandleFunc("/api/agents/list", AgentsListHandler)
-	r.HandleFunc("/api/slogcats/list", SimpleLogcatsListHandler)
+	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
 
 	http.Handle("/api/", r)
 	http.Handle("/api/socket.io/", self.ioserver)
