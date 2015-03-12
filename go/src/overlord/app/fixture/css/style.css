@@ -1,0 +1,112 @@
+html, body, #main {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+
+.app-box {
+  margin: 0px 15px;
+  overflow-x: hidden;
+}
+
+.fixture-block {
+  display: inline-block;
+  width: 420px;
+  margin: 10px;
+  vertical-align: text-top;
+}
+
+.fixture-block > .panel-heading {
+  padding: 7px !important;
+}
+
+.label {
+  margin: 2px;
+}
+
+.btn {
+  margin: 2px;
+}
+
+.well {
+  margin-top: 5px !important;
+  margin-bottom: 5px !important;
+}
+
+.well-inner {
+  background-color: #fff !important;
+}
+
+.log {
+  color: white;
+  background-color: black !important;
+  font-size: 8px;
+  font-family: monospace;
+  height: 80px;
+  width: calc(48em + 4px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0px !important;
+}
+
+.log::-webkit-scrollbar {
+  display: none;
+}
+
+.terminal-window {
+  display: block;
+  position: absolute !important;
+  float: left;
+  border: 5px solid #eee;
+  box-shadow: 0px 0px 20px 5px rgba(0,0,0,0.8);
+  border-radius: 4px;
+}
+
+.terminal-title {
+  float: left;
+  text-align: center;
+  display: inline-block;
+  width: 100%;
+  line-height: 20px;
+  background-color: #eee;
+  cursor: move;
+  padding-bottom: 4px;
+}
+
+.terminal-control {
+  position: absolute;
+  right: 0px;
+  top: 0px;
+  height: 20px;
+  color: black;
+  background-color: #eee;
+}
+
+.terminal-control * {
+  display: inline-block;
+}
+
+.terminal-close:hover, .terminal-minimize:hover {
+  opacity: 0.7;
+}
+
+.terminal-close {
+  background-image: url(/common/img/close.png);
+  width: 20px;
+  height: 20px;
+  opacity: 0.5;
+}
+
+.terminal-minimize {
+  background-image: url(/common/img/minimize.png);
+  width: 20px;
+  height: 20px;
+  opacity: 0.5;
+}
+
+.terminal {
+  clear: both;
+  font-size: 14px;
+  line-height: 16px;
+  text-rendering: auto;
+}

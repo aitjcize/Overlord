@@ -1,0 +1,25 @@
+{
+  "context": "fixture",
+  "terminal": "DUT Terminal",
+  "ui": {
+    "lights": [
+      ["dut", "DUT", "label-success"],
+      ["nuc", "NUC", "label-success"],
+      ["bone", "BeagleBone", "label-success"]
+    ],
+    "controls": [
+      ["Servo Debug", "whale debug"],
+      ["Case Close Debug", "whale debug"],
+      ["Voltage Measurement", "measure voltage"],
+      ["Upgrade Firmware", "whale firmware upgrade"],
+      ["Fixture control", [
+        ["whale close", "whale close"],
+        ["whale open", "whale open"],
+        ["io insertion", "whale insert"],
+        ["battery", "whale battery"],
+        ["charging", "whale charge"]
+      ]]
+    ],
+    "log": ["/tmp/log"]
+  }
+}
