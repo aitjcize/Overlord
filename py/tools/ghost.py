@@ -74,6 +74,7 @@ class Ghost(object):
       assert command is not None
 
     self._overlord_addrs = overlord_addrs
+    self._connected_addr = None
     self._mode = mode
     self._sock = None
     self._machine_id = self.GetMachineID()
@@ -101,7 +102,7 @@ class Ghost(object):
     """
     pid = os.fork()
     if pid == 0:
-      g = Ghost(self._overlord_addrs, mode, sid, command)
+      g = Ghost([self._connected_addr], mode, sid, command)
       g.Start(True)
       sys.exit(0)
     else:
@@ -381,6 +382,7 @@ class Ghost(object):
         pass
       else:
         self._sock.settimeout(None)
+        self._connected_addr = addr
         self.Listen()
 
     raise RuntimeError("Cannot connect to any server")

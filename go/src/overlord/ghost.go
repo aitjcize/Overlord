@@ -34,17 +34,18 @@ const (
 
 type Ghost struct {
 	*RPCCore
-	addrs        []string               // List of possible Overlord addresses
-	mid          string                 // Machine ID
-	cid          string                 // Client ID
-	mode         int                    // mode, see constants.go
-	properties   map[string]interface{} // Client properties
-	reset        bool                   // Whether to reset the connection
-	quit         bool                   // Whether to quit the connection
-	readChan     chan string            // The incoming data channel
-	readErrChan  chan error             // The incoming data error channel
-	pauseLanDisc bool                   // Stop LAN discovery
-	shellCommand string                 // filename to cat in logcat mode
+	addrs         []string               // List of possible Overlord addresses
+	connectedAddr string                 // Current connected Overlord address
+	mid           string                 // Machine ID
+	cid           string                 // Client ID
+	mode          int                    // mode, see constants.go
+	properties    map[string]interface{} // Client properties
+	reset         bool                   // Whether to reset the connection
+	quit          bool                   // Whether to quit the connection
+	readChan      chan string            // The incoming data channel
+	readErrChan   chan error             // The incoming data error channel
+	pauseLanDisc  bool                   // Stop LAN discovery
+	shellCommand  string                 // filename to cat in logcat mode
 }
 
 func NewGhost(addrs []string, mode int) *Ghost {
@@ -100,7 +101,8 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 
 	go func() {
 		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
-		g := NewGhost(self.addrs, TERMINAL).SetCid(params.Sid)
+		addrs := []string{self.connectedAddr}
+		g := NewGhost(addrs, TERMINAL).SetCid(params.Sid)
 		g.Start(true)
 	}()
 
@@ -121,7 +123,8 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 
 	go func() {
 		log.Printf("Received shell command: %s, shell %s spawned\n", params.Cmd, params.Sid)
-		g := NewGhost(self.addrs, SHELL).SetCid(params.Sid).SetCommand(params.Cmd)
+		addrs := []string{self.connectedAddr}
+		g := NewGhost(addrs, SHELL).SetCid(params.Sid).SetCommand(params.Cmd)
 		g.Start(true)
 	}()
 
@@ -229,7 +232,7 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 
 	defer func() {
 		if err != nil {
-			self.Conn.Write([]byte(err.Error()))
+			self.Conn.Write([]byte(err.Error() + "\n"))
 		}
 		self.quit = true
 		self.Conn.Close()
@@ -311,6 +314,7 @@ func (self *Ghost) Register() error {
 					return errors.New("Register request timeout")
 				} else {
 					log.Printf("Registered with Overlord at %s", addr)
+					self.connectedAddr = addr
 					self.pauseLanDisc = true
 				}
 				return nil

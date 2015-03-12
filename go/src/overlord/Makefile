@@ -3,21 +3,25 @@
 # found in the LICENSE file.
 
 GO=go
-FACTORY=$(PWD)/../../..
+FACTORY=$(CURDIR)/../../..
 GOPATH=$(FACTORY)/build/go:$(FACTORY)/go
+OVERLORD=overlord
+DEPS?=true
 
 all: ghost overlordd
 
-overlord:
-	GOPATH=$(GOPATH) $(GO) get $@
+deps:
+	if $(DEPS); then \
+		GOPATH=$(GOPATH) $(GO) get $(OVERLORD); \
+	fi
 
-overlordd: overlord
-	GOPATH=$(GOPATH) $(GO) install $</cmd/$@
+overlordd: deps
+	GOPATH=$(GOPATH) $(GO) install $(OVERLORD)/cmd/$@
 	rm -rf $(FACTORY)/go/bin/app
 	ln -s $(PWD)/app $(FACTORY)/go/bin
 
-ghost: overlord
-	GOPATH=$(GOPATH) $(GO) install $</cmd/$@
+ghost: deps
+	GOPATH=$(GOPATH) $(GO) install $(OVERLORD)/cmd/$@
 
 clean:
 	rm -rf $(FACTORY)/go/pkg $(FACTORY)/go/bin

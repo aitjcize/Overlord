@@ -316,12 +316,16 @@ func (self *Overlord) ServHTTP(addr, app string) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		jsonResult, err := json.Marshal(self.agents[mid].Properties)
-		if err != nil {
-			w.Write([]byte(`{"error": "` + err.Error() + `"}`))
-			return
+		if agent, ok := self.agents[mid]; ok {
+			jsonResult, err := json.Marshal(agent.Properties)
+			if err != nil {
+				w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+				return
+			}
+			w.Write(jsonResult)
+		} else {
+			w.Write([]byte(fmt.Sprintf(`{"error", "No client with mid` + mid + `"}`)))
 		}
-		w.Write(jsonResult)
 	}
 
 	// List all agents connected to the Overlord.
@@ -370,9 +374,18 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		}
 	}
 
-	appDir := filepath.Join(filepath.Dir(os.Args[0]), "app", app)
+	// Try local directory
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	appDir := filepath.Join(wd, filepath.Dir(os.Args[0]), "app", app)
 	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		log.Fatalf("App `%s' does not exist\n", app)
+		// Try system install direcotry
+		appDir = filepath.Join("/usr/share/overlord/app", app)
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			log.Fatalf("App `%s' does not exist\n", app)
+		}
 	}
 
 	self.InitSocketIOServer()
@@ -394,7 +407,7 @@ func (self *Overlord) ServHTTP(addr, app string) {
 	http.Handle("/api/socket.io/", self.ioserver)
 	http.Handle("/", http.FileServer(http.Dir(appDir)))
 
-	err := http.ListenAndServe(WEBSERVER_ADDR, nil)
+	err = http.ListenAndServe(WEBSERVER_ADDR, nil)
 	if err != nil {
 		log.Fatalf("net.http could not listen on address '%s': %s\n",
 			WEBSERVER_ADDR, err)
