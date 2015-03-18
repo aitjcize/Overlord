@@ -1,4 +1,11 @@
+// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// Requires: common.jsx :: NavBar
+//
 // - App
+//  - NavBar
 //  - ClientInfo
 //    - TerminalWindow
 
@@ -104,8 +111,8 @@ var App = React.createClass({
   render: function() {
     var $this=this;
     return (
-      <div id="main" className="container">
-        <h1 className="text-center">Factory Install Dashboard</h1>
+      <div id="main">
+        <NavBar name="Factory Install Dashboard" url="/api/apps/list" />
         <div className="client-box panel panel-info">
           <div className="panel-heading">
             Clients

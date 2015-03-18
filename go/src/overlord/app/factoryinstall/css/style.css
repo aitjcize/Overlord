@@ -15,6 +15,7 @@ html, body, #main {
 }
 
 .client-box {
+  margin: 0px 15px;
   height: 90%;
   overflow-x: hidden;
   overflow-y: auto;

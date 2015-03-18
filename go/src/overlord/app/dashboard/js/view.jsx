@@ -1,4 +1,11 @@
+// Copyright 2015 The Chromium OS Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+//
+// Requires: common.jsx :: NavBar
+//
 // - App
+//  - NavBar
 //  - SideBar
 //    - ClientBox
 //      - FilterInput
@@ -90,10 +97,10 @@ var App = React.createClass({
       $this.forceUpdate();
     });
   },
-  render: function() {
+  render: function () {
     return (
       <div id="main">
-        <h1 className="text-center">Overlord Dashboard</h1>
+        <NavBar name="Dashboard" url="/api/apps/list" />
         <SideBar clients={this.state.clients}
             recentclients={this.state.recentclients} root={this} />
         <TerminalGroup data={this.state.terminals} root={this} />
@@ -131,7 +138,7 @@ var FilterInput = React.createClass({
   onKeyUp: function (e) {
     this.props.root.filterClientList(this.refs.filter.getDOMNode().value);
   },
-  render: function() {
+  render: function () {
     return (
       <div>
         <input type="text" className="filter-input form-control" ref="filter"
@@ -185,7 +192,7 @@ var RecentList = React.createClass({
 });
 
 var ClientInfo = React.createClass({
-  onClick: function(e) {
+  onClick: function (e) {
     this.props.root.addTerminal(this.props.data);
   },
   render: function () {
@@ -244,7 +251,7 @@ var TerminalWindow = React.createClass({
 
     $el.draggable({
       // Once the window is dragged, make it position fixed.
-      stop: function() {
+      stop: function () {
         offsets = el.getBoundingClientRect();
         $el.css({
           position: 'fixed',
@@ -264,20 +271,24 @@ var TerminalWindow = React.createClass({
 
       term.open(el);
 
-      term.on('title', function(title) {
+      term.on('title', function (title) {
         $el.find('.terminal-title').text(title);
       });
 
-      term.on('data', function(data) {
+      term.on('data', function (data) {
         sock.send(data);
       });
 
-      sock.onmessage = function(msg) {
+      sock.onmessage = function (msg) {
         term.write(Base64.decode(msg.data));
       };
     };
+    sock.onclose = function (e) {
+      this.props.root.removeTerminal(this.props.data.mid);
+      this.sock.close();
+    }.bind(this)
   },
-  onWindowMouseDown: function(e) {
+  onWindowMouseDown: function (e) {
     if (typeof(window.maxz) == "undefined") {
       window.maxz = 100;
     }
@@ -287,7 +298,7 @@ var TerminalWindow = React.createClass({
       $el.css("z-index", window.maxz);
     }
   },
-  onCloseMouseUp: function(e) {
+  onCloseMouseUp: function (e) {
     this.props.root.removeTerminal(this.props.data.mid);
     this.sock.close();
   },

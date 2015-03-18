@@ -12,6 +12,7 @@ import (
 	"github.com/googollee/go-socket.io"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 )
 
 const (
+	SYSTEM_APP_DIR    = "/usr/share/overlord"
 	WEBSERVER_ADDR    = "localhost:9000"
 	LD_INTERVAL       = 5
 	KEEP_ALIVE_PERIOD = 1
@@ -218,8 +220,42 @@ func (self *Overlord) InitSocketIOServer() {
 	self.ioserver = server
 }
 
+func (self *Overlord) GetAppDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+
+	appDir := filepath.Join(wd, filepath.Dir(os.Args[0]), "app")
+	if _, err := os.Stat(appDir); os.IsNotExist(err) {
+		// Try system install direcotry
+		appDir = filepath.Join(SYSTEM_APP_DIR, "app")
+		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+			log.Fatalf("Can not find app directory\n")
+		}
+	}
+	return appDir
+}
+
+func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
+	var appNames []string
+
+	apps, err := ioutil.ReadDir(self.GetAppDir())
+	if err != nil {
+		return nil, nil
+	}
+
+	for _, app := range apps {
+		if ignoreSpecial && (app.Name() == "common" || app.Name() == "index") {
+			continue
+		}
+		appNames = append(appNames, app.Name())
+	}
+	return appNames, nil
+}
+
 // Web server main routine.
-func (self *Overlord) ServHTTP(addr, app string) {
+func (self *Overlord) ServHTTP(addr string) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  BUFSIZ,
 		WriteBufferSize: BUFSIZ,
@@ -234,6 +270,69 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
 		ws.WriteMessage(websocket.CloseMessage, msg)
 		ws.Close()
+	}
+
+	// List all apps available on Overlord.
+	AppsListHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		apps, err := self.GetAppNames(true)
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+		}
+
+		result, err := json.Marshal(map[string][]string{"apps": apps})
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+		} else {
+			w.Write(result)
+		}
+	}
+
+	// List all agents connected to the Overlord.
+	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data := make([]map[string]string, len(self.agents))
+		idx := 0
+		for _, agent := range self.agents {
+			data[idx] = map[string]string{
+				"mid": agent.Mid,
+				"cid": agent.Cid,
+			}
+			idx++
+		}
+
+		result, err := json.Marshal(data)
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+		} else {
+			w.Write(result)
+		}
+	}
+
+	// List all logcat clients connected to the Overlord.
+	LogcatsListHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data := make([]map[string]interface{}, len(self.logcats))
+		idx := 0
+		for mid, logcats := range self.logcats {
+			var cids []string
+			for cid, _ := range logcats {
+				cids = append(cids, cid)
+			}
+			data[idx] = map[string]interface{}{
+				"mid":  mid,
+				"cids": cids,
+			}
+			idx++
+		}
+
+		result, err := json.Marshal(data)
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+		} else {
+			w.Write(result)
+		}
 	}
 
 	// PTY stream request handler.
@@ -328,71 +427,17 @@ func (self *Overlord) ServHTTP(addr, app string) {
 		}
 	}
 
-	// List all agents connected to the Overlord.
-	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]string, len(self.agents))
-		idx := 0
-		for _, agent := range self.agents {
-			data[idx] = map[string]string{
-				"mid": agent.Mid,
-				"cid": agent.Cid,
-			}
-			idx++
-		}
-
-		result, err := json.Marshal(data)
-		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
-		} else {
-			w.Write(result)
-		}
-	}
-
-	// List all logcat clients connected to the Overlord.
-	LogcatsListHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]interface{}, len(self.logcats))
-		idx := 0
-		for mid, logcats := range self.logcats {
-			var cids []string
-			for cid, _ := range logcats {
-				cids = append(cids, cid)
-			}
-			data[idx] = map[string]interface{}{
-				"mid":  mid,
-				"cids": cids,
-			}
-			idx++
-		}
-
-		result, err := json.Marshal(data)
-		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
-		} else {
-			w.Write(result)
-		}
-	}
-
-	// Try local directory
-	wd, err := os.Getwd()
-	if err != nil {
-		panic(err)
-	}
-	appDir := filepath.Join(wd, filepath.Dir(os.Args[0]), "app", app)
-	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		// Try system install direcotry
-		appDir = filepath.Join("/usr/share/overlord/app", app)
-		if _, err := os.Stat(appDir); os.IsNotExist(err) {
-			log.Fatalf("App `%s' does not exist\n", app)
-		}
-	}
-
 	self.InitSocketIOServer()
 
 	// Register the request handlers and start the WebServer.
 	r := mux.NewRouter()
-	// Logcat
+	appDir := self.GetAppDir()
+
+	r.HandleFunc("/api/apps/list", AppsListHandler)
+	r.HandleFunc("/api/agents/list", AgentsListHandler)
+	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
+
+	// Logcat methods
 	r.HandleFunc("/api/log/{mid}/{cid}", LogcatHandler)
 
 	// Agent methods
@@ -400,12 +445,25 @@ func (self *Overlord) ServHTTP(addr, app string) {
 	r.HandleFunc("/api/agent/shell/{mid}", ShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 
-	r.HandleFunc("/api/agents/list", AgentsListHandler)
-	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
-
 	http.Handle("/api/", r)
 	http.Handle("/api/socket.io/", self.ioserver)
-	http.Handle("/", http.FileServer(http.Dir(appDir)))
+	http.Handle("/vendor/", http.FileServer(http.Dir(filepath.Join(appDir, "common"))))
+	http.Handle("/", http.FileServer(http.Dir(filepath.Join(appDir, "dashboard"))))
+
+	// Serve all apps
+	appNames, err := self.GetAppNames(false)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, app := range appNames {
+		if app != "common" && app != "index" {
+			log.Printf("Serving app `%s' ...\n", app)
+		}
+		prefix := fmt.Sprintf("/%s/", app)
+		http.Handle(prefix, http.StripPrefix(prefix,
+			http.FileServer(http.Dir(filepath.Join(appDir, app)))))
+	}
 
 	err = http.ListenAndServe(WEBSERVER_ADDR, nil)
 	if err != nil {
@@ -431,9 +489,9 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	}
 }
 
-func (self *Overlord) Serv(app string) {
+func (self *Overlord) Serv() {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR, app)
+	go self.ServHTTP(WEBSERVER_ADDR)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -447,7 +505,7 @@ func (self *Overlord) Serv(app string) {
 	}
 }
 
-func StartOverlord(app string) {
+func StartOverlord() {
 	ovl := NewOverlord()
-	ovl.Serv(app)
+	ovl.Serv()
 }

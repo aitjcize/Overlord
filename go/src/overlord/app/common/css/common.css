@@ -1,0 +1,10 @@
+.navbar-header {
+  float: left;
+  padding: 15px;
+  text-align: center;
+  width: calc(100% - 121px);
+}
+
+.navbar-brand {
+  float: none;
+}
