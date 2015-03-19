@@ -20,8 +20,10 @@ var App = React.createClass({
       url: this.props.url,
       dataType: "json",
       success: function (data) {
-        this.state.clients = data;
-        this.forceUpdate();
+        if (!window.locked) {
+          this.state.clients = data;
+          this.forceUpdate();
+        }
       }.bind(this),
       error: function (xhr, status, err) {
         console.error(this.props.url, status, err.toString());
