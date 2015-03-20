@@ -75,7 +75,8 @@ var App = React.createClass({
     setInterval(this.loadClientsFromServer, this.props.pollInterval);
 
     var $this = this;
-    var socket = io("http://" + window.location.host, {path: "/api/socket.io/"});
+    var socket = io(window.location.protocol + "//" + window.location.host,
+                    {path: "/api/socket.io/"});
     socket.on("logcat joined", function (msg) {
       var obj = JSON.parse(msg);
       var clients = $this.state.clients;
@@ -220,7 +221,8 @@ var TerminalWindow = React.createClass({
     var mid = this.props.data.mid;
     var cid = this.props.data.cid;
     var el = document.getElementById("terminal-" + mid + "-" + cid);
-    var url = "ws://" + window.location.host + "/api/log/" + mid + "/" + cid;
+    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
+                "://" + window.location.host + "/api/log/" + mid + "/" + cid;
     var sock = new WebSocket(url);
 
     var $el = $(el);

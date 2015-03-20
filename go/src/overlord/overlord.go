@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -260,7 +261,7 @@ func AuthPassThrough(h http.Handler) http.Handler {
 }
 
 // Web server main routine.
-func (self *Overlord) ServHTTP(addr string, noAuth bool) {
+func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  BUFSIZ,
 		WriteBufferSize: BUFSIZ,
@@ -475,7 +476,15 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool) {
 			auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
-	err = http.ListenAndServe(WEBSERVER_ADDR, nil)
+	if enableTLS != "" {
+		parts := strings.Split(enableTLS, ",")
+		if len(parts) != 2 {
+			log.Fatalf("TLS: invalid key assignment")
+		}
+		err = http.ListenAndServeTLS(WEBSERVER_ADDR, parts[0], parts[1], nil)
+	} else {
+		err = http.ListenAndServe(WEBSERVER_ADDR, nil)
+	}
 	if err != nil {
 		log.Fatalf("net.http could not listen on address '%s': %s\n",
 			WEBSERVER_ADDR, err)
@@ -499,9 +508,9 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	}
 }
 
-func (self *Overlord) Serv(noAuth bool) {
+func (self *Overlord) Serv(noAuth bool, enableTLS string) {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR, noAuth)
+	go self.ServHTTP(WEBSERVER_ADDR, noAuth, enableTLS)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -515,7 +524,7 @@ func (self *Overlord) Serv(noAuth bool) {
 	}
 }
 
-func StartOverlord(noAuth bool) {
+func StartOverlord(noAuth bool, enableTLS string) {
 	ovl := NewOverlord()
-	ovl.Serv(noAuth)
+	ovl.Serv(noAuth, enableTLS)
 }

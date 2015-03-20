@@ -12,6 +12,7 @@ import (
 )
 
 var noAuth = flag.Bool("noauth", false, "disable authentication")
+var enableTLS = flag.String("tls", "", `enable TLS. The argument should be in the form of "cert.pem,key.pem"`)
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
@@ -23,5 +24,5 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	overlord.StartOverlord(*noAuth)
+	overlord.StartOverlord(*noAuth, *enableTLS)
 }
