@@ -5,12 +5,12 @@
 package overlord
 
 import (
-	"code.google.com/p/go-shlex"
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/flynn/go-shlex"
 	"github.com/kr/pty"
+	"github.com/satori/go.uuid"
 	"io"
 	"io/ioutil"
 	"log"
@@ -57,7 +57,7 @@ func NewGhost(addrs []string, mode int) *Ghost {
 		RPCCore:      NewRPCCore(nil),
 		addrs:        addrs,
 		mid:          mid,
-		cid:          uuid.New(),
+		cid:          uuid.NewV4().String(),
 		mode:         mode,
 		properties:   make(map[string]interface{}),
 		reset:        false,

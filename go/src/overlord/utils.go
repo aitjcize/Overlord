@@ -6,11 +6,11 @@ package overlord
 
 import (
 	"bufio"
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/satori/go.uuid"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -62,7 +62,7 @@ func GetGateWayIP() ([]string, error) {
 // alternative if the previous doesn't work.
 func GetMachineID() (string, error) {
 	if DEBUG {
-		return uuid.New(), nil
+		return uuid.NewV4().String(), nil
 	}
 
 	buf := make([]byte, 64)

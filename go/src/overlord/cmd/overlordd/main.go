@@ -11,6 +11,8 @@ import (
 	"overlord"
 )
 
+var noAuth = flag.Bool("noauth", false, "disable authentication")
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
 	flag.PrintDefaults()
@@ -21,5 +23,5 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	overlord.StartOverlord()
+	overlord.StartOverlord(*noAuth)
 }

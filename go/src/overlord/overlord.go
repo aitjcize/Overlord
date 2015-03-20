@@ -5,13 +5,13 @@
 package overlord
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/googollee/go-socket.io"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/satori/go.uuid"
 	"io/ioutil"
 	"log"
 	"net"
@@ -58,7 +58,7 @@ type WebSocketContext struct {
 
 func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 	return &WebSocketContext{
-		Sid:  uuid.New(),
+		Sid:  uuid.NewV4().String(),
 		Conn: conn,
 	}
 }
@@ -246,7 +246,8 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	}
 
 	for _, app := range apps {
-		if ignoreSpecial && (app.Name() == "common" || app.Name() == "index") {
+		if !app.IsDir() ||
+			(ignoreSpecial && (app.Name() == "common" || app.Name() == "index")) {
 			continue
 		}
 		appNames = append(appNames, app.Name())
@@ -254,8 +255,12 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	return appNames, nil
 }
 
+func AuthPassThrough(h http.Handler) http.Handler {
+	return h
+}
+
 // Web server main routine.
-func (self *Overlord) ServHTTP(addr string) {
+func (self *Overlord) ServHTTP(addr string, noAuth bool) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  BUFSIZ,
 		WriteBufferSize: BUFSIZ,
@@ -427,11 +432,16 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 	}
 
+	appDir := self.GetAppDir()
+
+	// HTTP basic auth
+	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"), noAuth)
+
+	// Initialize socket IO server
 	self.InitSocketIOServer()
 
 	// Register the request handlers and start the WebServer.
 	r := mux.NewRouter()
-	appDir := self.GetAppDir()
 
 	r.HandleFunc("/api/apps/list", AppsListHandler)
 	r.HandleFunc("/api/agents/list", AgentsListHandler)
@@ -445,10 +455,10 @@ func (self *Overlord) ServHTTP(addr string) {
 	r.HandleFunc("/api/agent/shell/{mid}", ShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 
-	http.Handle("/api/", r)
-	http.Handle("/api/socket.io/", self.ioserver)
-	http.Handle("/vendor/", http.FileServer(http.Dir(filepath.Join(appDir, "common"))))
-	http.Handle("/", http.FileServer(http.Dir(filepath.Join(appDir, "dashboard"))))
+	http.Handle("/api/", auth.Wrap(r))
+	http.Handle("/api/socket.io/", auth.Wrap(self.ioserver))
+	http.Handle("/vendor/", auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, "common")))))
+	http.Handle("/", auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, "dashboard")))))
 
 	// Serve all apps
 	appNames, err := self.GetAppNames(false)
@@ -462,7 +472,7 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 		prefix := fmt.Sprintf("/%s/", app)
 		http.Handle(prefix, http.StripPrefix(prefix,
-			http.FileServer(http.Dir(filepath.Join(appDir, app)))))
+			auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
 	err = http.ListenAndServe(WEBSERVER_ADDR, nil)
@@ -489,9 +499,9 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	}
 }
 
-func (self *Overlord) Serv() {
+func (self *Overlord) Serv(noAuth bool) {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR)
+	go self.ServHTTP(WEBSERVER_ADDR, noAuth)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -505,7 +515,7 @@ func (self *Overlord) Serv() {
 	}
 }
 
-func StartOverlord() {
+func StartOverlord(noAuth bool) {
 	ovl := NewOverlord()
-	ovl.Serv()
+	ovl.Serv(noAuth)
 }

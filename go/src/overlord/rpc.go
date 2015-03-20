@@ -5,9 +5,9 @@
 package overlord
 
 import (
-	"code.google.com/p/go-uuid/uuid"
 	"encoding/json"
 	"errors"
+	"github.com/satori/go.uuid"
 	"log"
 	"net"
 	"strings"
@@ -41,7 +41,7 @@ type Request struct {
 // params is map between string and any other JSON-serializable data structure.
 func NewRequest(name string, params map[string]interface{}) *Request {
 	req := &Request{
-		Rid:     uuid.New(),
+		Rid:     uuid.NewV4().String(),
 		Timeout: REQUEST_TIMEOUT_SECS,
 		Name:    name,
 	}
