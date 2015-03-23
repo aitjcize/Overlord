@@ -80,7 +80,7 @@ func (self *ConnServer) Terminate() {
 // writeWebsocket is a helper function for written text to websocket in the
 // correct format.
 func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
-	if self.logFormat == TEXT {
+	if self.Mode == LOGCAT && self.logFormat == TEXT {
 		buf = ToVTNewLine(buf)
 	}
 	return conn.WriteMessage(websocket.TextMessage, B64Encode(buf))

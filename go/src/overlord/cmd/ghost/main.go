@@ -11,6 +11,7 @@ import (
 	"overlord"
 )
 
+var randMid = flag.Bool("rand-mid", false, "use random machine ID")
 var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
 var propFile = flag.String("prop-file", "", "file containing the JSON representation of client properties")
 
@@ -25,5 +26,5 @@ func main() {
 	flag.Parse()
 	args := flag.Args()
 
-	overlord.StartGhost(args, *noLanDisc, *propFile)
+	overlord.StartGhost(args, *randMid, *noLanDisc, *propFile)
 }

@@ -43,9 +43,6 @@ type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
 }
 
-type TerminateCmd struct {
-}
-
 // WebSocketContext is used for maintaining the session information of
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
@@ -349,7 +346,8 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			panic(err)
+			log.Println(err)
+			return
 		}
 
 		vars := mux.Vars(r)
@@ -371,7 +369,8 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			panic(err)
+			log.Println(err)
+			return
 		}
 
 		vars := mux.Vars(r)
@@ -397,7 +396,8 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			panic(err)
+			log.Println(err)
+			return
 		}
 
 		vars := mux.Vars(r)

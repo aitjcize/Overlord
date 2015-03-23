@@ -48,10 +48,17 @@ type Ghost struct {
 	shellCommand  string                 // filename to cat in logcat mode
 }
 
-func NewGhost(addrs []string, mode int) *Ghost {
-	mid, err := GetMachineID()
-	if err != nil {
-		panic(err)
+func NewGhost(addrs []string, mode int, randMid bool) *Ghost {
+	var mid string
+	var err error
+
+	if randMid {
+		mid = uuid.NewV4().String()
+	} else {
+		mid, err = GetMachineID()
+		if err != nil {
+			panic(err)
+		}
 	}
 	return &Ghost{
 		RPCCore:      NewRPCCore(nil),
@@ -102,7 +109,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 	go func() {
 		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, TERMINAL).SetCid(params.Sid)
+		g := NewGhost(addrs, TERMINAL, true).SetCid(params.Sid)
 		g.Start(true)
 	}()
 
@@ -124,7 +131,7 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 	go func() {
 		log.Printf("Received shell command: %s, shell %s spawned\n", params.Cmd, params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, SHELL).SetCid(params.Sid).SetCommand(params.Cmd)
+		g := NewGhost(addrs, SHELL, true).SetCid(params.Sid).SetCommand(params.Cmd)
 		g.Start(true)
 	}()
 
@@ -493,7 +500,7 @@ func (self *Ghost) Start(noLanDisc bool) {
 	}
 }
 
-func StartGhost(args []string, noLanDisc bool, propFile string) {
+func StartGhost(args []string, randMid, noLanDisc bool, propFile string) {
 	var addrs []string
 
 	if len(args) >= 1 {
@@ -501,11 +508,11 @@ func StartGhost(args []string, noLanDisc bool, propFile string) {
 	}
 	addrs = append(addrs, fmt.Sprintf("%s:%d", OVERLORD_IP, OVERLORD_PORT))
 
-	g := NewGhost(addrs, AGENT)
+	g := NewGhost(addrs, AGENT, randMid)
 	if propFile != "" {
 		g.LoadPropertiesFromFile(propFile)
 	}
-	go g.Start(false)
+	go g.Start(noLanDisc)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
 

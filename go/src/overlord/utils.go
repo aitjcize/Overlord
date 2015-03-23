@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/satori/go.uuid"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -61,10 +60,6 @@ func GetGateWayIP() ([]string, error) {
 // We follow the listed order to generate machine ID, and fallback to the next
 // alternative if the previous doesn't work.
 func GetMachineID() (string, error) {
-	if DEBUG {
-		return uuid.NewV4().String(), nil
-	}
-
 	buf := make([]byte, 64)
 	f, err := os.Open("/sys/class/dmi/id/product_uuid")
 	if err == nil {
