@@ -413,10 +413,10 @@ class Ghost(object):
         data, source_addr = s.recvfrom(_BUFSIZE)
         parts = data.split()
         if parts[0] == 'OVERLORD':
-          ip = source_addr[0]
-          port = int(parts[1].lstrip(':'))
-          addr = (ip, port)
-          self._queue.put(addr, True)
+          ip, port = parts[1].split(':')
+          if len(ip.strip()) == 0:
+            ip = source_addr[0]
+          self._queue.put((ip, int(port)), True)
 
       try:
         obj = self._queue.get(False)

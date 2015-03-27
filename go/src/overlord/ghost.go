@@ -83,6 +83,15 @@ func (self *Ghost) SetCommand(command string) *Ghost {
 	return self
 }
 
+func (self *Ghost) ExistsInAddr(target string) bool {
+	for _, x := range self.addrs {
+		if target == x {
+			return true
+		}
+	}
+	return false
+}
+
 func (self *Ghost) LoadPropertiesFromFile(filename string) {
 	bytes, err := ioutil.ReadFile(filename)
 	if err != nil {
@@ -409,7 +418,7 @@ func (self *Ghost) StartLanDiscovery() {
 
 	for {
 		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT * time.Second))
-		_, remote, err := conn.ReadFrom(buf)
+		n, remote, err := conn.ReadFrom(buf)
 
 		if self.pauseLanDisc {
 			log.Println("LAN discovery: paused")
@@ -431,23 +440,25 @@ func (self *Ghost) StartLanDiscovery() {
 			continue
 		}
 
-		// LAN discovery packet format: "OVERLOARD :port"
-		data := strings.Split(string(buf), " ")
-		parts := strings.Split(remote.String(), ":")
-		remoteAddr := parts[0] + data[1]
+		// LAN discovery packet format: "OVERLOARD [host]:port"
+		data := strings.Split(string(buf[:n]), " ")
+		if data[0] != "OVERLORD" {
+			continue
+		}
 
-		if data[0] == "OVERLORD" {
-			found := false
-			for _, addr := range self.addrs {
-				if addr == remoteAddr {
-					found = true
-					break
-				}
-			}
-			if !found {
-				log.Printf("LAN discovery: got overlord address %s", remoteAddr)
-				self.addrs = append(self.addrs, remoteAddr)
-			}
+		overlordAddrParts := strings.Split(data[1], ":")
+		remoteAddrParts := strings.Split(remote.String(), ":")
+
+		var remoteAddr string
+		if strings.Trim(overlordAddrParts[0], " ") == "" {
+			remoteAddr = remoteAddrParts[0] + ":" + overlordAddrParts[1]
+		} else {
+			remoteAddr = data[1]
+		}
+
+		if !self.ExistsInAddr(remoteAddr) {
+			log.Printf("LAN discovery: got overlord address %s", remoteAddr)
+			self.addrs = append(self.addrs, remoteAddr)
 		}
 	}
 }
@@ -455,19 +466,10 @@ func (self *Ghost) StartLanDiscovery() {
 // ScanGateWay scans currenty netowrk gateway and add it into addrs if not
 // already exist.
 func (self *Ghost) ScanGateway() {
-	exists := func(ips []string, target string) bool {
-		for _, x := range ips {
-			if target == x {
-				return true
-			}
-		}
-		return false
-	}
-
 	if gateways, err := GetGateWayIP(); err == nil {
 		for _, gw := range gateways {
 			addr := fmt.Sprintf("%s:%d", gw, OVERLORD_PORT)
-			if !exists(self.addrs, addr) {
+			if !self.ExistsInAddr(addr) {
 				self.addrs = append(self.addrs, addr)
 			}
 		}

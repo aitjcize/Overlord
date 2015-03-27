@@ -11,8 +11,11 @@ import (
 	"overlord"
 )
 
+var lanDiscInterface = flag.String("lan-disc-iface", "",
+	"the network interface used for broadcasting LAN discovery packets")
 var noAuth = flag.Bool("noauth", false, "disable authentication")
-var enableTLS = flag.String("tls", "", `enable TLS. The argument should be in the form of "cert.pem,key.pem"`)
+var TLSSettings = flag.String("tls", "",
+	"TLS settings in the form of 'cert.pem,key.pem'. Empty to disable.")
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: overlord [OPTIONS]\n")
@@ -24,5 +27,5 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	overlord.StartOverlord(*noAuth, *enableTLS)
+	overlord.StartOverlord(*lanDiscInterface, *noAuth, *TLSSettings)
 }

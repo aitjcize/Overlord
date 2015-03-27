@@ -62,17 +62,23 @@ func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 }
 
 type Overlord struct {
-	agents   map[string]*ConnServer            // Normal ghost agents
-	logcats  map[string]map[string]*ConnServer // logcat clients
-	wsctxs   map[string]*WebSocketContext      // (cid, WebSocketContext) mapping
-	ioserver *socketio.Server
+	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
+	noAuth           bool                              // Disable HTTP basic authentication
+	TLSSettings      string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
+	agents           map[string]*ConnServer            // Normal ghost agents
+	logcats          map[string]map[string]*ConnServer // logcat clients
+	wsctxs           map[string]*WebSocketContext      // (cid, WebSocketContext) mapping
+	ioserver         *socketio.Server
 }
 
-func NewOverlord() *Overlord {
+func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Overlord {
 	return &Overlord{
-		agents:  make(map[string]*ConnServer),
-		logcats: make(map[string]map[string]*ConnServer),
-		wsctxs:  make(map[string]*WebSocketContext),
+		lanDiscInterface: lanDiscInterface,
+		noAuth:           noAuth,
+		TLSSettings:      TLSSettings,
+		agents:           make(map[string]*ConnServer),
+		logcats:          make(map[string]map[string]*ConnServer),
+		wsctxs:           make(map[string]*WebSocketContext),
 	}
 }
 
@@ -258,7 +264,7 @@ func AuthPassThrough(h http.Handler) http.Handler {
 }
 
 // Web server main routine.
-func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
+func (self *Overlord) ServHTTP(addr string) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  BUFSIZ,
 		WriteBufferSize: BUFSIZ,
@@ -436,7 +442,8 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 	appDir := self.GetAppDir()
 
 	// HTTP basic auth
-	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"), noAuth)
+	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
+		self.noAuth)
 
 	// Initialize socket IO server
 	self.InitSocketIOServer()
@@ -476,10 +483,10 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 			auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
-	if enableTLS != "" {
-		parts := strings.Split(enableTLS, ",")
+	if self.TLSSettings != "" {
+		parts := strings.Split(self.TLSSettings, ",")
 		if len(parts) != 2 {
-			log.Fatalf("TLS: invalid key assignment")
+			log.Fatalf("TLSSettings: invalid key assignment")
 		}
 		err = http.ListenAndServeTLS(WEBSERVER_ADDR, parts[0], parts[1], nil)
 	} else {
@@ -493,7 +500,52 @@ func (self *Overlord) ServHTTP(addr string, noAuth bool, enableTLS string) {
 
 // Broadcast LAN discovery message.
 func (self *Overlord) StartUDPBroadcast(port int) {
-	conn, err := net.Dial("udp", fmt.Sprintf("%s:%d", net.IPv4bcast, port))
+	ifaceIP := ""
+	bcastIP := net.IPv4bcast.String()
+
+	if self.lanDiscInterface != "" {
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			panic(err)
+		}
+
+	outter:
+		for _, iface := range interfaces {
+			if iface.Name == self.lanDiscInterface {
+				addrs, err := iface.Addrs()
+				if err != nil {
+					panic(err)
+				}
+				for _, addr := range addrs {
+					ip, ipnet, err := net.ParseCIDR(addr.String())
+					if err != nil {
+						continue
+					}
+					// Calculate broadcast IP
+					ip4 := ip.To4()
+
+					// We only care about IPv4 address
+					if ip4 == nil {
+						continue
+					}
+					bcastIPraw := make(net.IP, 4)
+					for i := 0; i < 4; i++ {
+						bcastIPraw[i] = ip4[i] | ^ipnet.Mask[i]
+					}
+					ifaceIP = ip.String()
+					bcastIP = bcastIPraw.String()
+					break outter
+				}
+			}
+		}
+
+		if ifaceIP == "" {
+			log.Fatalf("can not found any interface with name %s\n",
+				self.lanDiscInterface)
+		}
+	}
+
+	conn, err := net.Dial("udp", fmt.Sprintf("%s:%d", bcastIP, port))
 	if err != nil {
 		panic(err)
 	}
@@ -503,14 +555,14 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 	for {
 		select {
 		case <-ticker.C:
-			conn.Write([]byte(fmt.Sprintf("OVERLORD :%d", OVERLORD_PORT)))
+			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, OVERLORD_PORT)))
 		}
 	}
 }
 
-func (self *Overlord) Serv(noAuth bool, enableTLS string) {
+func (self *Overlord) Serv() {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR, noAuth, enableTLS)
+	go self.ServHTTP(WEBSERVER_ADDR)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -524,7 +576,7 @@ func (self *Overlord) Serv(noAuth bool, enableTLS string) {
 	}
 }
 
-func StartOverlord(noAuth bool, enableTLS string) {
-	ovl := NewOverlord()
-	ovl.Serv(noAuth, enableTLS)
+func StartOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) {
+	ovl := NewOverlord(lanDiscInterface, noAuth, TLSSettings)
+	ovl.Serv()
 }
