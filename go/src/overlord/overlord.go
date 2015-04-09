@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	SYSTEM_APP_DIR    = "/usr/share/overlord"
+	SYSTEM_APP_DIR    = "../share/overlord"
 	WEBSERVER_ADDR    = "localhost:9000"
 	LD_INTERVAL       = 5
 	KEEP_ALIVE_PERIOD = 1
@@ -225,16 +225,24 @@ func (self *Overlord) InitSocketIOServer() {
 }
 
 func (self *Overlord) GetAppDir() string {
-	wd, err := os.Getwd()
+	execPath, err := GetExecutablePath()
 	if err != nil {
-		panic(err)
+		log.Fatalf(err.Error())
+	}
+	execDir := filepath.Dir(execPath)
+
+	appDir, err := filepath.Abs(filepath.Join(execDir, "app"))
+	if err != nil {
+		log.Fatalf(err.Error())
 	}
 
-	appDir := filepath.Join(wd, filepath.Dir(os.Args[0]), "app")
-	if _, err := os.Stat(appDir); os.IsNotExist(err) {
-		// Try system install direcotry
-		appDir = filepath.Join(SYSTEM_APP_DIR, "app")
-		if _, err := os.Stat(appDir); os.IsNotExist(err) {
+	if _, err := os.Stat(appDir); err != nil {
+		// Try system install directory
+		appDir, err = filepath.Abs(filepath.Join(execDir, SYSTEM_APP_DIR, "app"))
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+		if _, err := os.Stat(appDir); err != nil {
 			log.Fatalf("Can not find app directory\n")
 		}
 	}

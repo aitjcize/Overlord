@@ -18,7 +18,7 @@ deps:
 overlordd: deps
 	GOPATH=$(GOPATH) $(GO) install $(OVERLORD)/cmd/$@
 	rm -rf $(FACTORY)/go/bin/app
-	ln -s $(PWD)/app $(FACTORY)/go/bin
+	ln -s $(CURDIR)/app $(FACTORY)/go/bin
 
 ghost: deps
 	GOPATH=$(GOPATH) $(GO) install $(OVERLORD)/cmd/$@

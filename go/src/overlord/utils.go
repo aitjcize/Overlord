@@ -93,3 +93,8 @@ func GetMachineID() (string, error) {
 func ToVTNewLine(text string) string {
 	return strings.Replace(text, "\n", "\r\n", -1)
 }
+
+func GetExecutablePath() (string, error) {
+	path, err := os.Readlink("/proc/self/exe")
+	return path, err
+}
