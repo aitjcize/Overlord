@@ -481,7 +481,6 @@ func (self *Ghost) Start(noLanDisc bool) {
 	log.Printf("%s started\n", ModeStr(self.mode))
 	log.Printf("MID: %s\n", self.mid)
 	log.Printf("CID: %s\n", self.cid)
-	// Only control channel should perform LAN discovery
 
 	if !noLanDisc {
 		go self.StartLanDiscovery()

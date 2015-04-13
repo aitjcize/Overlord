@@ -50,7 +50,8 @@ class TestOverlord(unittest.TestCase):
 
     # Launch python implementation of ghost
     self.pyghost = subprocess.Popen(['%s/py/tools/ghost.py' % factorydir,
-                                     '--rand-mid --no-lan-disc'], env=env)
+                                     '--rand-mid', '--no-lan-disc',
+                                     '--no-rpc-server'], env=env)
     time.sleep(1)
 
   def tearDown(self):
