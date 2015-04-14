@@ -25,7 +25,7 @@ import (
 
 const (
 	SYSTEM_APP_DIR    = "../share/overlord"
-	WEBSERVER_ADDR    = "localhost:9000"
+	WEBSERVER_ADDR    = "0.0.0.0:9000"
 	LD_INTERVAL       = 5
 	KEEP_ALIVE_PERIOD = 1
 )
