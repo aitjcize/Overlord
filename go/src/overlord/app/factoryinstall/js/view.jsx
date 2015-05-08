@@ -9,18 +9,17 @@
 //  - ClientInfo
 //    - TerminalWindow
 
-window.locked = false;
 
 var App = React.createClass({
   loadClientsFromServer: function () {
-    if (window.locked) {
-      return
+    if (this.state.locked) {
+      return;
     }
     $.ajax({
       url: this.props.url,
       dataType: "json",
       success: function (data) {
-        if (!window.locked) {
+        if (!this.state.locked) {
           this.state.clients = data;
           this.forceUpdate();
         }
@@ -36,7 +35,7 @@ var App = React.createClass({
         index = target_list[i].cids.indexOf(obj.cid);
         if (index != -1) {
           target_list[i].cids.splice(index, 1);
-          if (!window.locked) {
+          if (!this.state.locked) {
             if (target_list[i].cids.length == 0) {
               target_list.splice(i, 1);
             }
@@ -47,7 +46,18 @@ var App = React.createClass({
     }
   },
   onLockClicked: function (e) {
-    window.locked = $(e.target).attr('aria-pressed') == "true";
+    this.state.locked = $(e.target).attr('aria-pressed') == "true";
+    this.forceUpdate();
+  },
+  onTimeoutClicked: function (e) {
+    $('#timeout-dialog').modal();
+  },
+  getTimeout: function (e) {
+    return this.state.boot_timeout_secs;
+  },
+  onTimeoutDialogSaveClicked: function (e) {
+    this.state.boot_timeout_secs = Math.max(1, $('#boot_timeout_secs').val());
+    this.forceUpdate();
   },
   onLayoutClicked: function (e) {
     $('#layout-dialog').modal();
@@ -67,7 +77,7 @@ var App = React.createClass({
     st.insertRule(".client-info { width: " + width + " !important }", 0);
   },
   getInitialState: function () {
-    return {clients: []};
+    return {clients: [], locked: false, boot_timeout_secs: 40};
   },
   componentDidMount: function () {
     this.onLayoutDialogSaveClicked();
@@ -96,7 +106,7 @@ var App = React.createClass({
         return
       }
 
-      if (!window.locked) {
+      if (!$this.state.locked) {
         $this.state.clients.push({mid: obj.mid, cids: [obj.cid]});
       }
       $this.forceUpdate();
@@ -104,7 +114,7 @@ var App = React.createClass({
     socket.on("logcat left", function (msg) {
       var obj = JSON.parse(msg);
 
-      if (window.locked) {
+      if ($this.state.locked) {
         $this.refs["client-" + obj.mid].updateStatus("disconnected");
       }
       $this.removeClientFromList($this.state.clients, obj);
@@ -122,6 +132,8 @@ var App = React.createClass({
             <div className="ctrl-btn-group">
               <button type="button" className="ctrl-btn btn btn-info"
                 onClick={this.onLayoutClicked}>Layout</button>
+              <button type="button" className="ctrl-btn btn btn-info"
+                onClick={this.onTimeoutClicked}>Timeout</button>
               <button type="button" className="ctrl-btn btn btn-primary"
                 data-toggle="button" onClick={this.onLockClicked}>Lock</button>
             </div>
@@ -130,12 +142,33 @@ var App = React.createClass({
           {
             this.state.clients.map(function (item) {
               return (
-                <ClientInfo key={item.mid} ref={"client-" + item.mid} data={item} root={$this}>
+                <ClientInfo key={item.mid} ref={"client-" + item.mid} data={item} root={$this} getTimeout={$this.getTimeout}>
                   {item.mid}
                 </ClientInfo>
               );
             })
           }
+          </div>
+        </div>
+
+        <div id="timeout-dialog" className="modal fade">
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <button type="button" className="close" data-dismiss="modal" aria-label="Close">
+                <span aria-hidden="true">&times;</span></button>
+                <h4 className="modal-title">Timeout Settings</h4>
+              </div>
+              <div className="modal-body">
+                Timeout seconds of the boot up:
+                <input id="boot_timeout_secs" type="number" className="form-control" defaultValue={this.state.boot_timeout_secs} min="1"></input>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-default" data-dismiss="modal">Close</button>
+                <button type="button" className="btn btn-primary" data-dismiss="modal"
+                    onClick={this.onTimeoutDialogSaveClicked}>Save changes</button>
+              </div>
+            </div>
           </div>
         </div>
         <div id="layout-dialog" className="modal fade">
@@ -173,9 +206,22 @@ var ClientInfo = React.createClass({
   updateStatus: function (status) {
     this.setState({status: status});
   },
-  onClick: function (e) {
+  onTagClick: function (e) {
     var cid = $(e.target).data('cid');
     $(this.refs["term-" + cid].getDOMNode()).css('display', 'block');
+  },
+  onPanelClick: function (e) {
+    // Workaround: crosbug.com/p/39839#11
+    // It take too long from DUT power up to enter kernel. The operator clicks the panel after
+    // power up the DUT, and shows error if the overlord doesn't connect the DUT in {boot_timeout_secs}.
+    if (this.state.status == "disconnected" || this.state.status == "no-connection") {
+      this.updateStatus("wait-connection");
+      setTimeout(function () {
+        if (this.state.status == "wait-connection") {
+          this.updateStatus("no-connection");
+        }
+      }.bind(this), this.props.getTimeout() * 1000);
+    }
   },
   render: function () {
     var statusClass = "panel-warning";
@@ -185,11 +231,25 @@ var ClientInfo = React.createClass({
       statusClass = "panel-danger";
     } else if (this.state.status == "disconnected") {
       statusClass = "panel-default";
+    } else if (this.state.status == "wait-connection") {
+      statusClass = "panel-warning";
+    } else if (this.state.status == "no-connection") {
+      statusClass = "panel-danger";
     }
+
+    var message = "";
+    if (this.state.status == "disconnected") {
+      message = "Click after power up";
+    } else if (this.state.status == "wait-connection") {
+      message = "Waiting for connection";
+    } else if (this.state.status == "no-connection") {
+      message = "Failed. Power-cycle DUT and click again.";
+    }
+
     var $this = this;
     var mid = this.props.data.mid;
     return (
-      <div className={"client-info panel " + statusClass}>
+      <div className={"client-info panel " + statusClass} onClick={$this.onPanelClick}>
         <div className="panel-heading">{this.props.children}</div>
         <div className="panel-body">
         {
@@ -198,7 +258,7 @@ var ClientInfo = React.createClass({
             return (
                 <div className="client-info-tag">
                   <span className="label label-warning client-info-terminal"
-                      data-cid={cid} onClick={$this.onClick}>
+                      data-cid={cid} onClick={$this.onTagClick}>
                     {cid}
                   </span>
                   <TerminalWindow key={cid} data={data}
@@ -207,6 +267,7 @@ var ClientInfo = React.createClass({
             );
           })
         }
+        {message}
         </div>
       </div>
     );
@@ -248,9 +309,6 @@ var TerminalWindow = React.createClass({
       },
       cancel: ".terminal"
     });
-    sock.onclose = function (e) {
-      $this.props.updateStatus("disconnected");
-    }
     sock.onopen = function (e) {
       var term = new Terminal({
         cols: 80,
