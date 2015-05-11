@@ -73,6 +73,7 @@ func (self *ConnServer) Terminate() {
 		self.Conn.Close()
 	}
 	if self.wsConn != nil {
+		self.wsConn.WriteMessage(websocket.CloseMessage, []byte(""))
 		self.wsConn.Close()
 	}
 }
