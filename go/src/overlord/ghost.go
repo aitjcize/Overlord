@@ -30,6 +30,7 @@ const (
 	PING_TIMEOUT   = 10
 	RETRY_INTERVAL = 2
 	READ_TIMEOUT   = 3
+	RANDOM_MID     = "##random_mid##"
 )
 
 type Ghost struct {
@@ -48,14 +49,16 @@ type Ghost struct {
 	shellCommand  string                 // filename to cat in logcat mode
 }
 
-func NewGhost(addrs []string, mode int, randMid bool) *Ghost {
-	var mid string
+func NewGhost(addrs []string, mode int, mid string) *Ghost {
+	var finalMid string
 	var err error
 
-	if randMid {
-		mid = uuid.NewV4().String()
+	if mid == RANDOM_MID {
+		finalMid = uuid.NewV4().String()
+	} else if mid != "" {
+		finalMid = mid
 	} else {
-		mid, err = GetMachineID()
+		finalMid, err = GetMachineID()
 		if err != nil {
 			panic(err)
 		}
@@ -63,7 +66,7 @@ func NewGhost(addrs []string, mode int, randMid bool) *Ghost {
 	return &Ghost{
 		RPCCore:      NewRPCCore(nil),
 		addrs:        addrs,
-		mid:          mid,
+		mid:          finalMid,
 		cid:          uuid.NewV4().String(),
 		mode:         mode,
 		properties:   make(map[string]interface{}),
@@ -118,7 +121,9 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 	go func() {
 		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, TERMINAL, true).SetCid(params.Sid)
+		// Terminal sessions are identified with session ID, thus we don't care
+		// machine ID and can make them random.
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetCid(params.Sid)
 		g.Start(true)
 	}()
 
@@ -140,7 +145,9 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 	go func() {
 		log.Printf("Received shell command: %s, shell %s spawned\n", params.Cmd, params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, SHELL, true).SetCid(params.Sid).SetCommand(params.Cmd)
+		// Shell sessions are identified with session ID, thus we don't care
+		// machine ID and can make them random.
+		g := NewGhost(addrs, SHELL, RANDOM_MID).SetCid(params.Sid).SetCommand(params.Cmd)
 		g.Start(true)
 	}()
 
@@ -501,7 +508,7 @@ func (self *Ghost) Start(noLanDisc bool) {
 	}
 }
 
-func StartGhost(args []string, randMid, noLanDisc bool, propFile string) {
+func StartGhost(args []string, mid string, noLanDisc bool, propFile string) {
 	var addrs []string
 
 	if len(args) >= 1 {
@@ -509,7 +516,7 @@ func StartGhost(args []string, randMid, noLanDisc bool, propFile string) {
 	}
 	addrs = append(addrs, fmt.Sprintf("%s:%d", OVERLORD_IP, OVERLORD_PORT))
 
-	g := NewGhost(addrs, AGENT, randMid)
+	g := NewGhost(addrs, AGENT, mid)
 	if propFile != "" {
 		g.LoadPropertiesFromFile(propFile)
 	}

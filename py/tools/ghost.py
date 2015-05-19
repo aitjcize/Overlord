@@ -65,14 +65,17 @@ class Ghost(object):
       LOGCAT: 'Logcat'
       }
 
-  def __init__(self, overlord_addrs, mode=AGENT, rand_mid=False, sid=None,
+  RANDOM_MID = '##random_mid##'
+
+  def __init__(self, overlord_addrs, mode=AGENT, mid=None, sid=None,
                command=None):
     """Constructor.
 
     Args:
       overlord_addrs: a list of possible address of overlord.
       mode: client mode, either AGENT, SHELL or LOGCAT
-      rand_mid: whether to use random machine ID or not
+      mid: a str to set for machine ID. If mid equals Ghost.RANDOM_MID, machine
+        id is randomly generated.
       sid: session id. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
       shell: the command to execute when we are in SHELL mode.
@@ -84,7 +87,7 @@ class Ghost(object):
     self._overlord_addrs = overlord_addrs
     self._connected_addr = None
     self._mode = mode
-    self._rand_mid = rand_mid
+    self._mid = mid
     self._sock = None
     self._machine_id = self.GetMachineID()
     self._client_id = sid if sid is not None else str(uuid.uuid4())
@@ -111,7 +114,7 @@ class Ghost(object):
     """
     pid = os.fork()
     if pid == 0:
-      g = Ghost([self._connected_addr], mode, True, sid, command)
+      g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid, command)
       g.Start()
       sys.exit(0)
     else:
@@ -147,8 +150,10 @@ class Ghost(object):
     We follow the listed order to generate machine ID, and fallback to the next
     alternative if the previous doesn't work.
     """
-    if self._rand_mid:
+    if self._mid == Ghost.RANDOM_MID:
       return str(uuid.uuid4())
+    elif self._mid:
+      return self._mid
 
     try:
       p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
@@ -504,8 +509,10 @@ def main():
   logger.setLevel(logging.INFO)
 
   parser = argparse.ArgumentParser()
-  parser.add_argument('--rand-mid', dest='rand_mid', action='store_true',
-                      default=False, help='use random machine ID')
+  parser.add_argument('--mid', metavar='MID', dest='mid', action='store',
+                      default=None, help='use MID as machine ID')
+  parser.add_argument('--rand-mid', dest='mid', action='store_const',
+                      const=Ghost.RANDOM_MID, help='use random machine ID')
   parser.add_argument('--no-lan-disc', dest='lan_disc', action='store_false',
                       default=True, help='disable LAN discovery')
   parser.add_argument('--no-rpc-server', dest='rpc_server',
@@ -521,7 +528,7 @@ def main():
   addrs = [('localhost', _OVERLORD_PORT)]
   addrs += [(x, _OVERLORD_PORT) for x in args.overlord_ip]
 
-  g = Ghost(addrs, Ghost.AGENT, args.rand_mid)
+  g = Ghost(addrs, Ghost.AGENT, args.mid)
   if args.prop_file:
     g.LoadPropertiesFromFile(args.prop_file)
   g.Start(args.lan_disc, args.rpc_server)
