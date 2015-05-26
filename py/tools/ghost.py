@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import Queue
+import re
 import select
 import socket
 import subprocess
@@ -140,6 +141,19 @@ class Ghost(object):
         pass
 
     return ips
+
+  def GetShopfloorIP(self):
+    try:
+      import factory_common  # pylint: disable=W0612
+      from cros.factory.test import shopfloor
+
+      url = shopfloor.get_server_url()
+      match = re.match(r'^https?://(.*):.*$', url)
+      if match:
+        return [match.group(1)]
+    except Exception:
+      pass
+    return []
 
   def GetMachineID(self):
     """Generates machine-dependent ID string for a machine.
@@ -460,10 +474,11 @@ class Ghost(object):
     t.daemon = True
     t.start()
 
-  def ScanGateway(self):
-    for addr in [(x, _OVERLORD_PORT) for x in self.GetGateWayIP()]:
-      if addr not in self._overlord_addrs:
-        self._overlord_addrs.append(addr)
+  def ScanServer(self):
+    for meth in [self.GetGateWayIP, self.GetShopfloorIP]:
+      for addr in [(x, _OVERLORD_PORT) for x in meth()]:
+        if addr not in self._overlord_addrs:
+          self._overlord_addrs.append(addr)
 
   def Start(self, lan_disc=False, rpc_server=False):
     logging.info('%s started', self.MODE_NAME[self._mode])
@@ -488,7 +503,7 @@ class Ghost(object):
             self._overlord_addrs.append(addr)
 
         try:
-          self.ScanGateway()
+          self.ScanServer()
           self.Register()
         except Exception as e:
           logging.info(str(e) + ', retrying in %ds' % _RETRY_INTERVAL)
