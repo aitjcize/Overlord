@@ -29,6 +29,7 @@ type Message interface {
 
 // Request Object.
 // Implements the Message interface.
+// If Timeout < 0, then the response can be omitted.
 type Request struct {
 	Rid     string          `json:"rid"`
 	Timeout int64           `json:"timeout"`
@@ -131,9 +132,9 @@ func (self *RPCCore) SendMessage(msg Message) error {
 }
 
 func (self *RPCCore) SendRequest(req *Request, handler ResponseHandler) error {
-	res := Responder{time.Now().Unix(), req.Timeout, handler}
 	err := self.SendMessage(req)
-	if err == nil {
+	if err == nil && req.Timeout >= 0 {
+		res := Responder{time.Now().Unix(), req.Timeout, handler}
 		self.responders[req.Rid] = res
 	}
 	return err
@@ -263,6 +264,8 @@ func (self *RPCCore) ScanForTimeoutRequests() error {
 					delete(self.responders, rid)
 					return err
 				}
+			} else {
+				log.Printf("Request %s timeout\n", rid)
 			}
 			delete(self.responders, rid)
 		}

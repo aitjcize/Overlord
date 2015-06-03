@@ -20,6 +20,7 @@ const (
 	TERMINAL
 	SHELL
 	LOGCAT
+	FILE
 )
 
 // Logcat format
@@ -34,9 +35,9 @@ const (
 )
 
 const (
-	CONTROL_NONE   = 255 // Control State None
-	CONTROL_START  = 128 // Control Start Code
-	CONTROL_END    = 129 // Control End Code
+	CONTROL_NONE  = 255 // Control State None
+	CONTROL_START = 128 // Control Start Code
+	CONTROL_END   = 129 // Control End Code
 )
 
 func ModeStr(mode int) string {
@@ -46,5 +47,6 @@ func ModeStr(mode int) string {
 		TERMINAL: "Terminal",
 		SHELL:    "Shell",
 		LOGCAT:   "Logcat",
+		FILE:     "File",
 	}[mode]
 }

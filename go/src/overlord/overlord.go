@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,7 +32,8 @@ const (
 )
 
 type SpawnTerminalCmd struct {
-	Sid string
+	Sid string // Session ID
+	Bid string // Browser ID
 }
 
 type SpawnShellCmd struct {
@@ -39,6 +41,11 @@ type SpawnShellCmd struct {
 	Command string
 }
 
+type SpawnFileCmd struct {
+	Sid      string
+	Action   string
+	Filename string
+}
 type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
 }
@@ -67,7 +74,8 @@ type Overlord struct {
 	TLSSettings      string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
 	agents           map[string]*ConnServer            // Normal ghost agents
 	logcats          map[string]map[string]*ConnServer // logcat clients
-	wsctxs           map[string]*WebSocketContext      // (cid, WebSocketContext) mapping
+	wsctxs           map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
+	downloads        map[string]*ConnServer            // Download file agents
 	ioserver         *socketio.Server
 }
 
@@ -79,6 +87,7 @@ func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Over
 		agents:           make(map[string]*ConnServer),
 		logcats:          make(map[string]map[string]*ConnServer),
 		wsctxs:           make(map[string]*WebSocketContext),
+		downloads:        make(map[string]*ConnServer),
 	}
 }
 
@@ -118,6 +127,9 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		}
 		self.logcats[conn.Mid][conn.Cid] = conn
 		self.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
+	case FILE:
+		// Do nothing, we wait until 'request_to_download' call from client to
+		// send the message to the browser
 	default:
 		return nil, errors.New("Register: Unknown client mode")
 	}
@@ -157,6 +169,10 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 				delete(self.logcats, conn.Mid)
 			}
 		}
+	case FILE:
+		if _, ok := self.downloads[conn.Cid]; ok {
+			delete(self.downloads, conn.Cid)
+		}
 	default:
 		if _, ok := self.wsctxs[conn.Cid]; ok {
 			delete(self.wsctxs, conn.Cid)
@@ -174,6 +190,14 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 
 func (self *Overlord) AddWebsocketContext(wc *WebSocketContext) {
 	self.wsctxs[wc.Sid] = wc
+}
+
+// Register a download request clients.
+func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
+	// Use client ID as download session ID instead of machine ID, so a machine
+	// can have multiple download at the same time
+	self.ioserver.BroadcastTo(conn.Bid, "file download", string(conn.Cid))
+	self.downloads[conn.Cid] = conn
 }
 
 // Handle TCP Connection.
@@ -214,6 +238,11 @@ func (self *Overlord) InitSocketIOServer() {
 	}
 
 	server.On("connection", func(so socketio.Socket) {
+		r := so.Request()
+		bid, err := r.Cookie("browser_id")
+		if err == nil {
+			so.Join(bid.Value)
+		}
 		so.Join("monitor")
 	})
 
@@ -281,12 +310,27 @@ func (self *Overlord) ServHTTP(addr string) {
 		},
 	}
 
+	appDir := self.GetAppDir()
+
 	// Helper function for writing error message to WebSocket
 	WebSocketSendError := func(ws *websocket.Conn, err string) {
 		log.Println(err)
 		msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
 		ws.WriteMessage(websocket.CloseMessage, msg)
 		ws.Close()
+	}
+
+	IndexHandler := func(w http.ResponseWriter, r *http.Request) {
+		handler := http.FileServer(http.Dir(filepath.Join(appDir, "dashboard")))
+		cookie, err := r.Cookie("browser_id")
+		if err != nil {
+			cookie = &http.Cookie{
+				Name:  "browser_id",
+				Value: uuid.NewV4().String(),
+			}
+			http.SetCookie(w, cookie)
+		}
+		handler.ServeHTTP(w, r)
 	}
 
 	// List all apps available on Overlord.
@@ -352,56 +396,6 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 	}
 
-	// PTY stream request handler.
-	// We first create a WebSocketContext to store the connection, then send a
-	// command to Overlord to client to spawn a terminal connection.
-	PtyHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Terminal request from %s\n", r.RemoteAddr)
-
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-		if agent, ok := self.agents[mid]; ok {
-			wc := NewWebsocketContext(conn)
-			self.AddWebsocketContext(wc)
-			agent.Bridge <- SpawnTerminalCmd{wc.Sid}
-		} else {
-			WebSocketSendError(conn, "No client with mid "+mid)
-		}
-	}
-
-	// Shell command request handler.
-	// We first create a WebSocketContext to store the connection, then send a
-	// command to ConnServer to client to spawn a shell connection.
-	ShellHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Shell request from %s\n", r.RemoteAddr)
-
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-		if agent, ok := self.agents[mid]; ok {
-			if command, ok := r.URL.Query()["command"]; ok {
-				wc := NewWebsocketContext(conn)
-				self.AddWebsocketContext(wc)
-				agent.Bridge <- SpawnShellCmd{wc.Sid, command[0]}
-			} else {
-				WebSocketSendError(conn, "No command specified for shell request "+mid)
-			}
-		} else {
-			WebSocketSendError(conn, "No client with mid "+mid)
-		}
-	}
-
 	// Logcat request handler.
 	// We directly send the WebSocket connection to ConnServer for forwarding
 	// the log stream.
@@ -429,7 +423,63 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 	}
 
-	// Get agent properties as JSON
+	// PTY stream request handler.
+	// We first create a WebSocketContext to store the connection, then send a
+	// command to Overlord to client to spawn a terminal connection.
+	AgentPtyHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Terminal request from %s\n", r.RemoteAddr)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		cookie, err := r.Cookie("browser_id")
+		if err != nil {
+			WebSocketSendError(conn, "No browser ID associated")
+			return
+		}
+		bid := cookie.Value
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		if agent, ok := self.agents[mid]; ok {
+			wc := NewWebsocketContext(conn)
+			self.AddWebsocketContext(wc)
+			agent.Bridge <- SpawnTerminalCmd{wc.Sid, bid}
+		} else {
+			WebSocketSendError(conn, "No client with mid "+mid)
+		}
+	}
+
+	// Shell command request handler.
+	// We first create a WebSocketContext to store the connection, then send a
+	// command to ConnServer to client to spawn a shell connection.
+	AgentShellHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Shell request from %s\n", r.RemoteAddr)
+
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		if agent, ok := self.agents[mid]; ok {
+			if command, ok := r.URL.Query()["command"]; ok {
+				wc := NewWebsocketContext(conn)
+				self.AddWebsocketContext(wc)
+				agent.Bridge <- SpawnShellCmd{wc.Sid, command[0]}
+			} else {
+				WebSocketSendError(conn, "No command specified for shell request "+mid)
+			}
+		} else {
+			WebSocketSendError(conn, "No client with mid "+mid)
+		}
+	}
+
+	// Get agent properties as JSON.
 	AgentPropertiesHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -447,7 +497,89 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 	}
 
-	appDir := self.GetAppDir()
+	// Helper function for serving file and write it into response body.
+	serveFileHTTP := func(w http.ResponseWriter, c *ConnServer) {
+		defer func() {
+			if c != nil {
+				c.StopListen()
+			}
+		}()
+		c.SendClearToDownload()
+
+		dispose := fmt.Sprintf("attachment; filename=\"%s\"", c.Download.Name)
+		w.Header().Set("Content-Disposition", dispose)
+		w.Header().Set("Content-Length", strconv.FormatInt(c.Download.Size, 10))
+
+		for {
+			data := <-c.Download.Data
+			if len(data) == 0 {
+				return
+			}
+			if _, err := w.Write([]byte(data)); err != nil {
+				break
+			}
+		}
+	}
+
+	// File download request handler.
+	// Handler for file download request, the filename target machine is
+	// specified in the request URL.
+	AgentDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		var agent *ConnServer
+		var ok bool
+
+		if agent, ok = self.agents[mid]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		var filename []string
+		if filename, ok = r.URL.Query()["filename"]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+
+		sid := uuid.NewV4().String()
+		agent.Bridge <- SpawnFileCmd{sid, "download", filename[0]}
+
+		var c *ConnServer
+		const maxTries = 100 // 20 seconds
+		count := 0
+
+		// Wait until download client connects
+		for {
+			if count++; count == maxTries {
+				http.NotFound(w, r)
+				return
+			}
+			if c, ok = self.downloads[sid]; ok {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		serveFileHTTP(w, c)
+	}
+
+	// Pass file download request handler.
+	// This handler deal with requests that are initiated by the client. We
+	// simply check if the session id exists in the download client list, than
+	// start to download the file if it does.
+	FileDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		sid := vars["sid"]
+
+		var c *ConnServer
+		var ok bool
+
+		if c, ok = self.downloads[sid]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		serveFileHTTP(w, c)
+	}
 
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
@@ -467,14 +599,19 @@ func (self *Overlord) ServHTTP(addr string) {
 	r.HandleFunc("/api/log/{mid}/{cid}", LogcatHandler)
 
 	// Agent methods
-	r.HandleFunc("/api/agent/pty/{mid}", PtyHandler)
-	r.HandleFunc("/api/agent/shell/{mid}", ShellHandler)
+	r.HandleFunc("/api/agent/pty/{mid}", AgentPtyHandler)
+	r.HandleFunc("/api/agent/shell/{mid}", AgentShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
+	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 
-	http.Handle("/api/", auth.Wrap(r))
-	http.Handle("/api/socket.io/", auth.Wrap(self.ioserver))
-	http.Handle("/vendor/", auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, "common")))))
-	http.Handle("/", auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, "dashboard")))))
+	// File methods
+	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
+
+	http.Handle("/api/", auth.WrapHandler(r))
+	http.Handle("/api/socket.io/", auth.WrapHandler(self.ioserver))
+	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
+		http.Dir(filepath.Join(appDir, "common")))))
+	http.Handle("/", auth.WrapHandlerFunc(IndexHandler))
 
 	// Serve all apps
 	appNames, err := self.GetAppNames(false)
@@ -488,7 +625,7 @@ func (self *Overlord) ServHTTP(addr string) {
 		}
 		prefix := fmt.Sprintf("/%s/", app)
 		http.Handle(prefix, http.StripPrefix(prefix,
-			auth.Wrap(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
+			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
 	if self.TLSSettings != "" {

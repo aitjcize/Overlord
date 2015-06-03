@@ -21,8 +21,9 @@ const (
 )
 
 type BasicAuthDecorator struct {
-	auth    *BasicAuth
-	handler http.Handler
+	auth        *BasicAuth
+	handler     http.Handler
+	handlerFunc http.HandlerFunc
 }
 
 func (self BasicAuthDecorator) Unauthorized(w http.ResponseWriter, msg string) {
@@ -52,7 +53,11 @@ func (self BasicAuthDecorator) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	self.handler.ServeHTTP(w, r)
+	if self.handler != nil {
+		self.handler.ServeHTTP(w, r)
+	} else {
+		self.handlerFunc(w, r)
+	}
 }
 
 type BasicAuth struct {
@@ -88,11 +93,18 @@ func NewBasicAuth(realm, htpasswd string, disable bool) *BasicAuth {
 	return &BasicAuth{realm, secrets, disable}
 }
 
-func (self *BasicAuth) Wrap(h http.Handler) http.Handler {
+func (self *BasicAuth) WrapHandler(h http.Handler) http.Handler {
 	if self.disable {
 		return h
 	}
-	return BasicAuthDecorator{self, h}
+	return BasicAuthDecorator{self, h, nil}
+}
+
+func (self *BasicAuth) WrapHandlerFunc(h http.HandlerFunc) http.Handler {
+	if self.disable {
+		return h
+	}
+	return BasicAuthDecorator{self, nil, h}
 }
 
 func (self *BasicAuth) Authenticate(user, passwd string) (bool, error) {

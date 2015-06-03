@@ -85,6 +85,7 @@ var App = React.createClass({
 
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
+
     socket.on("agent joined", function (msg) {
       var obj = JSON.parse(msg)
       this.state.recentclients.splice(0, 0, obj);
@@ -100,6 +101,14 @@ var App = React.createClass({
       this.removeClientFromList(this.state.terminals, obj);
       this.forceUpdate();
     }.bind(this));
+
+    // Initiate a file download
+    socket.on("file download", function (sid) {
+      var url = window.location.protocol + "//" + window.location.host +
+                "/api/file/download/" + sid;
+      $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
+        "</iframe>").appendTo('body');
+    });
   },
   render: function () {
     return (

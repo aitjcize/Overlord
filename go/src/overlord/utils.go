@@ -5,6 +5,7 @@
 package overlord
 
 import (
+	"C"
 	"bufio"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,7 +13,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
 func B64Encode(buffer string) []byte {
@@ -97,4 +101,20 @@ func ToVTNewLine(text string) string {
 func GetExecutablePath() (string, error) {
 	path, err := os.Readlink("/proc/self/exe")
 	return path, err
+}
+
+// Return the PtsName for a given tty master file descriptor.
+func PtsName(f *os.File) (string, error) {
+	var n C.uint
+	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCGPTN,
+		uintptr(unsafe.Pointer(&n)))
+	if err != 0 {
+		return "", err
+	}
+	return "/dev/pts/" + strconv.Itoa(int(n)), nil
+}
+
+// Return the TTY name of a given file descriptor.
+func TtyName(f *os.File) (string, error) {
+	return os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), f.Fd()))
 }
