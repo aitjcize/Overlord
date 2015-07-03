@@ -159,8 +159,9 @@ class Ghost(object):
     """Generates machine-dependent ID string for a machine.
     There are many ways to generate a machine ID:
     1. factory device-data
-    2. /sys/class/dmi/id/product_uuid (only available on intel machines)
-    3. MAC address
+    2. factory device_id
+    3. /sys/class/dmi/id/product_uuid (only available on intel machines)
+    4. MAC address
     We follow the listed order to generate machine ID, and fallback to the next
     alternative if the previous doesn't work.
     """
@@ -169,23 +170,35 @@ class Ghost(object):
     elif self._mid:
       return self._mid
 
+    # Try factory device data
     try:
       p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
                            'cut -d " " -f 2', stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, shell=True)
       stdout, _ = p.communicate()
       if stdout == '':
-        raise RuntimeError("empty mlb number")
+        raise RuntimeError('empty mlb number')
       return stdout.strip()
     except Exception:
       pass
 
+    # Try factory device id
+    try:
+      import factory_common  # pylint: disable=W0612
+      from cros.factory.test import event_log
+      with open(event_log.DEVICE_ID_PATH) as f:
+        return f.read()
+    except Exception:
+      pass
+
+    # Try DMI product UUID
     try:
       with open('/sys/class/dmi/id/product_uuid', 'r') as f:
         return f.read().strip()
     except Exception:
       pass
 
+    # Use MAC address if non is available
     try:
       macs = []
       ifaces = sorted(os.listdir('/sys/class/net'))
