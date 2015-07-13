@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Terminal Window wiget
+// Terminal Window widget
 //
 // props:
 //   id: DOM id
@@ -32,7 +32,7 @@ var TerminalWindow = React.createClass({
       stop: function () {
         offsets = el.getBoundingClientRect();
         $el.css({
-          position: 'fixed',
+          position: "fixed",
           top: offsets.top+"px",
           left: offsets.left+"px"
         });
@@ -57,11 +57,11 @@ var TerminalWindow = React.createClass({
 
       term.open(el);
 
-      term.on('title', function (title) {
-        $el.find('.terminal-title').text(title);
+      term.on("title", function (title) {
+        $el.find(".terminal-title").text(title);
       });
 
-      term.on('data', function (data) {
+      term.on("data", function (data) {
         sock.send(data);
       });
 
@@ -86,6 +86,68 @@ var TerminalWindow = React.createClass({
       if (typeof(callback) != "undefined") {
         (callback.bind(this))(e);
       }
+
+      // Calculate terminal and terminal-window width/height relation.
+      // Used for resize procedure
+      // we will hide right and bottom border of teriminal.
+      // and add the same size to terminal-window for good looking and resize indicator
+      var $terminal = $el.find(".terminal");
+      var termBorderRightWidth = $terminal.css("border-right-width");
+      var termBorderBottomWidth = $terminal.css("border-bottom-width");
+      var termWidthOffset = $el.outerWidth() - term.element.clientWidth;
+      var termHeightOffset = $el.outerHeight() - term.element.clientHeight;
+      var totalWidthOffset = termWidthOffset + parseInt(termBorderRightWidth);
+      var totalHeightOffset = termHeightOffset + parseInt(termBorderBottomWidth);
+
+      // hide terminal right and bottom border
+      $terminal.css("border-right-width", "0px");
+      $terminal.css("border-bottom-width", "0px");
+
+      // initial terminal-window size
+      el.style.width = term.element.clientWidth + totalWidthOffset;
+      el.style.height = term.element.clientHeight + totalHeightOffset;
+
+      $el.resizable();
+      $el.bind("resize", function () {
+          // We use CONTROL_START and CONTROL_END to specify the control buffer region.
+          // Ghost can use the 2 characters to know the control string.
+          // format:
+          // CONTROL_START ControlString CONTROL_END
+          var CONTROL_START = 128;
+          var CONTROL_END = 129;
+
+          // If there is no terminal now, just return.
+          // It may happen when we close the window
+          if (term.element.clientWidth == 0 || term.element.clientHeight == 0) {
+              return;
+          }
+
+          // convert to cols/rows
+          var widthToColsFactor = term.cols / term.element.clientWidth;
+          var heightToRowsFactor = term.rows / term.element.clientHeight;
+          newTermWidth = parseInt(el.style.width) - totalWidthOffset;
+          newTermHeight = parseInt(el.style.height) - totalHeightOffset;
+          newCols = Math.floor(newTermWidth * widthToColsFactor);
+          newRows = Math.floor(newTermHeight * heightToRowsFactor);
+          if (newCols != term.cols || newRows != term.rows) {
+              var msg = {
+                  command: "resize",
+                  params: [newRows, newCols]
+              }
+              term.resize(newCols, newRows);
+              term.refresh(0, term.rows - 1);
+
+              // Fine tune terminal-window size to match terminal.
+              // Prevent white space between terminal-window and terminal.
+              el.style.width = term.element.clientWidth + totalWidthOffset;
+              el.style.height = term.element.clientHeight + totalHeightOffset;
+
+              // Send to ghost to set new size
+              sock.send((new Uint8Array([CONTROL_START])).buffer);
+              sock.send(JSON.stringify(msg));
+              sock.send((new Uint8Array([CONTROL_END])).buffer);
+          }
+      });
     }.bind(this);
   },
   onWindowMouseDown: function (e) {

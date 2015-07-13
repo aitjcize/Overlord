@@ -162,13 +162,13 @@ func (self *RPCCore) handleResponse(res *Response) error {
 // This function returns two channels. The first one is the channel that
 // send the content from the socket, and the second channel send an error
 // object if there is one.
-func (self *RPCCore) SpawnReaderRoutine() (chan string, chan error) {
-	readChan := make(chan string)
+func (self *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
+	readChan := make(chan []byte)
 	readErrChan := make(chan error, 1)
 
 	go func() {
-		buf := make([]byte, BUFSIZ)
 		for {
+			buf := make([]byte, BUFSIZ)
 			n, err := self.Conn.Read(buf)
 			if err != nil {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
@@ -177,7 +177,7 @@ func (self *RPCCore) SpawnReaderRoutine() (chan string, chan error) {
 				readErrChan <- err
 				return
 			}
-			readChan <- string(buf[:n])
+			readChan <- buf[:n]
 		}
 	}()
 

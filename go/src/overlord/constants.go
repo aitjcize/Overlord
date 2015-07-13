@@ -33,6 +33,12 @@ const (
 	FAILED  = "failed"
 )
 
+const (
+	CONTROL_NONE   = 255 // Control State None
+	CONTROL_START  = 128 // Control Start Code
+	CONTROL_END    = 129 // Control End Code
+)
+
 func ModeStr(mode int) string {
 	return map[int]string{
 		NONE:     "None",

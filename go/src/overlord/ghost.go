@@ -5,6 +5,7 @@
 package overlord
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,9 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 )
 
 const (
@@ -43,7 +46,7 @@ type Ghost struct {
 	properties    map[string]interface{} // Client properties
 	reset         bool                   // Whether to reset the connection
 	quit          bool                   // Whether to quit the connection
-	readChan      chan string            // The incoming data channel
+	readChan      chan []byte            // The incoming data channel
 	readErrChan   chan error             // The incoming data error channel
 	pauseLanDisc  bool                   // Stop LAN discovery
 	shellCommand  string                 // filename to cat in logcat mode
@@ -190,6 +193,43 @@ func (self *Ghost) Ping() error {
 	return self.SendRequest(req, pingHandler)
 }
 
+func (self *Ghost) HandlePTYControl(tty *os.File, control_string string) error {
+	// Terminal Command for ghost
+	// Implements the Message interface.
+	type TerminalCommand struct {
+		Command string          `json:"command"`
+		Params  json.RawMessage `json:"params"`
+	}
+
+	// winsize stores the Height and Width of a terminal.
+	type winsize struct {
+		height uint16
+		width  uint16
+	}
+
+	var control TerminalCommand
+	err := json.Unmarshal([]byte(control_string), &control)
+	if err != nil {
+		log.Println("mal-formed JSON request, ignored")
+		return nil
+	}
+
+	command := control.Command
+	if command == "resize" {
+		var params []int
+		err := json.Unmarshal([]byte(control.Params), &params)
+		if err != nil || len(params) != 2 {
+			log.Println("mal-formed JSON request, ignored")
+			return nil
+		}
+		ws := &winsize{width: uint16(params[1]), height: uint16(params[0])}
+		syscall.Syscall(syscall.SYS_IOCTL, tty.Fd(), uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
+	} else {
+		return errors.New("Invalid request command " + command)
+	}
+	return nil
+}
+
 // Spawn a PTY server and forward I/O to the TCP socket.
 func (self *Ghost) SpawnPTYServer(res *Response) error {
 	log.Println("SpawnPTYServer: started")
@@ -226,10 +266,45 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 		stopConn <- true
 	}()
 
+	var control_buffer bytes.Buffer
+	var write_buffer bytes.Buffer
+	control_state := CONTROL_NONE
+
 	for {
 		select {
 		case buffer := <-self.readChan:
-			tty.Write([]byte(buffer))
+			write_buffer.Reset()
+			for len(buffer) > 0 {
+				if control_state != CONTROL_NONE {
+					index := bytes.IndexByte(buffer, CONTROL_END)
+					if index != -1 {
+						control_buffer.Write(buffer[:index])
+						err := self.HandlePTYControl(tty, control_buffer.String())
+						control_state = CONTROL_NONE
+						control_buffer.Reset()
+						if err != nil {
+							return err
+						}
+						buffer = buffer[index+1:]
+					} else {
+						control_buffer.Write(buffer)
+						buffer = buffer[0:0]
+					}
+				} else {
+					index := bytes.IndexByte(buffer, CONTROL_START)
+					if index != -1 {
+						control_state = CONTROL_START
+						write_buffer.Write(buffer[:index])
+						buffer = buffer[index+1:]
+					} else {
+						write_buffer.Write(buffer)
+						buffer = buffer[0:0]
+					}
+				}
+			}
+			if write_buffer.Len() != 0 {
+				tty.Write(write_buffer.Bytes())
+			}
 		case err := <-self.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnPTYServer: connection dropped")
@@ -383,7 +458,7 @@ func (self *Ghost) Listen() error {
 	for {
 		select {
 		case buffer := <-readChan:
-			reqs := self.ParseRequests(buffer, false)
+			reqs := self.ParseRequests(string(buffer), false)
 			if self.quit {
 				return nil
 			}

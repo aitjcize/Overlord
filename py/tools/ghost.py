@@ -16,6 +16,8 @@ import select
 import socket
 import subprocess
 import sys
+import struct
+import termios
 import threading
 import time
 import uuid
@@ -38,9 +40,11 @@ _REQUEST_TIMEOUT_SECS = 60
 _SHELL = os.getenv('SHELL', '/bin/bash')
 _DEFAULT_BIND_ADDRESS = '0.0.0.0'
 
+_CONTROL_START = 128
+_CONTROL_END = 129
+
 RESPONSE_SUCCESS = 'success'
 RESPONSE_FAILED = 'failed'
-
 
 class PingTimeoutError(Exception):
   pass
@@ -213,12 +217,12 @@ class Ghost(object):
     except Exception:
       pass
 
-    raise RuntimeError("can't generate machine ID")
+    raise RuntimeError('can\'t generate machine ID')
 
   def Reset(self):
     """Reset state and clear request handlers."""
     self._reset.clear()
-    self._buf = ""
+    self._buf = ''
     self._last_ping = 0
     self._requests = {}
 
@@ -240,6 +244,19 @@ class Ghost(object):
     msg = {'rid': omsg['rid'], 'response': status, 'params': params}
     self.SendMessage(msg)
 
+  def HandlePTYControl(self, fd, control_string):
+    msg = json.loads(control_string)
+    command = msg['command']
+    params = msg['params']
+    if command == 'resize':
+      # some error happened on websocket
+      if len(params) != 2:
+        return
+      winsize = struct.pack('HHHH', params[0], params[1], 0, 0)
+      fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+    else:
+      logging.warn('Invalid request command "%s"', command)
+
   def SpawnPTYServer(self, _):
     """Spawn a PTY server and forward I/O to the TCP socket."""
     logging.info('SpawnPTYServer: started')
@@ -253,6 +270,9 @@ class Ghost(object):
       os.execve(_SHELL, [_SHELL], env)
     else:
       try:
+        control_state = None
+        control_string = ''
+        write_buffer = ''
         while True:
           rd, _, _ = select.select([self._sock, fd], [], [])
 
@@ -262,8 +282,31 @@ class Ghost(object):
           if self._sock in rd:
             ret = self._sock.recv(_BUFSIZE)
             if len(ret) == 0:
-              raise RuntimeError("socket closed")
-            os.write(fd, ret)
+              raise RuntimeError('socket closed')
+            while ret:
+              if control_state:
+                if chr(_CONTROL_END) in ret:
+                  index = ret.index(chr(_CONTROL_END))
+                  control_string += ret[:index]
+                  self.HandlePTYControl(fd, control_string)
+                  control_state = None
+                  control_string = ''
+                  ret = ret[index+1:]
+                else:
+                  control_string += ret
+                  ret = ''
+              else:
+                if chr(_CONTROL_START) in ret:
+                  control_state = _CONTROL_START
+                  index = ret.index(chr(_CONTROL_START))
+                  write_buffer += ret[:index]
+                  ret = ret[index+1:]
+                else:
+                  write_buffer += ret
+                  ret = ''
+            if write_buffer:
+              os.write(fd, write_buffer)
+              write_buffer = ''
       except (OSError, socket.error, RuntimeError):
         self._sock.close()
         logging.info('SpawnPTYServer: terminated')
@@ -290,7 +333,7 @@ class Ghost(object):
         p.poll()
 
         if p.returncode != None:
-          raise RuntimeError("process complete")
+          raise RuntimeError('process complete')
 
         if p.stdout in rd:
           self._sock.send(p.stdout.read(_BUFSIZE))
@@ -301,7 +344,7 @@ class Ghost(object):
         if self._sock in rd:
           ret = self._sock.recv(_BUFSIZE)
           if len(ret) == 0:
-            raise RuntimeError("socket closed")
+            raise RuntimeError('socket closed')
           p.stdin.write(ret)
     except (OSError, socket.error, RuntimeError):
       self._sock.close()
@@ -399,7 +442,7 @@ class Ghost(object):
           self._reset.set()
           raise RuntimeError('Register request timeout')
         logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
-        self._queue.put("pause", True)
+        self._queue.put('pause', True)
 
       try:
         logging.info('Trying %s:%d ...', *addr)
@@ -429,7 +472,7 @@ class Ghost(object):
         self._connected_addr = addr
         self.Listen()
 
-    raise RuntimeError("Cannot connect to any server")
+    raise RuntimeError('Cannot connect to any server')
 
   def Reconnect(self):
     logging.info('Received reconnect request from RPC server, reconnecting...')
@@ -446,7 +489,7 @@ class Ghost(object):
       try:
         s.bind(('0.0.0.0', _OVERLORD_LAN_DISCOVERY_PORT))
       except socket.error as e:
-        logging.error("LAN discovery: %s, abort", e)
+        logging.error('LAN discovery: %s, abort', e)
         return
 
       logging.info('LAN Discovery: started')
@@ -546,7 +589,7 @@ def main():
   parser.add_argument('--no-rpc-server', dest='rpc_server',
                       action='store_false', default=True,
                       help='disable RPC server')
-  parser.add_argument("--prop-file", dest="prop_file", type=str, default=None,
+  parser.add_argument('--prop-file', dest='prop_file', type=str, default=None,
                       help='file containing the JSON representation of client '
                            'properties')
   parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,

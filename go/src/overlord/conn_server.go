@@ -88,7 +88,7 @@ func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 }
 
 // Forwards the input from Websocket to TCP socket.
-func (self *ConnServer) forwardWSInput() {
+func (self *ConnServer) forwardWSInput(allowBinary bool) {
 	defer func() {
 		self.stopListen <- true
 	}()
@@ -106,7 +106,11 @@ func (self *ConnServer) forwardWSInput() {
 
 		switch mt {
 		case websocket.BinaryMessage:
-			log.Printf("Ignoring binary message: %q\n", payload)
+			if allowBinary {
+				self.Conn.Write(payload)
+			} else {
+				log.Printf("Ignoring binary message: %q\n", payload)
+			}
 		case websocket.TextMessage:
 			self.Conn.Write(payload)
 		default:
@@ -185,7 +189,8 @@ func (self *ConnServer) Listen() {
 
 	for {
 		select {
-		case buffer := <-readChan:
+		case buf := <-readChan:
+			buffer := string(buf)
 			switch self.Mode {
 			case TERMINAL:
 				self.forwardTerminalOutput(buffer)
@@ -210,9 +215,12 @@ func (self *ConnServer) Listen() {
 				// If self.mode changed, means we just got a registration message and
 				// are in a different mode.
 				switch self.Mode {
-				case TERMINAL, SHELL:
+				case TERMINAL:
 					// Start a goroutine to forward the WebSocket Input
-					go self.forwardWSInput()
+					go self.forwardWSInput(true)
+				case SHELL:
+					// Start a goroutine to forward the WebSocket Input
+					go self.forwardWSInput(false)
 				case LOGCAT:
 					// A logcat client does not wait for ACK before sending
 					// stream, so we need to forward the remaining content of the buffer
