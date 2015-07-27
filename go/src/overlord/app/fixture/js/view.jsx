@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Requires: common.jsx :: NavBar
+// View for Fixture dashboard App
+//
+// Requires:
+//   NavBar.jsx :: NavBar
+//   TerminalWindow.jsx :: TerminalWindow
 //
 // - App
 //  - NavBar
@@ -114,6 +118,9 @@ var App = React.createClass({
     }.bind(this));
   },
   render: function () {
+    onClose = function (e) {
+      this.props.app.removeTerminal(this.props.mid);
+    }
     return (
       <div id="main">
         <NavBar name="Fixture Dashboard" url="/api/apps/list" />
@@ -121,7 +128,9 @@ var App = React.createClass({
           {
             Object.keys(this.state.terminals).map(function (mid) {
               return (
-                <TerminalWindow key={mid} mid={mid} app={this} />
+                <TerminalWindow key={mid} mid={mid} id={"terminal-" + mid}
+                 title={mid} path={"/api/agent/pty/" + mid}
+                 onClose={onClose} app={this} />
               );
             }.bind(this))
           }
@@ -376,91 +385,6 @@ var AuxLog = React.createClass({
   render: function () {
     return (
       <div className="log log-aux well well-sm" ref={"log-" + this.props.mid}>
-      </div>
-    );
-  }
-});
-
-var TerminalWindow = React.createClass({
-  componentDidMount: function () {
-    var mid = this.props.mid;
-    var el = document.getElementById("terminal-" + mid);
-    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
-              "://" + window.location.host + "/api/agent/pty/" + mid;
-    var sock = new WebSocket(url);
-
-    var $el = $(el);
-
-    this.sock = sock;
-    this.el = el;
-
-    sock.onerror = function (e) {
-      console.log("socket error", e);
-      this.props.updateStatus("error");
-    }.bind(this);
-
-    $el.draggable({
-      // Once the window is dragged, make it position fixed.
-      stop: function () {
-        offsets = el.getBoundingClientRect();
-        $el.css({
-          position: 'fixed',
-          top: offsets.top+"px",
-          left: offsets.left+"px"
-        });
-      },
-      cancel: ".terminal"
-    });
-
-    sock.onclose = function (e) {
-      this.props.app.removeTerminal(this.props.mid);
-    }.bind(this);
-
-    sock.onopen = function (e) {
-      var term = new Terminal({
-        cols: 80,
-        rows: 24,
-        useStyle: true,
-        screenKeys: true
-      });
-
-      term.open(el);
-
-      term.on('title', function(title) {
-        $el.find('.terminal-title').text(title);
-      });
-
-      term.on('data', function(data) {
-        sock.send(data);
-      });
-
-      sock.onmessage = function(msg) {
-        var data = Base64.decode(msg.data);
-        term.write(data);
-      };
-    };
-  },
-  onWindowMouseDown: function(e) {
-    if (typeof(window.maxz) == "undefined") {
-      window.maxz = 100;
-    }
-    var $el = $(this.el);
-    if ($el.css("z-index") != window.maxz) {
-      window.maxz += 1;
-      $el.css("z-index", window.maxz);
-    }
-  },
-  onCloseMouseUp: function(e) {
-    this.props.app.removeTerminal(this.props.mid);
-  },
-  render: function () {
-    return (
-      <div className="terminal-window" id={"terminal-" + this.props.mid}
-          onMouseDown={this.onWindowMouseDown}>
-        <div className="terminal-title">{this.props.mid}</div>
-        <div className="terminal-control">
-          <div className="terminal-close" onMouseUp={this.onCloseMouseUp}></div>
-        </div>
       </div>
     );
   }

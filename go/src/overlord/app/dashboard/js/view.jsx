@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Requires: common.jsx :: NavBar
+// View for Dashboard App
+//
+// Requires:
+//   NavBar.jsx :: NavBar
+//   TerminalWindow.jsx :: TerminalWindow
 //
 // - App
 //  - NavBar
@@ -79,32 +83,31 @@ var App = React.createClass({
     this.loadClientsFromServer();
     setInterval(this.loadClientsFromServer, this.props.pollInterval);
 
-    var $this = this;
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
     socket.on("agent joined", function (msg) {
       var obj = JSON.parse(msg)
-      $this.state.recentclients.splice(0, 0, obj);
-      $this.state.recentclients = $this.state.recentclients.slice(0, 5);
-      $this.state.clients.push(obj);
-      $this.forceUpdate();
-    });
+      this.state.recentclients.splice(0, 0, obj);
+      this.state.recentclients = this.state.recentclients.slice(0, 5);
+      this.state.clients.push(obj);
+      this.forceUpdate();
+    }.bind(this));
     socket.on("agent left", function (msg) {
       var obj = JSON.parse(msg);
 
-      $this.removeClientFromList($this.state.clients, obj);
-      $this.removeClientFromList($this.state.recentclients, obj);
-      $this.removeClientFromList($this.state.terminals, obj);
-      $this.forceUpdate();
-    });
+      this.removeClientFromList(this.state.clients, obj);
+      this.removeClientFromList(this.state.recentclients, obj);
+      this.removeClientFromList(this.state.terminals, obj);
+      this.forceUpdate();
+    }.bind(this));
   },
   render: function () {
     return (
       <div id="main">
         <NavBar name="Dashboard" url="/api/apps/list" />
         <SideBar clients={this.state.clients}
-            recentclients={this.state.recentclients} root={this} />
-        <TerminalGroup data={this.state.terminals} root={this} />
+            recentclients={this.state.recentclients} app={this} />
+        <TerminalGroup data={this.state.terminals} app={this} />
       </div>
     );
   }
@@ -114,8 +117,8 @@ var SideBar = React.createClass({
   render: function () {
     return (
       <div className="sidebar">
-        <ClientBox data={this.props.clients} root={this.props.root} />
-        <RecentList data={this.props.recentclients} root={this.props.root} />
+        <ClientBox data={this.props.clients} app={this.props.app} />
+        <RecentList data={this.props.recentclients} app={this.props.app} />
       </div>
     );
   }
@@ -127,8 +130,8 @@ var ClientBox = React.createClass({
       <div className="client-box panel panel-success">
         <div className="panel-heading">Clients</div>
         <div className="panel-body">
-          <FilterInput root={this.props.root} />
-          <ClientList data={this.props.data} root={this.props.root} />
+          <FilterInput app={this.props.app} />
+          <ClientList data={this.props.data} app={this.props.app} />
         </div>
       </div>
     );
@@ -137,7 +140,7 @@ var ClientBox = React.createClass({
 
 var FilterInput = React.createClass({
   onKeyUp: function (e) {
-    this.props.root.filterClientList(this.refs.filter.getDOMNode().value);
+    this.props.app.filterClientList(this.refs.filter.getDOMNode().value);
   },
   render: function () {
     return (
@@ -151,17 +154,16 @@ var FilterInput = React.createClass({
 
 var ClientList = React.createClass({
   render: function () {
-    var $this = this;
     return (
       <div className="list-box client-list">
         {
           this.props.data.map(function (item) {
             return (
-              <ClientInfo key={item.mid} data={item} root={$this.props.root}>
+              <ClientInfo key={item.mid} data={item} app={this.props.app}>
                 {abbr(item.mid, 36)}
               </ClientInfo>
               );
-          })
+          }.bind(this))
         }
       </div>
     );
@@ -170,7 +172,6 @@ var ClientList = React.createClass({
 
 var RecentList = React.createClass({
   render: function () {
-    var $this = this;
     return (
       <div className="recent-box panel panel-info">
         <div className="panel-heading">Recent Connected Clients</div>
@@ -179,11 +180,11 @@ var RecentList = React.createClass({
             {
               this.props.data.map(function (item) {
                 return (
-                  <ClientInfo key={item.mid} data={item} root={$this.props.root}>
+                  <ClientInfo key={item.mid} data={item} app={this.props.app}>
                     {abbr(item.mid, 36)}
                   </ClientInfo>
                   );
-              })
+              }.bind(this))
             }
           </div>
         </div>
@@ -194,7 +195,7 @@ var RecentList = React.createClass({
 
 var ClientInfo = React.createClass({
   onClick: function (e) {
-    this.props.root.addTerminal(this.props.data);
+    this.props.app.addTerminal(this.props.data);
   },
   render: function () {
     var display = "block";
@@ -219,99 +220,21 @@ var ClientInfo = React.createClass({
 
 var TerminalGroup = React.createClass({
   render: function () {
-    var $this = this;
+    var onClose = function (e) {
+      this.props.app.removeTerminal(this.props.mid);
+    }
     return (
       <div className="terminal-group">
         {
           this.props.data.map(function (item) {
             return (
-              <TerminalWindow key={item.mid} data={item} root={$this.props.root} />
+              <TerminalWindow key={item.mid} mid={item.mid}
+               id={"terminal-" + item.mid} title={item.mid}
+               path={"/api/agent/pty/" + item.mid}
+               app={this.props.app} onClose={onClose} />
             );
-          })
+          }.bind(this))
         }
-      </div>
-    );
-  }
-});
-
-var TerminalWindow = React.createClass({
-  getInitialState: function () {
-    return {"pages": []};
-  },
-  componentDidMount: function () {
-    var mid = this.props.data.mid;
-    var el = document.getElementById("terminal-" + mid);
-    var $el = $(el);
-    var ws_url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
-                 "://" + window.location.host + "/api/agent/pty/" + mid;
-    var sock = new WebSocket(ws_url);
-    this.sock = sock;
-
-    sock.onerror = function (e) {
-      console.log("socket error", e);
-    };
-
-    $el.draggable({
-      // Once the window is dragged, make it position fixed.
-      stop: function () {
-        offsets = el.getBoundingClientRect();
-        $el.css({
-          position: 'fixed',
-          top: offsets.top+"px",
-          left: offsets.left+"px"
-        });
-      },
-      cancel: ".terminal"
-    });
-    sock.onopen = function (e) {
-      var term = new Terminal({
-        cols: 80,
-        rows: 24,
-        useStyle: true,
-        screenKeys: true
-      });
-
-      term.open(el);
-
-      term.on('title', function (title) {
-        $el.find('.terminal-title').text(title);
-      });
-
-      term.on('data', function (data) {
-        sock.send(data);
-      });
-
-      sock.onmessage = function (msg) {
-        term.write(Base64.decode(msg.data));
-      };
-    };
-    sock.onclose = function (e) {
-      this.props.root.removeTerminal(this.props.data.mid);
-      this.sock.close();
-    }.bind(this)
-  },
-  onWindowMouseDown: function (e) {
-    if (typeof(window.maxz) == "undefined") {
-      window.maxz = 100;
-    }
-    var $el = $(e.target).parents('.terminal-window');
-    if ($el.css("z-index") != window.maxz) {
-      window.maxz += 1;
-      $el.css("z-index", window.maxz);
-    }
-  },
-  onCloseMouseUp: function (e) {
-    this.props.root.removeTerminal(this.props.data.mid);
-    this.sock.close();
-  },
-  render: function () {
-    return (
-      <div className="terminal-window" id={"terminal-" + this.props.data.mid}
-          onMouseDown={this.onWindowMouseDown}>
-        <div className="terminal-title">{abbr(this.props.data.mid, 90)}</div>
-        <div className="terminal-control">
-          <div className="terminal-close" onMouseUp={this.onCloseMouseUp}></div>
-        </div>
       </div>
     );
   }

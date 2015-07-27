@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Requires: common.jsx :: NavBar
+// View for Factory Install App
+//
+// Requires:
+//   NavBar.jsx :: NavBar
+//   TerminalWindow.jsx :: TerminalWindow
 //
 // - App
 //  - NavBar
@@ -84,15 +88,14 @@ var App = React.createClass({
     this.loadClientsFromServer();
     setInterval(this.loadClientsFromServer, this.props.pollInterval);
 
-    var $this = this;
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
     socket.on("logcat joined", function (msg) {
       var obj = JSON.parse(msg);
-      var clients = $this.state.clients;
+      var clients = this.state.clients;
 
-      if (typeof($this.refs["client-" + obj.mid]) != "undefined") {
-        $this.refs["client-" + obj.mid].updateStatus("in-progress");
+      if (typeof(this.refs["client-" + obj.mid]) != "undefined") {
+        this.refs["client-" + obj.mid].updateStatus("in-progress");
       }
 
       for (var i = 0; i < clients.length; i++) {
@@ -102,27 +105,26 @@ var App = React.createClass({
         if (clients[i].cids.indexOf(obj.cid) == -1) {
           clients[i].cids.push(obj.cid);
         }
-        $this.forceUpdate();
+        this.forceUpdate();
         return
       }
 
-      if (!$this.state.locked) {
-        $this.state.clients.push({mid: obj.mid, cids: [obj.cid]});
+      if (!this.state.locked) {
+        this.state.clients.push({mid: obj.mid, cids: [obj.cid]});
       }
-      $this.forceUpdate();
-    });
+      this.forceUpdate();
+    }.bind(this));
     socket.on("logcat left", function (msg) {
       var obj = JSON.parse(msg);
 
-      if ($this.state.locked) {
-        $this.refs["client-" + obj.mid].updateStatus("disconnected");
+      if (this.state.locked) {
+        this.refs["client-" + obj.mid].updateStatus("disconnected");
       }
-      $this.removeClientFromList($this.state.clients, obj);
-      $this.forceUpdate();
-    });
+      this.removeClientFromList(this.state.clients, obj);
+      this.forceUpdate();
+    }.bind(this));
   },
   render: function() {
-    var $this=this;
     return (
       <div id="main">
         <NavBar name="Factory Install Dashboard" url="/api/apps/list" />
@@ -142,11 +144,11 @@ var App = React.createClass({
           {
             this.state.clients.map(function (item) {
               return (
-                <ClientInfo key={item.mid} ref={"client-" + item.mid} data={item} root={$this} getTimeout={$this.getTimeout}>
+                <ClientInfo key={item.mid} ref={"client-" + item.mid} data={item} root={this} getTimeout={this.getTimeout}>
                   {item.mid}
                 </ClientInfo>
               );
-            })
+            }.bind(this))
           }
           </div>
         </div>
@@ -246,119 +248,48 @@ var ClientInfo = React.createClass({
       message = "Failed. Power-cycle DUT and click again.";
     }
 
-    var $this = this;
+    var onError = function (e) {
+      this.props.client.updateStatus("error");
+    }
+
+    var onMessage = function (msg) {
+      var data = Base64.decode(msg.data);
+      if (data.indexOf("Factory Installer Complete") != -1) {
+        this.props.client.updateStatus("done");
+      } else if (data.indexOf("\033[1;31m") != -1) {
+        this.props.client.updateStatus("error");
+      }
+    };
+
+    var onCloseClicked = function (e) {
+      var el = document.getElementById(this.props.id);
+      $(el).css("display", "none");
+    }
+
     var mid = this.props.data.mid;
     return (
-      <div className={"client-info panel " + statusClass} onClick={$this.onPanelClick}>
+      <div className={"client-info panel " + statusClass} onClick={this.onPanelClick}>
         <div className="panel-heading">{this.props.children}</div>
         <div className="panel-body">
         {
           this.props.data.cids.map(function (cid) {
-            var data = {mid: mid, cid: cid};
             return (
                 <div className="client-info-tag">
                   <span className="label label-warning client-info-terminal"
-                      data-cid={cid} onClick={$this.onTagClick}>
+                      data-cid={cid} onClick={this.onTagClick}>
                     {cid}
                   </span>
-                  <TerminalWindow key={cid} data={data}
-                      updateStatus={$this.updateStatus} ref={"term-" + cid} />
+                  <TerminalWindow key={cid} id={"terminal-" + mid + "-" + cid}
+                   title={mid + ' / ' + cid}
+                   path={"/api/log/" + mid + "/" + cid}
+                   onError={onError} onMessage={onMessage}
+                   onCloseClicked={onCloseClicked} client={this}
+                   ref={"term-" + cid} />
                 </div>
             );
-          })
+          }.bind(this))
         }
         {message}
-        </div>
-      </div>
-    );
-  }
-});
-
-var TerminalWindow = React.createClass({
-  getInitialState: function () {
-    return {"pages": []};
-  },
-  componentDidMount: function () {
-    var mid = this.props.data.mid;
-    var cid = this.props.data.cid;
-    var el = document.getElementById("terminal-" + mid + "-" + cid);
-    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
-                "://" + window.location.host + "/api/log/" + mid + "/" + cid;
-    var sock = new WebSocket(url);
-
-    var $el = $(el);
-    var $this = this;
-
-    this.sock = sock;
-    this.el = el;
-
-    sock.onerror = function (e) {
-      console.log("socket error", e);
-      $this.props.updateStatus("error");
-    };
-
-    $el.draggable({
-      // Once the window is dragged, make it position fixed.
-      stop: function() {
-        offsets = el.getBoundingClientRect();
-        $el.css({
-          position: 'fixed',
-          top: offsets.top+"px",
-          left: offsets.left+"px"
-        });
-      },
-      cancel: ".terminal"
-    });
-    sock.onopen = function (e) {
-      var term = new Terminal({
-        cols: 80,
-        rows: 24,
-        useStyle: true,
-        screenKeys: true
-      });
-
-      term.open(el);
-
-      term.on('title', function(title) {
-        $el.find('.terminal-title').text(title);
-      });
-
-      term.on('data', function(data) {
-        sock.send(data);
-      });
-
-      sock.onmessage = function(msg) {
-        var data = Base64.decode(msg.data);
-        if (data.indexOf("Factory Installer Complete") != -1) {
-          $this.props.updateStatus("done");
-        } else if (data.indexOf("\033[1;31m") != -1) {
-          $this.props.updateStatus("error");
-        }
-        term.write(data);
-      };
-    };
-  },
-  onWindowMouseDown: function(e) {
-    if (typeof(window.maxz) == "undefined") {
-      window.maxz = 100;
-    }
-    var $el = $(this.el);
-    if ($el.css("z-index") != window.maxz) {
-      window.maxz += 1;
-      $el.css("z-index", window.maxz);
-    }
-  },
-  onCloseMouseUp: function(e) {
-    $(this.el).css('display', 'none');
-  },
-  render: function () {
-    return (
-      <div className="terminal-window"
-          id={"terminal-" + this.props.data.mid + "-" + this.props.data.cid}
-          onMouseDown={this.onWindowMouseDown}>
-        <div className="terminal-title">{this.props.data.mid}</div>
-        <div className="terminal-control">
-          <div className="terminal-close" onMouseUp={this.onCloseMouseUp}></div>
         </div>
       </div>
     );
