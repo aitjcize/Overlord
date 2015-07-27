@@ -50,7 +50,7 @@ var App = React.createClass({
     }
   },
   onLockClicked: function (e) {
-    this.state.locked = $(e.target).attr('aria-pressed') == "true";
+    this.state.locked = !this.state.locked;
     this.forceUpdate();
   },
   onTimeoutClicked: function (e) {
@@ -125,6 +125,8 @@ var App = React.createClass({
     }.bind(this));
   },
   render: function() {
+    var lock_btn_class = this.state.locked ? "btn-danger" : "btn-primary";
+    var lock_btn_text = this.state.locked ? "Unlock" : "Lock";
     return (
       <div id="main">
         <NavBar name="Factory Install Dashboard" url="/api/apps/list" />
@@ -136,8 +138,8 @@ var App = React.createClass({
                 onClick={this.onLayoutClicked}>Layout</button>
               <button type="button" className="ctrl-btn btn btn-info"
                 onClick={this.onTimeoutClicked}>Timeout</button>
-              <button type="button" className="ctrl-btn btn btn-primary"
-                data-toggle="button" onClick={this.onLockClicked}>Lock</button>
+              <button type="button" className={"ctrl-btn btn " + lock_btn_class}
+                onClick={this.onLockClicked}>{lock_btn_text}</button>
             </div>
           </div>
           <div id="client-box-body" className="panel-body">
