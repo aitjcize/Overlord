@@ -15,6 +15,13 @@
 
 
 var App = React.createClass({
+  loadCookies: function (key, defaultValue) {
+    return reactCookie.load(key) || defaultValue;
+  },
+  saveCookies: function (key, value) {
+    // Set cookies expire 10 year later
+    reactCookie.save(key, value, {maxAge: 10 * 365 * 86400});
+  },
   loadClientsFromServer: function () {
     if (this.state.locked) {
       return;
@@ -52,6 +59,11 @@ var App = React.createClass({
   onLockClicked: function (e) {
     this.state.locked = !this.state.locked;
     this.forceUpdate();
+    this.saveCookies('locked', this.state.locked);
+    if (this.state.locked) {
+      var locked_mids = this.state.clients.map(function (e) {return e['mid'];});
+      this.saveCookies('locked_mids', locked_mids);
+    }
   },
   onTimeoutClicked: function (e) {
     $('#timeout-dialog').modal();
@@ -62,6 +74,7 @@ var App = React.createClass({
   onTimeoutDialogSaveClicked: function (e) {
     this.state.boot_timeout_secs = Math.max(1, $('#boot_timeout_secs').val());
     this.forceUpdate();
+    this.saveCookies('boot_timeout_secs', this.state.boot_timeout_secs);
   },
   onLayoutClicked: function (e) {
     $('#layout-dialog').modal();
@@ -81,7 +94,16 @@ var App = React.createClass({
     st.insertRule(".client-info { width: " + width + " !important }", 0);
   },
   getInitialState: function () {
-    return {clients: [], locked: false, boot_timeout_secs: 40};
+    var locked = this.loadCookies('locked', false);
+    var clients = [];
+    if (locked) {
+      clients = this.loadCookies('locked_mids', []).map(
+          function (mid) {return {mid: mid, cids: [], status: 'disconnected'}});
+    }
+    return {
+        locked: locked,
+        clients: clients,
+        boot_timeout_secs: this.loadCookies('boot_timeout_secs', 60)};
   },
   componentDidMount: function () {
     this.onLayoutDialogSaveClicked();
@@ -202,7 +224,7 @@ var App = React.createClass({
 
 var ClientInfo = React.createClass({
   getInitialState: function (e) {
-    if (typeof(this.props.data.status) == "undefined") {
+    if (typeof(this.props.data.status) != "undefined") {
       return {status: this.props.data.status};
     }
     return {status: 'in-progress'};
