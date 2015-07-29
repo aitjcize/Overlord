@@ -4,24 +4,13 @@ html, body, #main {
   overflow: hidden;
 }
 
-.navbar-header {
-  float: left;
-  padding: 15px;
-  text-align: center;
-  width: calc(100% - 121px);
-}
-
-.navbar-brand {
-  float: none;
-}
-
 .sidebar {
   position: absolute;
   left: 2%;
-  top: 6%;
+  top: 70px;
   display: inline-block;
   width: 430px;
-  height: 90%;
+  height: calc(100% - 120px);
 }
 
 .client-box {
