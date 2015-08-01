@@ -2,14 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-GO=go
-FACTORY=$(CURDIR)/../../..
-BINDIR=$(FACTORY)/go/bin
-GOPATH=$(FACTORY)/build/go:$(FACTORY)/go
-OVERLORD=overlord
-DEPS?=true
-STATIC?=false
-LDFLAGS=
+GO ?= go
+FACTORY = $(CURDIR)/../../..
+override GOPATH := $(GOPATH):$(FACTORY)/build/go:$(FACTORY)/go
+BINDIR = $(FACTORY)/go/bin
+OVERLORD = overlord
+DEPS ?= true
+STATIC ?= false
+LDFLAGS =
 
 ifeq ($(STATIC), true)
 	LDFLAGS=-a -tags netgo -installsuffix netgo
