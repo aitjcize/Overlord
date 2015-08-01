@@ -7,6 +7,7 @@ package overlord
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,7 +35,7 @@ const (
 	GHOST_RPC_PORT = 4499
 	DEFAULT_SHELL  = "/bin/bash"
 	DIAL_TIMEOUT   = 3
-	OVERLORD_IP    = "localhost"
+	LOCALHOST      = "localhost"
 	PING_INTERVAL  = 10
 	PING_TIMEOUT   = 10
 	RETRY_INTERVAL = 2
@@ -142,6 +143,78 @@ func (self *Ghost) LoadPropertiesFromFile(filename string) {
 	}
 }
 
+func (self *Ghost) closeSockets() {
+}
+
+func (self *Ghost) Upgrade() error {
+	log.Println("Upgrade: initiating upgrade sequence...")
+
+	exePath, err := GetExecutablePath()
+	if err != nil {
+		return errors.New("Upgrade: can not find executable path")
+	}
+
+	var buffer bytes.Buffer
+	parts := strings.Split(self.connectedAddr, ":")
+	url := fmt.Sprintf("http://%s:%d/upgrade/ghost.%s", parts[0],
+		OVERLORD_HTTP_PORT, GetArchString())
+
+	// Download the sha1sum for ghost for verification
+	resp, err := http.Get(url + ".sha1")
+	if err != nil || resp.StatusCode != 200 {
+		return errors.New("Upgrade: failed to download sha1sum file, abort")
+	}
+	sha1sumBytes := make([]byte, 40)
+	resp.Body.Read(sha1sumBytes)
+	sha1sum := strings.Trim(string(sha1sumBytes), "\n ")
+	defer resp.Body.Close()
+
+	// Compare the current version of ghost, if sha1 is the same, skip upgrading
+	currentSha1sum, _ := GetFileSha1(exePath)
+
+	if currentSha1sum == sha1sum {
+		log.Println("Upgrade: ghost is already up-to-date, skipping upgrade")
+		return nil
+	}
+
+	// Download upgrade version of ghost
+	resp2, err := http.Get(url)
+	if err != nil || resp2.StatusCode != 200 {
+		return errors.New("Upgrade: failed to download upgrade, abort")
+	}
+	defer resp2.Body.Close()
+
+	_, err = buffer.ReadFrom(resp2.Body)
+	if err != nil {
+		return errors.New("Upgrade: failed to write upgrade onto disk, abort")
+	}
+
+	// Compare SHA1 sum
+	if sha1sum != fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())) {
+		return errors.New("Upgrade: sha1sum mismatch, abort")
+	}
+
+	os.Remove(exePath)
+	exeFile, err := os.Create(exePath)
+	if err != nil {
+		return errors.New("Upgrade: can not open ghost executable for writing")
+	}
+	_, err = buffer.WriteTo(exeFile)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Upgrade: %s", err.Error()))
+	}
+	exeFile.Close()
+
+	err = os.Chmod(exePath, 0755)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Upgrade: %s", err.Error()))
+	}
+
+	log.Println("Upgrade: restarting ghost...")
+	os.Args[0] = exePath
+	return syscall.Exec(exePath, os.Args, os.Environ())
+}
+
 func (self *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestParams struct {
 		Sid string `json:"sid"`
@@ -245,6 +318,8 @@ func (self *Ghost) StartDownloadServer() error {
 func (self *Ghost) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
+	case "upgrade":
+		err = self.Upgrade()
 	case "terminal":
 		err = self.handleTerminalRequest(req)
 	case "shell":
@@ -835,7 +910,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	if len(args) >= 1 {
 		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OVERLORD_PORT))
 	}
-	addrs = append(addrs, fmt.Sprintf("%s:%d", OVERLORD_IP, OVERLORD_PORT))
+	addrs = append(addrs, fmt.Sprintf("%s:%d", LOCALHOST, OVERLORD_PORT))
 
 	g := NewGhost(addrs, AGENT, mid)
 	if propFile != "" {

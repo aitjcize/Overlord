@@ -7,12 +7,15 @@ package overlord
 import (
 	"C"
 	"bufio"
+	"bytes"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -117,4 +120,28 @@ func PtsName(f *os.File) (string, error) {
 // Return the TTY name of a given file descriptor.
 func TtyName(f *os.File) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), f.Fd()))
+}
+
+// Return machine architecture string.
+// For ARM platform, return armvX, where X is ARM version.
+func GetArchString() string {
+	if runtime.GOARCH == "arm" {
+		return fmt.Sprintf("armv%s", os.Getenv("GOARM"))
+	}
+	return runtime.GOARCH
+}
+
+func GetFileSha1(filename string) (string, error) {
+	fd, err := os.Open(filename)
+	if err != nil {
+		return "", err
+	}
+
+	var buffer bytes.Buffer
+	_, err = buffer.ReadFrom(fd)
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())), nil
 }

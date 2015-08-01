@@ -6,7 +6,9 @@
 # found in the LICENSE file.
 
 import argparse
+import contextlib
 import fcntl
+import hashlib
 import json
 import logging
 import os
@@ -15,12 +17,13 @@ import re
 import select
 import signal
 import socket
+import struct
 import subprocess
 import sys
-import struct
 import termios
 import threading
 import time
+import urllib
 import uuid
 
 import jsonrpclib
@@ -31,6 +34,7 @@ _GHOST_RPC_PORT = 4499
 
 _OVERLORD_PORT = 4455
 _OVERLORD_LAN_DISCOVERY_PORT = 4456
+_OVERLORD_HTTP_PORT = 9000
 
 _BUFSIZE = 8192
 _RETRY_INTERVAL = 2
@@ -117,6 +121,65 @@ class Ghost(object):
     self._download_queue = Queue.Queue()
     self._session_map = {}  # Stores the mapping between ttyname and browser_id
 
+  def SetIgnoreChild(self, status):
+    # Only ignore child for Agent since only it could spawn child Ghost.
+    if self._mode == Ghost.AGENT:
+      signal.signal(signal.SIGCHLD,
+                    signal.SIG_IGN if status else signal.SIG_DFL)
+
+  def GetFileSha1(self, filename):
+    with open(filename, 'r') as f:
+      return hashlib.sha1(f.read()).hexdigest()
+
+  def Upgrade(self):
+    logging.info('Upgrade: initiating upgrade sequence...')
+
+    scriptpath = os.path.abspath(sys.argv[0])
+    url = 'http://%s:%d/upgrade/ghost.py' % (
+        self._connected_addr[0], _OVERLORD_HTTP_PORT)
+
+    # Download sha1sum for ghost.py for verification
+    try:
+      with contextlib.closing(urllib.urlopen(url + '.sha1')) as f:
+        if f.getcode() != 200:
+          raise RuntimeError('HTTP status %d' % f.getcode())
+        sha1sum = f.read().strip()
+    except Exception:
+      logging.error('Upgrade: failed to download sha1sum file, abort')
+      return
+
+    if self.GetFileSha1(scriptpath) == sha1sum:
+      logging.info('Upgrade: ghost is already up-to-date, skipping upgrade')
+      return
+
+    # Download upgrade version of ghost.py
+    try:
+      with contextlib.closing(urllib.urlopen(url)) as f:
+        if f.getcode() != 200:
+          raise RuntimeError('HTTP status %d' % f.getcode())
+        data = f.read()
+    except Exception:
+      logging.error('Upgrade: failed to download upgrade, abort')
+      return
+
+    # Compare SHA1 sum
+    if hashlib.sha1(data).hexdigest() != sha1sum:
+      logging.error('Upgrade: sha1sum mismatch, abort')
+      return
+
+    python = os.readlink('/proc/self/exe')
+    try:
+      with open(scriptpath, 'w') as f:
+        f.write(data)
+    except Exception:
+      logging.error('Upgrade: failed to write upgrade onto disk, abort')
+      return
+
+    logging.info('Upgrade: restarting ghost...')
+    self.CloseSockets()
+    self.SetIgnoreChild(False)
+    os.execve(python, [python, scriptpath] + sys.argv[1:], os.environ)
+
   def LoadPropertiesFromFile(self, filename):
     try:
       with open(filename, 'r') as f:
@@ -124,19 +187,34 @@ class Ghost(object):
     except Exception as e:
       logging.exception('LoadPropertiesFromFile: ' + str(e))
 
+  def CloseSockets(self):
+    # Close sockets opened by parent process, since we don't use it anymore.
+    for fd in os.listdir('/proc/self/fd/'):
+      try:
+        real_fd = os.readlink('/proc/self/fd/%s' % fd)
+        if real_fd.startswith('socket'):
+          os.close(int(fd))
+      except Exception:
+        pass
+
   def SpawnGhost(self, mode, sid=None, bid=None, command=None, file_op=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
       The spawned child process pid.
     """
+    # Restore the default signal hanlder, so our child won't have problems.
+    self.SetIgnoreChild(False)
+
     pid = os.fork()
     if pid == 0:
+      self.CloseSockets()
       g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid, bid,
                 command, file_op)
       g.Start()
       sys.exit(0)
     else:
+      self.SetIgnoreChild(True)
       return pid
 
   def Timestamp(self):
@@ -176,8 +254,8 @@ class Ghost(object):
   def GetMachineID(self):
     """Generates machine-dependent ID string for a machine.
     There are many ways to generate a machine ID:
-    1. factory device-data
-    2. factory device_id
+    1. factory device_id
+    2. factory device-data
     3. /sys/class/dmi/id/product_uuid (only available on intel machines)
     4. MAC address
     We follow the listed order to generate machine ID, and fallback to the next
@@ -188,6 +266,15 @@ class Ghost(object):
     elif self._mid:
       return self._mid
 
+    # Try factory device id
+    try:
+      import factory_common  # pylint: disable=W0612
+      from cros.factory.test import event_log
+      with open(event_log.DEVICE_ID_PATH) as f:
+        return f.read().strip()
+    except Exception:
+      pass
+
     # Try factory device data
     try:
       p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
@@ -197,15 +284,6 @@ class Ghost(object):
       if stdout == '':
         raise RuntimeError('empty mlb number')
       return stdout.strip()
-    except Exception:
-      pass
-
-    # Try factory device id
-    try:
-      import factory_common  # pylint: disable=W0612
-      from cros.factory.test import event_log
-      with open(event_log.DEVICE_ID_PATH) as f:
-        return f.read().strip()
     except Exception:
       pass
 
@@ -414,7 +492,9 @@ class Ghost(object):
     self.SendRequest('ping', {}, timeout_handler, 5)
 
   def HandleRequest(self, msg):
-    if msg['name'] == 'terminal':
+    if msg['name'] == 'upgrade':
+      self.Upgrade()
+    elif msg['name'] == 'terminal':
       self.SpawnGhost(self.TERMINAL, msg['params']['sid'],
                       bid=msg['params']['bid'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
@@ -623,8 +703,9 @@ class Ghost(object):
     logging.info('MID: %s', self._machine_id)
     logging.info('CID: %s', self._client_id)
 
-    # We don't care about child process's return code, not wait is needed.
-    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+    # We don't care about child process's return code, not wait is needed.  This
+    # is used to prevent zombie process from lingering in the system.
+    self.SetIgnoreChild(True)
 
     if lan_disc:
       self.StartLanDiscovery()

@@ -376,6 +376,13 @@ func (self *ConnServer) handleRequest(req *Request) error {
 	return err
 }
 
+// Send upgrade request to clients to trigger an upgrade.
+func (self *ConnServer) SendUpgradeRequest() error {
+	req := NewRequest("upgrade", nil)
+	req.SetTimeout(-1)
+	return self.SendRequest(req, nil)
+}
+
 // Spawn a remote terminal connection (a ghost with mode TERMINAL).
 // sid is the session ID, which will be used as the client ID of the new ghost.
 // bid is the browser ID, which identify the browser which started the terminal.

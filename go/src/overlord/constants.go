@@ -9,8 +9,9 @@ const (
 )
 
 const (
-	OVERLORD_PORT    = 4455 // Socket server port
-	OVERLORD_LD_PORT = 4456 // LAN discovery port
+	OVERLORD_PORT      = 4455 // Socket server port
+	OVERLORD_LD_PORT   = 4456 // LAN discovery port
+	OVERLORD_HTTP_PORT = 9000 // Overlord HTTP server port
 )
 
 // ConnServer Client mode

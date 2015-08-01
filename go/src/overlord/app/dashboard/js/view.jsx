@@ -98,7 +98,6 @@ var App = React.createClass({
 
       this.removeClientFromList(this.state.clients, obj);
       this.removeClientFromList(this.state.recentclients, obj);
-      this.removeClientFromList(this.state.terminals, obj);
       this.forceUpdate();
     }.bind(this));
 

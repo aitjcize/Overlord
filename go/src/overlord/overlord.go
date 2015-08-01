@@ -26,7 +26,7 @@ import (
 
 const (
 	SYSTEM_APP_DIR    = "../share/overlord"
-	WEBSERVER_ADDR    = "0.0.0.0:9000"
+	WEBSERVER_HOST    = "0.0.0.0"
 	LD_INTERVAL       = 5
 	KEEP_ALIVE_PERIOD = 1
 )
@@ -301,7 +301,7 @@ func AuthPassThrough(h http.Handler) http.Handler {
 }
 
 // Web server main routine.
-func (self *Overlord) ServHTTP(addr string) {
+func (self *Overlord) ServHTTP(port int) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  BUFSIZ,
 		WriteBufferSize: BUFSIZ,
@@ -369,6 +369,18 @@ func (self *Overlord) ServHTTP(addr string) {
 		} else {
 			w.Write(result)
 		}
+	}
+
+	// Agent upgrade request handler.
+	AgentsUpgradeHandler := func(w http.ResponseWriter, r *http.Request) {
+		for _, agent := range self.agents {
+			err := agent.SendUpgradeRequest()
+			if err != nil {
+				w.Write([]byte(fmt.Sprintf("Failed to send upgrade request for `%s'.\n",
+					agent.Mid)))
+			}
+		}
+		w.Write([]byte(SUCCESS + "\n"))
 	}
 
 	// List all logcat clients connected to the Overlord.
@@ -593,6 +605,7 @@ func (self *Overlord) ServHTTP(addr string) {
 
 	r.HandleFunc("/api/apps/list", AppsListHandler)
 	r.HandleFunc("/api/agents/list", AgentsListHandler)
+	r.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler)
 	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
 
 	// Logcat methods
@@ -609,6 +622,8 @@ func (self *Overlord) ServHTTP(addr string) {
 
 	http.Handle("/api/", auth.WrapHandler(r))
 	http.Handle("/api/socket.io/", auth.WrapHandler(self.ioserver))
+	http.Handle("/upgrade/", http.StripPrefix("/upgrade/",
+		http.FileServer(http.Dir(filepath.Join(appDir, "upgrade")))))
 	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
 		http.Dir(filepath.Join(appDir, "common")))))
 	http.Handle("/", auth.WrapHandlerFunc(IndexHandler))
@@ -620,6 +635,9 @@ func (self *Overlord) ServHTTP(addr string) {
 	}
 
 	for _, app := range appNames {
+		if app == "upgrade" {
+			continue
+		}
 		if app != "common" && app != "index" {
 			log.Printf("Serving app `%s' ...\n", app)
 		}
@@ -628,18 +646,20 @@ func (self *Overlord) ServHTTP(addr string) {
 			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
+	webServerAddr := fmt.Sprintf("%s:%d", WEBSERVER_HOST, port)
+
 	if self.TLSSettings != "" {
 		parts := strings.Split(self.TLSSettings, ",")
 		if len(parts) != 2 {
 			log.Fatalf("TLSSettings: invalid key assignment")
 		}
-		err = http.ListenAndServeTLS(WEBSERVER_ADDR, parts[0], parts[1], nil)
+		err = http.ListenAndServeTLS(webServerAddr, parts[0], parts[1], nil)
 	} else {
-		err = http.ListenAndServe(WEBSERVER_ADDR, nil)
+		err = http.ListenAndServe(webServerAddr, nil)
 	}
 	if err != nil {
 		log.Fatalf("net.http could not listen on address '%s': %s\n",
-			WEBSERVER_ADDR, err)
+			webServerAddr, err)
 	}
 }
 
@@ -707,7 +727,7 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 
 func (self *Overlord) Serv() {
 	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(WEBSERVER_ADDR)
+	go self.ServHTTP(OVERLORD_HTTP_PORT)
 	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
