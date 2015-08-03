@@ -36,6 +36,7 @@ var App = React.createClass({
       dataType: "json",
       success: function (data) {
         this.state.clients = data;
+        this.filterClientList();
         this.forceUpdate();
       }.bind(this),
       error: function (xhr, status, err) {
@@ -67,9 +68,13 @@ var App = React.createClass({
     this.forceUpdate();
   },
   filterClientList: function (val) {
-    var pattern = new RegExp(val);
+    if (typeof(val) != "undefined") {
+      this.lastPattern = new RegExp(val, "i");
+    } else if (typeof(this.lastPattern) == "undefined") {
+      this.lastPattern = new RegExp("", "i");
+    }
     for (var i = 0; i < this.state.clients.length; i++) {
-      if (!pattern.test(this.state.clients[i].mid)) {
+      if (!this.lastPattern.test(this.state.clients[i].mid)) {
         this.state.clients[i].status = "hidden";
       } else {
         this.state.clients[i].status = "";
@@ -88,9 +93,19 @@ var App = React.createClass({
                     {path: "/api/socket.io/"});
 
     socket.on("agent joined", function (msg) {
-      var obj = JSON.parse(msg)
-      this.state.recentclients.splice(0, 0, obj);
+      // Add to recent client list
+      this.state.recentclients.splice(0, 0, JSON.parse(msg));
       this.state.recentclients = this.state.recentclients.slice(0, 5);
+
+      // Add to client list and filter it if pattern does not matched
+      // We are not reusing the result of JSON.parse since we don't want to hide
+      // the client in recentclient list (and Javascript is passed-by
+      // reference).
+      var obj = JSON.parse(msg);
+      if (typeof(this.lastPattern) != "undefined" &&
+          !this.lastPattern.test(obj.mid)) {
+        obj.status = "hidden";
+      }
       this.state.clients.push(obj);
       this.forceUpdate();
     }.bind(this));

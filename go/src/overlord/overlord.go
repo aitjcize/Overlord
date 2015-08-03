@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -332,6 +333,14 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	return appNames, nil
 }
 
+type ByMid []map[string]interface{}
+
+func (a ByMid) Len() int           { return len(a) }
+func (a ByMid) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByMid) Less(i, j int) bool {
+	return a[i]["mid"].(string) < a[j]["mid"].(string)
+}
+
 // Web server main routine.
 func (self *Overlord) ServHTTP(port int) {
 	var upgrader = websocket.Upgrader{
@@ -399,6 +408,7 @@ func (self *Overlord) ServHTTP(port int) {
 			}
 			idx++
 		}
+		sort.Sort(ByMid(data))
 
 		result, err := json.Marshal(data)
 		if err != nil {
