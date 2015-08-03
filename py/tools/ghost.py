@@ -441,11 +441,6 @@ class Ghost(object):
     try:
       while True:
         rd, _, _ = select.select([p.stdout, p.stderr, self._sock], [], [])
-        p.poll()
-
-        if p.returncode != None:
-          raise RuntimeError('process complete')
-
         if p.stdout in rd:
           self._sock.send(p.stdout.read(_BUFSIZE))
 
@@ -457,7 +452,11 @@ class Ghost(object):
           if len(ret) == 0:
             raise RuntimeError('socket closed')
           p.stdin.write(ret)
-    except (OSError, socket.error, RuntimeError):
+
+        p.poll()
+        if p.returncode != None:
+          break
+    finally:
       self._sock.close()
       logging.info('SpawnShellServer: terminated')
       sys.exit(0)

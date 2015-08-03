@@ -422,16 +422,16 @@ func (self *ConnServer) handleRequest(req *Request) error {
 	switch req.Name {
 	case "ping":
 		err = self.handlePingRequest(req)
-	case "request_target_ssh_port":
-		err = self.handleRequestTargetSSHPortRequest(req)
-	case "register_target_ssh_port":
-		err = self.handleRegisterTargetSSHPortRequest(req)
 	case "register":
 		err = self.handleRegisterRequest(req)
 	case "request_to_download":
 		err = self.handleDownloadRequest(req)
 	case "clear_to_upload":
 		err = self.handleClearToUploadRequest(req)
+	case "request_target_ssh_port":
+		err = self.handleRequestTargetSSHPortRequest(req)
+	case "register_target_ssh_port":
+		err = self.handleRegisterTargetSSHPortRequest(req)
 	}
 	return err
 }
