@@ -6,7 +6,7 @@
 //
 // Requires:
 //   NavBar.jsx :: NavBar
-//   TerminalWindow.jsx :: TerminalWindow
+//   TerminalWindow.jsx :: TerminalWindow, UploadProgress
 //
 // - App
 //  - NavBar
@@ -19,6 +19,7 @@
 //      - ClientInfo
 //  - TerminalGroup
 //    - TerminalWindow
+//    - UploadProgress
 
 
 function abbr(str, len) {
@@ -230,19 +231,26 @@ var TerminalGroup = React.createClass({
   render: function () {
     var onClose = function (e) {
       this.props.app.removeTerminal(this.props.mid);
-    }
+    };
     return (
-      <div className="terminal-group">
-        {
-          this.props.data.map(function (item) {
-            return (
-              <TerminalWindow key={item.mid} mid={item.mid}
-               id={"terminal-" + item.mid} title={item.mid}
-               path={"/api/agent/pty/" + item.mid}
-               app={this.props.app} onClose={onClose} />
-            );
-          }.bind(this))
-        }
+      <div>
+        <div className="terminal-group">
+          {
+            this.props.data.map(function (item) {
+              return (
+                <TerminalWindow key={item.mid} mid={item.mid}
+                 id={"terminal-" + item.mid} title={item.mid}
+                 path={"/api/agent/pty/" + item.mid}
+                 uploadPath={"/api/agent/upload/" + item.mid}
+                 app={this.props.app} progressBars={this.refs.uploadProgress}
+                 onClose={onClose} />
+              );
+            }.bind(this))
+          }
+        </div>
+        <div className="upload-progress">
+          <UploadProgress ref="uploadProgress" />
+        </div>
       </div>
     );
   }

@@ -23,6 +23,11 @@ const (
 	PING_RECV_TIMEOUT = PING_TIMEOUT * 2
 )
 
+type TerminalControl struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
+}
+
 type LogcatContext struct {
 	Format  int               // Log format, see constants.go
 	WsConns []*websocket.Conn // WebSockets for logcat
@@ -32,7 +37,7 @@ type LogcatContext struct {
 type FileDownloadContext struct {
 	Name  string      // Download filename
 	Size  int64       // Download filesize
-	Data  chan string // Channel for download data
+	Data  chan []byte // Channel for download data
 	Ready bool        // Ready for download
 }
 
@@ -67,7 +72,7 @@ func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 		ovl:        ovl,
 		stopListen: make(chan bool, 1),
 		registered: false,
-		Download:   FileDownloadContext{Data: make(chan string)},
+		Download:   FileDownloadContext{Data: make(chan []byte)},
 	}
 }
 
@@ -175,7 +180,7 @@ func (self *ConnServer) forwardLogcatOutput(buffer string) {
 	self.logcat.WsConns = aliveWsConns
 }
 
-func (self *ConnServer) forwardFileDownloadData(buffer string) {
+func (self *ConnServer) forwardFileDownloadData(buffer []byte) {
 	self.Download.Data <- buffer
 }
 
@@ -201,7 +206,7 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 		self.writeLogToWS(v.Conn, self.logcat.History)
 		self.logcat.WsConns = append(self.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
-		self.SpawnFileServer(v.Sid, v.Action, v.Filename)
+		self.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename)
 	}
 }
 
@@ -230,7 +235,7 @@ func (self *ConnServer) Listen() {
 				continue
 			case FILE:
 				if self.Download.Ready {
-					self.forwardFileDownloadData(buffer)
+					self.forwardFileDownloadData(buf)
 					continue
 				}
 			}
@@ -267,7 +272,7 @@ func (self *ConnServer) Listen() {
 		case err := <-readErrChan:
 			if err == io.EOF {
 				if self.Download.Ready {
-					self.Download.Data <- ""
+					self.Download.Data <- nil
 					return
 				}
 				log.Printf("connection dropped: %s\n", self.Mid)
@@ -349,10 +354,10 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 		return err
 	} else {
 		if len(args.Mid) == 0 {
-			return errors.New("handleRegisterRequest: Empty machine ID received")
+			return errors.New("handleRegisterRequest: empty machine ID received")
 		}
 		if len(args.Sid) == 0 {
-			return errors.New("handleRegisterRequest: Empty session ID received")
+			return errors.New("handleRegisterRequest: empty session ID received")
 		}
 	}
 
@@ -366,6 +371,16 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	self.wsConn, err = self.ovl.Register(self)
 	if err != nil {
 		return RegistrationFailedError(err)
+	}
+
+	// Notify client of our Terminal ssesion ID
+	if self.Mode == TERMINAL && self.wsConn != nil {
+		msg, err := json.Marshal(TerminalControl{"sid", self.Sid})
+		if err != nil {
+			log.Println("handleRegisterRequest: failed to format message")
+		} else {
+			self.wsConn.WriteMessage(websocket.TextMessage, msg)
+		}
 	}
 
 	self.registered = true
@@ -397,6 +412,11 @@ func (self *ConnServer) handleDownloadRequest(req *Request) error {
 	return self.SendResponse(res)
 }
 
+func (self *ConnServer) handleClearToUploadRequest(req *Request) error {
+	self.ovl.RegisterUploadRequest(self)
+	return nil
+}
+
 func (self *ConnServer) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
@@ -410,6 +430,8 @@ func (self *ConnServer) handleRequest(req *Request) error {
 		err = self.handleRegisterRequest(req)
 	case "request_to_download":
 		err = self.handleDownloadRequest(req)
+	case "clear_to_upload":
+		err = self.handleClearToUploadRequest(req)
 	}
 	return err
 }
@@ -461,21 +483,29 @@ func (self *ConnServer) SpawnShell(sid string, command string) {
 
 // Spawn a remote file command connection (a ghost with mode FILE).
 // action is either 'download' or 'upload'.
-func (self *ConnServer) SpawnFileServer(sid, action, filename string) {
-	if action == "download" {
-		handler := func(res *Response) error {
-			if res == nil {
-				return errors.New("SpawnFileServer: command timeout ")
-			}
-			if res.Response != SUCCESS {
-				return errors.New("SpawnFileServer failed: " + res.Response)
-			}
-			return nil
+// sid is used for uploading file, indicatiting which client's working
+// directory to upload to.
+func (self *ConnServer) SpawnFileServer(sid, terminalSid, action, filename string) {
+	handler := func(res *Response) error {
+		if res == nil {
+			return errors.New("SpawnFileServer: command timeout ")
 		}
+		if res.Response != SUCCESS {
+			return errors.New("SpawnFileServer failed: " + res.Response)
+		}
+		return nil
+	}
 
+	if action == "download" {
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
 		self.SendRequest(req, handler)
+	} else if action == "upload" {
+		req := NewRequest("file_upload", map[string]interface{}{
+			"sid": sid, "terminal_sid": terminalSid, "filename": filename})
+		self.SendRequest(req, handler)
+	} else {
+		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)
 	}
 }
 

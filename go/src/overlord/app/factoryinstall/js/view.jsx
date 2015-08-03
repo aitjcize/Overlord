@@ -274,7 +274,7 @@ var ClientInfo = React.createClass({
 
     var onError = function (e) {
       this.props.client.updateStatus("error");
-    }
+    };
 
     var onMessage = function (data) {
       if (data.indexOf("Factory Installer Complete") != -1) {
@@ -287,7 +287,7 @@ var ClientInfo = React.createClass({
     var onCloseClicked = function (e) {
       var el = document.getElementById(this.props.id);
       $(el).css("display", "none");
-    }
+    };
 
     var mid = this.props.data.mid;
     return (

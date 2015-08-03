@@ -28,6 +28,11 @@ func (self *GhostRPC) RegisterTTY(args []string, reply *EmptyReply) error {
 	return nil
 }
 
+func (self *GhostRPC) RegisterSession(args []string, reply *EmptyReply) error {
+	self.ghost.RegisterSession(args[0], args[1])
+	return nil
+}
+
 func (self *GhostRPC) AddToDownloadQueue(args []string, reply *EmptyReply) error {
 	self.ghost.AddToDownloadQueue(args[0], args[1])
 	return nil

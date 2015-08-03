@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/satori/go.uuid"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -42,9 +43,10 @@ type SpawnShellCmd struct {
 }
 
 type SpawnFileCmd struct {
-	Sid      string
-	Action   string
-	Filename string
+	Sid         string
+	TerminalSid string
+	Action      string
+	Filename    string
 }
 type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
@@ -76,8 +78,9 @@ type Overlord struct {
 	logcats           map[string]map[string]*ConnServer // logcat clients
 	wsctxs            map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
 	downloads         map[string]*ConnServer            // Download file agents
-	ioserver          *socketio.Server                  // Socket.io server for communication with frontend
-	lastTargetSSHPort int                               // Last target SSH port suggested to ConnServer
+	uploads           map[string]*ConnServer            // Upload file agents
+	ioserver          *socketio.Server
+	lastTargetSSHPort int // Last target SSH port suggested to ConnServer
 }
 
 func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Overlord {
@@ -89,6 +92,7 @@ func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Over
 		logcats:           make(map[string]map[string]*ConnServer),
 		wsctxs:            make(map[string]*WebSocketContext),
 		downloads:         make(map[string]*ConnServer),
+		uploads:           make(map[string]*ConnServer),
 		lastTargetSSHPort: TARGET_SSH_PORT_START - 1,
 	}
 }
@@ -175,6 +179,9 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 		if _, ok := self.downloads[conn.Sid]; ok {
 			delete(self.downloads, conn.Sid)
 		}
+		if _, ok := self.uploads[conn.Sid]; ok {
+			delete(self.uploads, conn.Sid)
+		}
 	default:
 		if _, ok := self.wsctxs[conn.Sid]; ok {
 			delete(self.wsctxs, conn.Sid)
@@ -200,6 +207,14 @@ func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	// can have multiple download at the same time
 	self.ioserver.BroadcastTo(conn.Bid, "file download", string(conn.Sid))
 	self.downloads[conn.Sid] = conn
+}
+
+// Register a upload request clients.
+func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
+	// Use session ID as upload session ID instead of machine ID, so a machine
+	// can have multiple upload at the same time
+	self.ioserver.BroadcastTo(conn.Bid, "file upload", string(conn.Sid))
+	self.uploads[conn.Sid] = conn
 }
 
 // It's not that important to worry about race conditions here, since
@@ -294,23 +309,27 @@ func (self *Overlord) GetAppDir() string {
 func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	var appNames []string
 
+	isSpecial := func(target string) bool {
+		for _, name := range []string{"common", "index", "upgrade"} {
+			if name == target {
+				return true
+			}
+		}
+		return false
+	}
+
 	apps, err := ioutil.ReadDir(self.GetAppDir())
 	if err != nil {
 		return nil, nil
 	}
 
 	for _, app := range apps {
-		if !app.IsDir() ||
-			(ignoreSpecial && (app.Name() == "common" || app.Name() == "index")) {
+		if !app.IsDir() || (ignoreSpecial && isSpecial(app.Name())) {
 			continue
 		}
 		appNames = append(appNames, app.Name())
 	}
 	return appNames, nil
-}
-
-func AuthPassThrough(h http.Handler) http.Handler {
-	return h
 }
 
 // Web server main routine.
@@ -352,12 +371,12 @@ func (self *Overlord) ServHTTP(port int) {
 
 		apps, err := self.GetAppNames(true)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
 		}
 
 		result, err := json.Marshal(map[string][]string{"apps": apps})
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
 		} else {
 			w.Write(result)
 		}
@@ -383,7 +402,7 @@ func (self *Overlord) ServHTTP(port int) {
 
 		result, err := json.Marshal(data)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
 		} else {
 			w.Write(result)
 		}
@@ -398,7 +417,7 @@ func (self *Overlord) ServHTTP(port int) {
 					agent.Mid)))
 			}
 		}
-		w.Write([]byte(SUCCESS + "\n"))
+		w.Write([]byte(`{"status": "success"}`))
 	}
 
 	// List all logcat clients connected to the Overlord.
@@ -420,7 +439,7 @@ func (self *Overlord) ServHTTP(port int) {
 
 		result, err := json.Marshal(data)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
 		} else {
 			w.Write(result)
 		}
@@ -518,12 +537,12 @@ func (self *Overlord) ServHTTP(port int) {
 		if agent, ok := self.agents[mid]; ok {
 			jsonResult, err := json.Marshal(agent.Properties)
 			if err != nil {
-				w.Write([]byte(fmt.Sprintf(`{"error", "%s"}`, err.Error())))
+				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
 				return
 			}
 			w.Write(jsonResult)
 		} else {
-			w.Write([]byte(fmt.Sprintf(`{"error", "No client with mid` + mid + `"}`)))
+			w.Write([]byte(fmt.Sprintf(`{"error": "No client with mid %s"}`, mid)))
 		}
 	}
 
@@ -542,10 +561,10 @@ func (self *Overlord) ServHTTP(port int) {
 
 		for {
 			data := <-c.Download.Data
-			if len(data) == 0 {
+			if data == nil {
 				return
 			}
-			if _, err := w.Write([]byte(data)); err != nil {
+			if _, err := w.Write(data); err != nil {
 				break
 			}
 		}
@@ -573,7 +592,7 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		sid := uuid.NewV4().String()
-		agent.Bridge <- SpawnFileCmd{sid, "download", filename[0]}
+		agent.Bridge <- SpawnFileCmd{sid, "", "download", filename[0]}
 
 		var c *ConnServer
 		const maxTries = 100 // 20 seconds
@@ -593,7 +612,7 @@ func (self *Overlord) ServHTTP(port int) {
 		serveFileHTTP(w, c)
 	}
 
-	// Pass file download request handler.
+	// Passive file download request handler.
 	// This handler deal with requests that are initiated by the client. We
 	// simply check if the session id exists in the download client list, than
 	// start to download the file if it does.
@@ -609,6 +628,69 @@ func (self *Overlord) ServHTTP(port int) {
 			return
 		}
 		serveFileHTTP(w, c)
+	}
+
+	// File upload request handler.
+	AgentUploadHandler := func(w http.ResponseWriter, r *http.Request) {
+		var ok bool
+		var agent *ConnServer
+		var errMsg string
+
+		defer func() {
+			if errMsg != "" {
+				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, errMsg)))
+				http.Error(w, "", http.StatusBadRequest)
+			}
+		}()
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		if agent, ok = self.agents[mid]; !ok {
+			errMsg = fmt.Sprintf("No client with mid %s", mid)
+			return
+		}
+
+		mr, err := r.MultipartReader()
+		if err != nil {
+			errMsg = err.Error()
+			return
+		}
+
+		p, err := mr.NextPart()
+		if err != nil {
+			errMsg = err.Error()
+			return
+		}
+
+		var sids []string
+		if sids, ok = r.URL.Query()["sid"]; !ok {
+			sids = []string{""}
+		}
+		sid := uuid.NewV4().String()
+		filename := filepath.Base(p.FileName())
+		agent.Bridge <- SpawnFileCmd{sid, sids[0], "upload", filename}
+
+		const maxTries = 100 // 20 seconds
+		count := 0
+
+		// Wait until upload client connects
+		var c *ConnServer
+		for {
+			if count++; count == maxTries {
+				http.Error(w, "no response from client", http.StatusInternalServerError)
+				return
+			}
+			if c, ok = self.uploads[sid]; ok {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		io.Copy(c.Conn, p)
+		c.StopListen()
+
+		w.Write([]byte(`{"status": "success"}`))
+		return
 	}
 
 	// HTTP basic auth
@@ -634,6 +716,7 @@ func (self *Overlord) ServHTTP(port int) {
 	r.HandleFunc("/api/agent/shell/{mid}", AgentShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
+	r.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
 
 	// File methods
 	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)

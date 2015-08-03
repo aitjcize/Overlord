@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -44,31 +45,46 @@ const (
 	BLOCK_SIZE     = 4096
 )
 
+// An structure that we be place into download queue.
+// In our case since we always execute 'ghost --download' in our pseudo
+// terminal so ttyName will always have the form /dev/pts/X
 type DownloadInfo struct {
 	Ttyname  string
 	Filename string
 }
 
+type FileOperation struct {
+	Action   string
+	Filename string
+	Pid      int
+}
+
+type FileUploadContext struct {
+	Ready bool
+	Data  chan []byte
+}
+
 type Ghost struct {
 	*RPCCore
-	addrs         []string               // List of possible Overlord addresses
-	sessionMap    map[string]string      // Mapping between ttyName and bid
-	server        *rpc.Server            // RPC server handle
-	connectedAddr string                 // Current connected Overlord address
-	mid           string                 // Machine ID
-	sid           string                 // Session ID
-	bid           string                 // Browser ID
-	mode          int                    // mode, see constants.go
-	properties    map[string]interface{} // Client properties
-	reset         bool                   // Whether to reset the connection
-	quit          bool                   // Whether to quit the connection
-	readChan      chan []byte            // The incoming data channel
-	readErrChan   chan error             // The incoming data error channel
-	pauseLanDisc  bool                   // Stop LAN discovery
-	shellCommand  string                 // Shell command to execute
-	fileOperation string                 // File operation name
-	fileFilename  string                 // File operation filename
-	downloadQueue chan DownloadInfo      // Download queue
+	addrs           []string               // List of possible Overlord addresses
+	ttyName2Bid     map[string]string      // Mapping between ttyName and bid
+	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
+	server          *rpc.Server            // RPC server handle
+	connectedAddr   string                 // Current connected Overlord address
+	mid             string                 // Machine ID
+	sid             string                 // Session ID
+	bid             string                 // Browser ID
+	mode            int                    // mode, see constants.go
+	properties      map[string]interface{} // Client properties
+	reset           bool                   // Whether to reset the connection
+	quit            bool                   // Whether to quit the connection
+	readChan        chan []byte            // The incoming data channel
+	readErrChan     chan error             // The incoming data error channel
+	pauseLanDisc    bool                   // Stop LAN discovery
+	shellCommand    string                 // Shell command to execute
+	fileOperation   FileOperation          // File operation name
+	downloadQueue   chan DownloadInfo      // Download queue
+	upload          FileUploadContext      // File upload context
 }
 
 func NewGhost(addrs []string, mode int, mid string) *Ghost {
@@ -86,17 +102,19 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 		}
 	}
 	return &Ghost{
-		RPCCore:       NewRPCCore(nil),
-		sessionMap:    make(map[string]string),
-		addrs:         addrs,
-		mid:           finalMid,
-		sid:           uuid.NewV4().String(),
-		mode:          mode,
-		properties:    make(map[string]interface{}),
-		reset:         false,
-		quit:          false,
-		pauseLanDisc:  false,
-		downloadQueue: make(chan DownloadInfo),
+		RPCCore:         NewRPCCore(nil),
+		ttyName2Bid:     make(map[string]string),
+		terminalSid2Pid: make(map[string]int),
+		addrs:           addrs,
+		mid:             finalMid,
+		sid:             uuid.NewV4().String(),
+		mode:            mode,
+		properties:      make(map[string]interface{}),
+		reset:           false,
+		quit:            false,
+		pauseLanDisc:    false,
+		downloadQueue:   make(chan DownloadInfo),
+		upload:          FileUploadContext{Data: make(chan []byte)},
 	}
 }
 
@@ -115,9 +133,10 @@ func (self *Ghost) SetCommand(command string) *Ghost {
 	return self
 }
 
-func (self *Ghost) SetFileOp(operation, filename string) *Ghost {
-	self.fileOperation = operation
-	self.fileFilename = filename
+func (self *Ghost) SetFileOp(operation, filename string, pid int) *Ghost {
+	self.fileOperation.Action = operation
+	self.fileOperation.Filename = filename
+	self.fileOperation.Pid = pid
 	return self
 }
 
@@ -275,10 +294,39 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Printf("Received file_download command, file agent spawned\n")
+		log.Println("Received file_download command, file agent spawned")
 		addrs := []string{self.connectedAddr}
 		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-			"download", params.Filename)
+			"download", params.Filename, 0)
+		g.Start(false, false)
+	}()
+
+	res := NewResponse(req.Rid, SUCCESS, nil)
+	return self.SendResponse(res)
+}
+
+func (self *Ghost) handleFileUploadRequest(req *Request) error {
+	type RequestParams struct {
+		Sid         string `json:"sid"`
+		TerminalSid string `json:"terminal_sid"`
+		Filename    string `json:"filename"`
+	}
+
+	var params RequestParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return err
+	}
+
+	pid, ok := self.terminalSid2Pid[params.TerminalSid]
+	if !ok {
+		pid = 0
+	}
+
+	go func() {
+		log.Println("Received file_upload command, file agent spawned")
+		addrs := []string{self.connectedAddr}
+		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
+			"upload", params.Filename, pid)
 		g.Start(false, false)
 	}()
 
@@ -295,21 +343,50 @@ func (self *Ghost) StartDownloadServer() error {
 		log.Println("StartDownloadServer: terminated")
 	}()
 
-	file, err := os.Open(self.fileFilename)
+	file, err := os.Open(self.fileOperation.Filename)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	for {
-		data := make([]byte, BLOCK_SIZE)
-		count, err := file.Read(data)
+	io.Copy(self.Conn, file)
+	return nil
+}
+
+func (self *Ghost) StartUploadServer() error {
+	log.Println("StartUploadServer: started")
+
+	defer func() {
+		log.Println("StartUploadServer: terminated")
+	}()
+
+	// Get the client's working dir, which is our target upload dir
+	target_dir := os.Getenv("HOME")
+	if target_dir == "" {
+		target_dir = "/tmp"
+	}
+
+	var err error
+	if self.fileOperation.Pid != 0 {
+		target_dir, err = os.Readlink(fmt.Sprintf("/proc/%d/cwd",
+			self.fileOperation.Pid))
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
 			return err
 		}
-		self.Conn.Write(data[:count])
+	}
+
+	file, err := os.Create(filepath.Join(target_dir, self.fileOperation.Filename))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for {
+		buffer := <-self.upload.Data
+		if buffer == nil {
+			break
+		}
+		file.Write(buffer)
 	}
 
 	return nil
@@ -328,6 +405,8 @@ func (self *Ghost) handleRequest(req *Request) error {
 		err = self.handleFileDownloadRequest(req)
 	case "clear_to_download":
 		err = self.StartDownloadServer()
+	case "file_upload":
+		err = self.handleFileUploadRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
@@ -442,10 +521,20 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 	}
 
 	client, err := GhostRPCServer()
-	err = client.Call("rpc.RegisterTTY", []string{self.bid, ttyName},
-		&EmptyReply{})
-	if err != nil {
-		return err
+
+	// Ghost could be launched without RPC server, ignore registraion in that case
+	if err == nil {
+		err = client.Call("rpc.RegisterTTY", []string{self.bid, ttyName},
+			&EmptyReply{})
+		if err != nil {
+			return err
+		}
+
+		err = client.Call("rpc.RegisterSession", []string{
+			self.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
+		if err != nil {
+			return err
+		}
 	}
 
 	stopConn := make(chan bool, 1)
@@ -585,20 +674,31 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 // The operation could either be 'download' or 'upload'
 // This function starts handshake with overlord then execute download sequence.
 func (self *Ghost) InitiateFileOperation(res *Response) error {
-	if self.fileOperation == "download" {
-		fi, err := os.Stat(self.fileFilename)
+	if self.fileOperation.Action == "download" {
+		fi, err := os.Stat(self.fileOperation.Filename)
 		if err != nil {
 			return err
 		}
 
 		req := NewRequest("request_to_download", map[string]interface{}{
 			"bid":      self.bid,
-			"filename": filepath.Base(self.fileFilename),
+			"filename": filepath.Base(self.fileOperation.Filename),
 			"size":     fi.Size(),
 		})
 
-		req.SetTimeout(PING_TIMEOUT)
 		return self.SendRequest(req, nil)
+	} else if self.fileOperation.Action == "upload" {
+		self.upload.Ready = true
+		req := NewRequest("clear_to_upload", nil)
+		req.SetTimeout(-1)
+		err := self.SendRequest(req, nil)
+		if err != nil {
+			return err
+		}
+		go self.StartUploadServer()
+		return nil
+	} else {
+		return errors.New("InitiateFileOperation: unknown file operation, ignored")
 	}
 	return nil
 }
@@ -653,7 +753,7 @@ func (self *Ghost) Register() error {
 func (self *Ghost) InitiateDownload(info DownloadInfo) {
 	addrs := []string{self.connectedAddr}
 	g := NewGhost(addrs, FILE, RANDOM_MID).SetBid(
-		self.sessionMap[info.Ttyname]).SetFileOp("download", info.Filename)
+		self.ttyName2Bid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
 	g.Start(false, false)
 }
 
@@ -680,6 +780,15 @@ func (self *Ghost) Listen() error {
 	for {
 		select {
 		case buffer := <-readChan:
+			if self.upload.Ready {
+				if self.ReadBuffer != "" {
+					// Write the left over from previous ReadBuffer
+					self.upload.Data <- []byte(self.ReadBuffer)
+					self.ReadBuffer = ""
+				}
+				self.upload.Data <- buffer
+				continue
+			}
 			reqs := self.ParseRequests(string(buffer), false)
 			if self.quit {
 				return nil
@@ -689,6 +798,11 @@ func (self *Ghost) Listen() error {
 			}
 		case err := <-readErrChan:
 			if err == io.EOF {
+				if self.upload.Ready {
+					self.upload.Data <- nil
+					self.quit = true
+					return nil
+				}
 				return errors.New("Connection dropped")
 			} else {
 				return err
@@ -696,7 +810,10 @@ func (self *Ghost) Listen() error {
 		case info := <-self.downloadQueue:
 			self.InitiateDownload(info)
 		case <-pingTicker.C:
-			self.Ping()
+			// When upload is in progress, we don't want to send any ping message.
+			if !self.upload.Ready {
+				self.Ping()
+			}
 		case <-reqTicker.C:
 			err := self.ScanForTimeoutRequests()
 			if self.reset {
@@ -707,7 +824,15 @@ func (self *Ghost) Listen() error {
 }
 
 func (self *Ghost) RegisterTTY(brower_id, ttyName string) {
-	self.sessionMap[ttyName] = brower_id
+	self.ttyName2Bid[ttyName] = brower_id
+}
+
+func (self *Ghost) RegisterSession(session_id, pidStr string) {
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		panic(err)
+	}
+	self.terminalSid2Pid[session_id] = pid
 }
 
 func (self *Ghost) AddToDownloadQueue(ttyName, filename string) {

@@ -120,7 +120,7 @@ var App = React.createClass({
   render: function () {
     onClose = function (e) {
       this.props.app.removeTerminal(this.props.mid);
-    }
+    };
     return (
       <div id="main">
         <NavBar name="Fixture Dashboard" url="/api/apps/list" />

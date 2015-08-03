@@ -68,3 +68,9 @@ html, body, #main {
   left: 25%;
   top: 10%;
 }
+
+.upload-progress-bars {
+  position: fixed;
+  right: 50px;
+  bottom: 0px;
+}

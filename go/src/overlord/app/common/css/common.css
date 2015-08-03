@@ -67,3 +67,41 @@
   line-height: 16px;
   text-rendering: auto;
 }
+
+.terminal-drop-overlay {
+  display: none;
+  width: 100%;
+  height: calc(100% - 24px);
+  background-color: rgba(255, 255, 255, 0.7);
+  position: absolute;
+  top: 24px;
+  text-align: center;
+  line-height: 400px;
+  font-size: 2em;
+  font-family: Verdana;
+  border: 5px dashed #777;
+}
+
+.progress {
+  margin: 3px;
+}
+
+.upload-progress-bar {
+  min-width: 2em;
+}
+
+.upload-progress-bars {
+  width: 400px;
+}
+
+.upload-progress-bars-hidden {
+  display: none;
+}
+
+.upload-progress-bars > .panel-heading {
+  padding: 5px 10px;
+}
+
+.upload-progress-bars > .panel-body {
+  padding: 2px;
+}
