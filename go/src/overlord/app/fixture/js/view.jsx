@@ -250,7 +250,11 @@ var Controls = React.createClass({
 
     sock.onopen = function () {
       sock.onmessage = function (msg) {
-        this.props.fixture.refs.mainlog.appendLog(Base64.decode(msg.data));
+        if (msg.data instanceof Blob) {
+          ReadBlobAsText(msg.data, function(text) {
+            this.props.fixture.refs.mainlog.appendLog(text);
+          }.bind(this));
+        }
       }.bind(this)
     }.bind(this)
   },
@@ -371,14 +375,17 @@ var AuxLog = React.createClass({
     sock.onopen = function () {
       var odiv = this.refs["log-" + this.props.mid].getDOMNode();
       sock.onmessage = function (msg) {
-        var text = Base64.decode(msg.data);
-        this.props.fixture.refs.lights.scanForLightMsg(text);
-        odiv.innerText += text;
-        if (odiv.innerText.length > LOG_BUF_SIZE) {
-          odiv.innerText = odiv.innerText.substr(odiv.innerText.length -
-                                                 LOG_BUF_SIZE, LOG_BUF_SIZE);
+        if (msg.data instanceof Blob) {
+          ReadBlobAsText(msg.data, function (text) {
+            this.props.fixture.refs.lights.scanForLightMsg(text);
+            odiv.innerText += text;
+            if (odiv.innerText.length > LOG_BUF_SIZE) {
+              odiv.innerText = odiv.innerText.substr(odiv.innerText.length -
+                                                     LOG_BUF_SIZE, LOG_BUF_SIZE);
+            }
+            odiv.scrollTop = odiv.scrollHeight;
+          }.bind(this));
         }
-        odiv.scrollTop = odiv.scrollHeight;
       }.bind(this)
     }.bind(this)
   },

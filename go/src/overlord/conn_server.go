@@ -104,7 +104,7 @@ func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 	if self.Mode == LOGCAT && self.logcat.Format == TEXT {
 		buf = ToVTNewLine(buf)
 	}
-	return conn.WriteMessage(websocket.TextMessage, B64Encode(buf))
+	return conn.WriteMessage(websocket.BinaryMessage, []byte(buf))
 }
 
 // Forwards the input from Websocket to TCP socket.
@@ -146,7 +146,7 @@ func (self *ConnServer) forwardTerminalOutput(buffer string) {
 	if self.wsConn == nil {
 		self.stopListen <- true
 	}
-	self.wsConn.WriteMessage(websocket.TextMessage, B64Encode(buffer))
+	self.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
 }
 
 // Forward the logcat output to WebSocket.

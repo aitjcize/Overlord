@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha1"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -21,13 +20,6 @@ import (
 	"syscall"
 	"unsafe"
 )
-
-func B64Encode(buffer string) []byte {
-	n := len(buffer)
-	out := make([]byte, base64.StdEncoding.EncodedLen(n))
-	base64.StdEncoding.Encode(out, []byte(buffer))
-	return out
-}
 
 func GetGateWayIP() ([]string, error) {
 	f, err := os.Open("/proc/net/route")

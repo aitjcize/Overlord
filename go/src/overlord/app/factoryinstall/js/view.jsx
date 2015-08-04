@@ -276,8 +276,7 @@ var ClientInfo = React.createClass({
       this.props.client.updateStatus("error");
     }
 
-    var onMessage = function (msg) {
-      var data = Base64.decode(msg.data);
+    var onMessage = function (data) {
       if (data.indexOf("Factory Installer Complete") != -1) {
         this.props.client.updateStatus("done");
       } else if (data.indexOf("\033[1;31m") != -1) {

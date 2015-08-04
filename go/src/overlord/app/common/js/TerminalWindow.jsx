@@ -66,12 +66,14 @@ var TerminalWindow = React.createClass({
       });
 
       sock.onmessage = function (msg) {
-        var data = Base64.decode(msg.data);
-        term.write(data);
-
-        var callback = this.props.onMessage;
-        if (typeof(callback) != "undefined") {
-          (callback.bind(this))(msg);
+        if (msg.data instanceof Blob) {
+          var callback = this.props.onMessage;
+          ReadBlobAsText(msg.data, function(text) {
+            term.write(text);
+            if (typeof(callback) != "undefined") {
+              (callback.bind(this))(text);
+            }
+          }.bind(this));
         }
       }.bind(this);
 
