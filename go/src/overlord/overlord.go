@@ -54,8 +54,8 @@ type ConnectLogcatCmd struct {
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
 // will request a new terminal connection with client ID equals the session ID.
-// This way, the ConnServer can retreive the connresponding WebSocketContext
-// with it's client (session) ID and get the WebSocket.
+// This way, the ConnServer can retreive the corresponding WebSocketContext
+// with its client (session) ID and get the WebSocket.
 type WebSocketContext struct {
 	Sid  string
 	Conn *websocket.Conn
@@ -69,25 +69,27 @@ func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 }
 
 type Overlord struct {
-	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
-	noAuth           bool                              // Disable HTTP basic authentication
-	TLSSettings      string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
-	agents           map[string]*ConnServer            // Normal ghost agents
-	logcats          map[string]map[string]*ConnServer // logcat clients
-	wsctxs           map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
-	downloads        map[string]*ConnServer            // Download file agents
-	ioserver         *socketio.Server
+	lanDiscInterface  string                            // Network interface used for broadcasting LAN discovery packet
+	noAuth            bool                              // Disable HTTP basic authentication
+	TLSSettings       string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
+	agents            map[string]*ConnServer            // Normal ghost agents
+	logcats           map[string]map[string]*ConnServer // logcat clients
+	wsctxs            map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
+	downloads         map[string]*ConnServer            // Download file agents
+	ioserver          *socketio.Server                  // Socket.io server for communication with frontend
+	lastTargetSSHPort int                               // Last target SSH port suggested to ConnServer
 }
 
 func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Overlord {
 	return &Overlord{
-		lanDiscInterface: lanDiscInterface,
-		noAuth:           noAuth,
-		TLSSettings:      TLSSettings,
-		agents:           make(map[string]*ConnServer),
-		logcats:          make(map[string]map[string]*ConnServer),
-		wsctxs:           make(map[string]*WebSocketContext),
-		downloads:        make(map[string]*ConnServer),
+		lanDiscInterface:  lanDiscInterface,
+		noAuth:            noAuth,
+		TLSSettings:       TLSSettings,
+		agents:            make(map[string]*ConnServer),
+		logcats:           make(map[string]map[string]*ConnServer),
+		wsctxs:            make(map[string]*WebSocketContext),
+		downloads:         make(map[string]*ConnServer),
+		lastTargetSSHPort: TARGET_SSH_PORT_START - 1,
 	}
 }
 
@@ -200,6 +202,17 @@ func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	self.downloads[conn.Cid] = conn
 }
 
+// It's not that important to worry about race conditions here, since
+// after all the port is just a suggestion.  If it doesn't work, ConnServer
+// will come back and request another one.
+func (self *Overlord) SuggestTargetSSHPort() int {
+	self.lastTargetSSHPort++
+	if self.lastTargetSSHPort > TARGET_SSH_PORT_END {
+		self.lastTargetSSHPort = TARGET_SSH_PORT_START - 1
+	}
+	return self.lastTargetSSHPort
+}
+
 // Handle TCP Connection.
 func (self *Overlord) handleConnection(conn net.Conn) {
 	handler := NewConnServer(self, conn)
@@ -223,7 +236,7 @@ func (self *Overlord) ServSocket(port int) {
 		if err != nil {
 			panic(err)
 		}
-		log.Printf("Incomming connection from %s\n", conn.RemoteAddr())
+		log.Printf("Incoming connection from %s\n", conn.RemoteAddr())
 		conn.SetKeepAlive(true)
 		conn.SetKeepAlivePeriod(KEEP_ALIVE_PERIOD * time.Second)
 		self.handleConnection(conn)
@@ -353,12 +366,17 @@ func (self *Overlord) ServHTTP(port int) {
 	// List all agents connected to the Overlord.
 	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]string, len(self.agents))
+		data := make([]map[string]interface{}, len(self.agents))
 		idx := 0
 		for _, agent := range self.agents {
-			data[idx] = map[string]string{
-				"mid": agent.Mid,
-				"cid": agent.Cid,
+			data[idx] = map[string]interface{}{
+				"mid":  agent.Mid,
+				"cid":  agent.Cid,
+			}
+			if agent.TargetSSHPort == 0 {
+				data[idx]["target_ssh_port"] = nil
+			} else {
+				data[idx]["target_ssh_port"] = agent.TargetSSHPort
 			}
 			idx++
 		}
