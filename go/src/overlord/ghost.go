@@ -56,7 +56,7 @@ type Ghost struct {
 	server        *rpc.Server            // RPC server handle
 	connectedAddr string                 // Current connected Overlord address
 	mid           string                 // Machine ID
-	cid           string                 // Client ID
+	sid           string                 // Session ID
 	bid           string                 // Browser ID
 	mode          int                    // mode, see constants.go
 	properties    map[string]interface{} // Client properties
@@ -90,7 +90,7 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 		sessionMap:    make(map[string]string),
 		addrs:         addrs,
 		mid:           finalMid,
-		cid:           uuid.NewV4().String(),
+		sid:           uuid.NewV4().String(),
 		mode:          mode,
 		properties:    make(map[string]interface{}),
 		reset:         false,
@@ -100,8 +100,8 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 	}
 }
 
-func (self *Ghost) SetCid(cid string) *Ghost {
-	self.cid = cid
+func (self *Ghost) SetSid(sid string) *Ghost {
+	self.sid = sid
 	return self
 }
 
@@ -231,7 +231,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetCid(params.Sid).SetBid(params.Bid)
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetBid(params.Bid)
 		g.Start(false, false)
 	}()
 
@@ -255,7 +255,7 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, SHELL, RANDOM_MID).SetCid(params.Sid).SetCommand(params.Cmd)
+		g := NewGhost(addrs, SHELL, RANDOM_MID).SetSid(params.Sid).SetCommand(params.Cmd)
 		g.Start(false, false)
 	}()
 
@@ -277,7 +277,7 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 	go func() {
 		log.Printf("Received file_download command, file agent spawned\n")
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, FILE, RANDOM_MID).SetCid(params.Sid).SetFileOp(
+		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
 			"download", params.Filename)
 		g.Start(false, false)
 	}()
@@ -613,7 +613,7 @@ func (self *Ghost) Register() error {
 			self.Conn = conn
 			req := NewRequest("register", map[string]interface{}{
 				"mid":        self.mid,
-				"cid":        self.cid,
+				"sid":        self.sid,
 				"mode":       self.mode,
 				"properties": self.properties,
 			})
@@ -820,7 +820,7 @@ func (self *Ghost) ScanGateway() {
 func (self *Ghost) Start(lanDisc bool, RPCServer bool) {
 	log.Printf("%s started\n", ModeStr(self.mode))
 	log.Printf("MID: %s\n", self.mid)
-	log.Printf("CID: %s\n", self.cid)
+	log.Printf("SID: %s\n", self.sid)
 
 	if lanDisc {
 		go self.StartLanDiscovery()

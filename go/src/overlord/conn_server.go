@@ -44,7 +44,7 @@ type ConnServer struct {
 	*RPCCore
 	Mode          int                    // Client mode, see constants.go
 	Bridge        chan interface{}       // Channel for overlord command
-	Cid           string                 // Client ID
+	Sid           string                 // Session ID
 	Mid           string                 // Machine ID
 	Bid           string                 // Associated Browser ID
 	Properties    map[string]interface{} // Client properties
@@ -309,7 +309,7 @@ func (self *ConnServer) handleRequestTargetSSHPortRequest(req *Request) error {
 	// Request port number from Overlord.
 	port := self.ovl.SuggestTargetSSHPort()
 	log.Printf("Offering port %d to client\n", port)
-	res := NewResponse(req.Rid, SUCCESS, map[string]interface{}{ "port": port})
+	res := NewResponse(req.Rid, SUCCESS, map[string]interface{}{"port": port})
 	return self.SendResponse(res)
 }
 
@@ -337,7 +337,7 @@ func (self *ConnServer) handleRegisterTargetSSHPortRequest(req *Request) error {
 
 func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	type RequestArgs struct {
-		Cid        string                 `json:"cid"`
+		Sid        string                 `json:"sid"`
 		Mid        string                 `json:"mid"`
 		Mode       int                    `json:"mode"`
 		Format     int                    `json:"format"`
@@ -351,13 +351,13 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 		if len(args.Mid) == 0 {
 			return errors.New("handleRegisterRequest: Empty machine ID received")
 		}
-		if len(args.Cid) == 0 {
-			return errors.New("handleRegisterRequest: Empty client ID received")
+		if len(args.Sid) == 0 {
+			return errors.New("handleRegisterRequest: Empty session ID received")
 		}
 	}
 
 	var err error
-	self.Cid = args.Cid
+	self.Sid = args.Sid
 	self.Mid = args.Mid
 	self.Mode = args.Mode
 	self.logcat.Format = args.Format
@@ -422,7 +422,7 @@ func (self *ConnServer) SendUpgradeRequest() error {
 }
 
 // Spawn a remote terminal connection (a ghost with mode TERMINAL).
-// sid is the session ID, which will be used as the client ID of the new ghost.
+// sid is the session ID, which will be used as the session ID of the new ghost.
 // bid is the browser ID, which identify the browser which started the terminal.
 func (self *ConnServer) SpawnTerminal(sid, bid string) {
 	handler := func(res *Response) error {
@@ -441,7 +441,7 @@ func (self *ConnServer) SpawnTerminal(sid, bid string) {
 }
 
 // Spawn a remote shell command connection (a ghost with mode SHELL).
-// sid is the session ID, which will be used as the client ID of the new ghost.
+// sid is the session ID, which will be used as the session ID of the new ghost.
 // command is the command to execute.
 func (self *ConnServer) SpawnShell(sid string, command string) {
 	handler := func(res *Response) error {

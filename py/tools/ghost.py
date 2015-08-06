@@ -108,7 +108,7 @@ class Ghost(object):
     self._mid = mid
     self._sock = None
     self._machine_id = self.GetMachineID()
-    self._client_id = sid if sid is not None else str(uuid.uuid4())
+    self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._browser_id = bid
     self._properties = {}
     self._shell_command = command
@@ -616,7 +616,7 @@ class Ghost(object):
         self._machine_id = self.GetMachineID()
         self.SendRequest('register',
                          {'mode': self._mode, 'mid': self._machine_id,
-                          'cid': self._client_id,
+                          'sid': self._session_id,
                           'properties': self._properties}, handler)
       except socket.error:
         pass
@@ -701,7 +701,7 @@ class Ghost(object):
   def Start(self, lan_disc=False, rpc_server=False):
     logging.info('%s started', self.MODE_NAME[self._mode])
     logging.info('MID: %s', self._machine_id)
-    logging.info('CID: %s', self._client_id)
+    logging.info('SID: %s', self._session_id)
 
     # We don't care about child process's return code, not wait is needed.  This
     # is used to prevent zombie process from lingering in the system.

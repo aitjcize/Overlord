@@ -53,7 +53,7 @@ var App = React.createClass({
     return result;
   },
   addClient: function (data) {
-    // Data should have the format {mid: "mid", cid: "cid"}
+    // Data should have the format {mid: "mid", sid: "sid"}
     data.properties = this.fetchProperties(data.mid);
     if (data.properties.context != "fixture") {
       return;

@@ -53,9 +53,9 @@ type ConnectLogcatCmd struct {
 // WebSocketContext is used for maintaining the session information of
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
-// will request a new terminal connection with client ID equals the session ID.
-// This way, the ConnServer can retreive the corresponding WebSocketContext
-// with its client (session) ID and get the WebSocket.
+// will request a new terminal connection with the given session ID.
+// This way, the ConnServer can retreive the connresponding WebSocketContext
+// with it's the given session ID and get the WebSocket.
 type WebSocketContext struct {
 	Sid  string
 	Conn *websocket.Conn
@@ -97,7 +97,7 @@ func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Over
 func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	msg, err := json.Marshal(map[string]interface{}{
 		"mid": conn.Mid,
-		"cid": conn.Cid,
+		"sid": conn.Sid,
 	})
 	if err != nil {
 		return nil, err
@@ -114,8 +114,8 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		self.agents[conn.Mid] = conn
 		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
 	case TERMINAL, SHELL:
-		if ctx, ok := self.wsctxs[conn.Cid]; !ok {
-			return nil, errors.New("Register: client " + conn.Cid +
+		if ctx, ok := self.wsctxs[conn.Sid]; !ok {
+			return nil, errors.New("Register: client " + conn.Sid +
 				" registered without context")
 		} else {
 			wsconn = ctx.Conn
@@ -124,10 +124,10 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		if _, ok := self.logcats[conn.Mid]; !ok {
 			self.logcats[conn.Mid] = make(map[string]*ConnServer)
 		}
-		if _, ok := self.logcats[conn.Mid][conn.Cid]; ok {
-			return nil, errors.New("Register: duplicate client ID: " + conn.Cid)
+		if _, ok := self.logcats[conn.Mid][conn.Sid]; ok {
+			return nil, errors.New("Register: duplicate session ID: " + conn.Sid)
 		}
-		self.logcats[conn.Mid][conn.Cid] = conn
+		self.logcats[conn.Mid][conn.Sid] = conn
 		self.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
 	case FILE:
 		// Do nothing, we wait until 'request_to_download' call from client to
@@ -140,7 +140,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	if conn.Mode == AGENT {
 		id = conn.Mid
 	} else {
-		id = conn.Cid
+		id = conn.Sid
 	}
 
 	log.Printf("%s %s registered\n", ModeStr(conn.Mode), id)
@@ -152,7 +152,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 func (self *Overlord) Unregister(conn *ConnServer) {
 	msg, err := json.Marshal(map[string]interface{}{
 		"mid": conn.Mid,
-		"cid": conn.Cid,
+		"sid": conn.Sid,
 	})
 
 	if err != nil {
@@ -166,18 +166,18 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 	case LOGCAT:
 		if _, ok := self.logcats[conn.Mid]; ok {
 			self.ioserver.BroadcastTo("monitor", "logcat left", string(msg))
-			delete(self.logcats[conn.Mid], conn.Cid)
+			delete(self.logcats[conn.Mid], conn.Sid)
 			if len(self.logcats[conn.Mid]) == 0 {
 				delete(self.logcats, conn.Mid)
 			}
 		}
 	case FILE:
-		if _, ok := self.downloads[conn.Cid]; ok {
-			delete(self.downloads, conn.Cid)
+		if _, ok := self.downloads[conn.Sid]; ok {
+			delete(self.downloads, conn.Sid)
 		}
 	default:
-		if _, ok := self.wsctxs[conn.Cid]; ok {
-			delete(self.wsctxs, conn.Cid)
+		if _, ok := self.wsctxs[conn.Sid]; ok {
+			delete(self.wsctxs, conn.Sid)
 		}
 	}
 
@@ -185,7 +185,7 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 	if conn.Mode == AGENT {
 		id = conn.Mid
 	} else {
-		id = conn.Cid
+		id = conn.Sid
 	}
 	log.Printf("%s %s unregistered\n", ModeStr(conn.Mode), id)
 }
@@ -196,10 +196,10 @@ func (self *Overlord) AddWebsocketContext(wc *WebSocketContext) {
 
 // Register a download request clients.
 func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
-	// Use client ID as download session ID instead of machine ID, so a machine
+	// Use session ID as download session ID instead of machine ID, so a machine
 	// can have multiple download at the same time
-	self.ioserver.BroadcastTo(conn.Bid, "file download", string(conn.Cid))
-	self.downloads[conn.Cid] = conn
+	self.ioserver.BroadcastTo(conn.Bid, "file download", string(conn.Sid))
+	self.downloads[conn.Sid] = conn
 }
 
 // It's not that important to worry about race conditions here, since
@@ -370,8 +370,8 @@ func (self *Overlord) ServHTTP(port int) {
 		idx := 0
 		for _, agent := range self.agents {
 			data[idx] = map[string]interface{}{
-				"mid":  agent.Mid,
-				"cid":  agent.Cid,
+				"mid": agent.Mid,
+				"sid": agent.Sid,
 			}
 			if agent.TargetSSHPort == 0 {
 				data[idx]["target_ssh_port"] = nil
@@ -407,13 +407,13 @@ func (self *Overlord) ServHTTP(port int) {
 		data := make([]map[string]interface{}, len(self.logcats))
 		idx := 0
 		for mid, logcats := range self.logcats {
-			var cids []string
-			for cid, _ := range logcats {
-				cids = append(cids, cid)
+			var sids []string
+			for sid, _ := range logcats {
+				sids = append(sids, sid)
 			}
 			data[idx] = map[string]interface{}{
 				"mid":  mid,
-				"cids": cids,
+				"sids": sids,
 			}
 			idx++
 		}
@@ -440,13 +440,13 @@ func (self *Overlord) ServHTTP(port int) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		cid := vars["cid"]
+		sid := vars["sid"]
 
 		if logcats, ok := self.logcats[mid]; ok {
-			if logcat, ok := logcats[cid]; ok {
+			if logcat, ok := logcats[sid]; ok {
 				logcat.Bridge <- ConnectLogcatCmd{conn}
 			} else {
-				WebSocketSendError(conn, "No client with cid "+cid)
+				WebSocketSendError(conn, "No client with sid "+sid)
 			}
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
@@ -627,7 +627,7 @@ func (self *Overlord) ServHTTP(port int) {
 	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
 
 	// Logcat methods
-	r.HandleFunc("/api/log/{mid}/{cid}", LogcatHandler)
+	r.HandleFunc("/api/log/{mid}/{sid}", LogcatHandler)
 
 	// Agent methods
 	r.HandleFunc("/api/agent/pty/{mid}", AgentPtyHandler)

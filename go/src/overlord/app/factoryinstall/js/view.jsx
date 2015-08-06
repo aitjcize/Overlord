@@ -43,11 +43,11 @@ var App = React.createClass({
   removeClientFromList: function (target_list, obj) {
     for (var i = 0; i < target_list.length; ++i) {
       if (target_list[i].mid == obj.mid) {
-        index = target_list[i].cids.indexOf(obj.cid);
+        index = target_list[i].sids.indexOf(obj.sid);
         if (index != -1) {
-          target_list[i].cids.splice(index, 1);
+          target_list[i].sids.splice(index, 1);
           if (!this.state.locked) {
-            if (target_list[i].cids.length == 0) {
+            if (target_list[i].sids.length == 0) {
               target_list.splice(i, 1);
             }
           }
@@ -98,7 +98,7 @@ var App = React.createClass({
     var clients = [];
     if (locked) {
       clients = this.loadCookies('locked_mids', []).map(
-          function (mid) {return {mid: mid, cids: [], status: 'disconnected'}});
+          function (mid) {return {mid: mid, sids: [], status: 'disconnected'}});
     }
     return {
         locked: locked,
@@ -124,15 +124,15 @@ var App = React.createClass({
         if (clients[i].mid != obj.mid) {
           continue;
         }
-        if (clients[i].cids.indexOf(obj.cid) == -1) {
-          clients[i].cids.push(obj.cid);
+        if (clients[i].sids.indexOf(obj.sid) == -1) {
+          clients[i].sids.push(obj.sid);
         }
         this.forceUpdate();
         return
       }
 
       if (!this.state.locked) {
-        this.state.clients.push({mid: obj.mid, cids: [obj.cid]});
+        this.state.clients.push({mid: obj.mid, sids: [obj.sid]});
       }
       this.forceUpdate();
     }.bind(this));
@@ -233,8 +233,8 @@ var ClientInfo = React.createClass({
     this.setState({status: status});
   },
   onTagClick: function (e) {
-    var cid = $(e.target).data('cid');
-    $(this.refs["term-" + cid].getDOMNode()).css('display', 'block');
+    var sid = $(e.target).data('sid');
+    $(this.refs["term-" + sid].getDOMNode()).css('display', 'block');
   },
   onPanelClick: function (e) {
     // Workaround: crosbug.com/p/39839#11
@@ -295,19 +295,19 @@ var ClientInfo = React.createClass({
         <div className="panel-heading">{this.props.children}</div>
         <div className="panel-body">
         {
-          this.props.data.cids.map(function (cid) {
+          this.props.data.sids.map(function (sid) {
             return (
                 <div className="client-info-tag">
                   <span className="label label-warning client-info-terminal"
-                      data-cid={cid} onClick={this.onTagClick}>
-                    {cid}
+                      data-sid={sid} onClick={this.onTagClick}>
+                    {sid}
                   </span>
-                  <TerminalWindow key={cid} id={"terminal-" + mid + "-" + cid}
-                   title={mid + ' / ' + cid}
-                   path={"/api/log/" + mid + "/" + cid}
+                  <TerminalWindow key={sid} id={"terminal-" + mid + "-" + sid}
+                   title={mid + ' / ' + sid}
+                   path={"/api/log/" + mid + "/" + sid}
                    onError={onError} onMessage={onMessage}
                    onCloseClicked={onCloseClicked} client={this}
-                   ref={"term-" + cid} />
+                   ref={"term-" + sid} />
                 </div>
             );
           }.bind(this))
