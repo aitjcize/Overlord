@@ -80,8 +80,8 @@ class Ghost(object):
 
   RANDOM_MID = '##random_mid##'
 
-  def __init__(self, overlord_addrs, mode=AGENT, mid=None, sid=None, bid=None,
-               command=None, file_op=None):
+  def __init__(self, overlord_addrs, mode=AGENT, mid=None, sid=None,
+               terminal_sid=None, command=None, file_op=None):
     """Constructor.
 
     Args:
@@ -91,7 +91,8 @@ class Ghost(object):
         id is randomly generated.
       sid: session ID. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
-      bid: browser ID. Identifies the browser which started the session.
+      terminal_sid: the terminal session ID associate with this client. This is
+        use for file download.
       command: the command to execute when we are in SHELL mode.
       file_op: a tuple (action, filepath, pid). action is either 'download' or
         'upload'. pid is the pid of the target shell, used to determine where
@@ -110,7 +111,7 @@ class Ghost(object):
     self._sock = None
     self._machine_id = self.GetMachineID()
     self._session_id = sid if sid is not None else str(uuid.uuid4())
-    self._browser_id = bid
+    self._terminal_session_id = terminal_sid
     self._properties = {}
     self._shell_command = command
     self._file_op = file_op
@@ -120,7 +121,7 @@ class Ghost(object):
     self._last_ping = 0
     self._queue = Queue.Queue()
     self._download_queue = Queue.Queue()
-    self._ttyname_to_bid = {}
+    self._ttyname_to_sid = {}
     self._terminal_sid_to_pid = {}
 
   def SetIgnoreChild(self, status):
@@ -199,7 +200,8 @@ class Ghost(object):
       except Exception:
         pass
 
-  def SpawnGhost(self, mode, sid=None, bid=None, command=None, file_op=None):
+  def SpawnGhost(self, mode, sid=None, terminal_sid=None, command=None,
+                 file_op=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
@@ -211,8 +213,8 @@ class Ghost(object):
     pid = os.fork()
     if pid == 0:
       self.CloseSockets()
-      g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid, bid,
-                command, file_op)
+      g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid,
+                terminal_sid, command, file_op)
       g.Start()
       sys.exit(0)
     else:
@@ -358,11 +360,10 @@ class Ghost(object):
 
     pid, fd = os.forkpty()
     if pid == 0:
-      # Register the mapping of browser_id and ttyname
       ttyname = os.readlink('/proc/%d/fd/0' % os.getpid())
       try:
         server = GhostRPCServer()
-        server.RegisterTTY(self._browser_id, ttyname)
+        server.RegisterTTY(self._session_id, ttyname)
         server.RegisterSession(self._session_id, os.getpid())
       except Exception:
         # If ghost is launched without RPC server, the call will fail but we
@@ -465,7 +466,7 @@ class Ghost(object):
     if self._file_op[0] == 'download':
       size = os.stat(self._file_op[1]).st_size
       self.SendRequest('request_to_download',
-                       {'bid': self._browser_id,
+                       {'terminal_sid': self._terminal_session_id,
                         'filename': os.path.basename(self._file_op[1]),
                         'size': size})
     elif self._file_op[0] == 'upload':
@@ -536,7 +537,7 @@ class Ghost(object):
     if command == 'upgrade':
       self.Upgrade()
     elif command == 'terminal':
-      self.SpawnGhost(self.TERMINAL, params['sid'], bid=params['bid'])
+      self.SpawnGhost(self.TERMINAL, params['sid'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
     elif command == 'shell':
       self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
@@ -594,8 +595,9 @@ class Ghost(object):
 
   def InitiateDownload(self):
     ttyname, filename = self._download_queue.get()
-    bid = self._ttyname_to_bid[ttyname]
-    self.SpawnGhost(self.FILE, bid=bid, file_op=('download', filename))
+    sid = self._ttyname_to_sid[ttyname]
+    self.SpawnGhost(self.FILE, terminal_sid=sid,
+                    file_op=('download', filename, None))
 
   def Listen(self):
     try:
@@ -678,8 +680,8 @@ class Ghost(object):
   def AddToDownloadQueue(self, ttyname, filename):
     self._download_queue.put((ttyname, filename))
 
-  def RegisterTTY(self, browser_id, ttyname):
-    self._ttyname_to_bid[ttyname] = browser_id
+  def RegisterTTY(self, session_id, ttyname):
+    self._ttyname_to_sid[ttyname] = session_id
 
   def RegisterSession(self, session_id, process_id):
     self._terminal_sid_to_pid[session_id] = process_id

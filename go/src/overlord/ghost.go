@@ -67,13 +67,13 @@ type FileUploadContext struct {
 type Ghost struct {
 	*RPCCore
 	addrs           []string               // List of possible Overlord addresses
-	ttyName2Bid     map[string]string      // Mapping between ttyName and bid
+	ttyName2Sid     map[string]string      // Mapping between ttyName and Sid
 	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
 	server          *rpc.Server            // RPC server handle
 	connectedAddr   string                 // Current connected Overlord address
 	mid             string                 // Machine ID
 	sid             string                 // Session ID
-	bid             string                 // Browser ID
+	terminalSid     string                 // Associated terminal session ID
 	mode            int                    // mode, see constants.go
 	properties      map[string]interface{} // Client properties
 	reset           bool                   // Whether to reset the connection
@@ -103,7 +103,7 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 	}
 	return &Ghost{
 		RPCCore:         NewRPCCore(nil),
-		ttyName2Bid:     make(map[string]string),
+		ttyName2Sid:     make(map[string]string),
 		terminalSid2Pid: make(map[string]int),
 		addrs:           addrs,
 		mid:             finalMid,
@@ -123,8 +123,8 @@ func (self *Ghost) SetSid(sid string) *Ghost {
 	return self
 }
 
-func (self *Ghost) SetBid(bid string) *Ghost {
-	self.bid = bid
+func (self *Ghost) SetTerminalSid(sid string) *Ghost {
+	self.terminalSid = sid
 	return self
 }
 
@@ -237,7 +237,6 @@ func (self *Ghost) Upgrade() error {
 func (self *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestParams struct {
 		Sid string `json:"sid"`
-		Bid string `json:"bid"`
 	}
 
 	var params RequestParams
@@ -250,7 +249,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetBid(params.Bid)
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid)
 		g.Start(false, false)
 	}()
 
@@ -514,7 +513,7 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 		log.Println("SpawnPTYServer: terminated")
 	}()
 
-	// Register the mapping of browser_id and ttyName
+	// Register the mapping of sid and ttyName
 	ttyName, err := PtsName(tty)
 	if err != nil {
 		return err
@@ -524,7 +523,7 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 
 	// Ghost could be launched without RPC server, ignore registraion in that case
 	if err == nil {
-		err = client.Call("rpc.RegisterTTY", []string{self.bid, ttyName},
+		err = client.Call("rpc.RegisterTTY", []string{self.sid, ttyName},
 			&EmptyReply{})
 		if err != nil {
 			return err
@@ -681,9 +680,9 @@ func (self *Ghost) InitiateFileOperation(res *Response) error {
 		}
 
 		req := NewRequest("request_to_download", map[string]interface{}{
-			"bid":      self.bid,
-			"filename": filepath.Base(self.fileOperation.Filename),
-			"size":     fi.Size(),
+			"terminal_sid": self.terminalSid,
+			"filename":     filepath.Base(self.fileOperation.Filename),
+			"size":         fi.Size(),
 		})
 
 		return self.SendRequest(req, nil)
@@ -752,8 +751,8 @@ func (self *Ghost) Register() error {
 // Initiate a client-side download request
 func (self *Ghost) InitiateDownload(info DownloadInfo) {
 	addrs := []string{self.connectedAddr}
-	g := NewGhost(addrs, FILE, RANDOM_MID).SetBid(
-		self.ttyName2Bid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
+	g := NewGhost(addrs, FILE, RANDOM_MID).SetTerminalSid(
+		self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
 	g.Start(false, false)
 }
 
@@ -823,8 +822,8 @@ func (self *Ghost) Listen() error {
 	}
 }
 
-func (self *Ghost) RegisterTTY(brower_id, ttyName string) {
-	self.ttyName2Bid[ttyName] = brower_id
+func (self *Ghost) RegisterTTY(session_id, ttyName string) {
+	self.ttyName2Sid[ttyName] = session_id
 }
 
 func (self *Ghost) RegisterSession(session_id, pidStr string) {

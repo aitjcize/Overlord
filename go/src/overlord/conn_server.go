@@ -51,7 +51,7 @@ type ConnServer struct {
 	Bridge        chan interface{}       // Channel for overlord command
 	Sid           string                 // Session ID
 	Mid           string                 // Machine ID
-	Bid           string                 // Associated Browser ID
+	TerminalSid   string                 // Associated terminal session ID
 	Properties    map[string]interface{} // Client properties
 	TargetSSHPort int                    // Target SSH port for forwarding
 	ovl           *Overlord              // Overlord handle
@@ -198,7 +198,7 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 	log.Printf("Received %T command from overlord\n", obj)
 	switch v := obj.(type) {
 	case SpawnTerminalCmd:
-		self.SpawnTerminal(v.Sid, v.Bid)
+		self.SpawnTerminal(v.Sid)
 	case SpawnShellCmd:
 		self.SpawnShell(v.Sid, v.Command)
 	case ConnectLogcatCmd:
@@ -391,9 +391,9 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 
 func (self *ConnServer) handleDownloadRequest(req *Request) error {
 	type RequestArgs struct {
-		Bid      string `json:"bid"`
-		Filename string `json:"filename"`
-		Size     int64  `json:"size"`
+		TerminalSid string `json:"terminal_sid"`
+		Filename    string `json:"filename"`
+		Size        int64  `json:"size"`
 	}
 
 	var args RequestArgs
@@ -402,7 +402,7 @@ func (self *ConnServer) handleDownloadRequest(req *Request) error {
 	}
 
 	self.Download.Ready = true
-	self.Bid = args.Bid
+	self.TerminalSid = args.TerminalSid
 	self.Download.Name = args.Filename
 	self.Download.Size = args.Size
 
@@ -445,8 +445,7 @@ func (self *ConnServer) SendUpgradeRequest() error {
 
 // Spawn a remote terminal connection (a ghost with mode TERMINAL).
 // sid is the session ID, which will be used as the session ID of the new ghost.
-// bid is the browser ID, which identify the browser which started the terminal.
-func (self *ConnServer) SpawnTerminal(sid, bid string) {
+func (self *ConnServer) SpawnTerminal(sid string) {
 	handler := func(res *Response) error {
 		if res == nil {
 			return errors.New("SpawnTerminal: command timeout")
@@ -458,7 +457,7 @@ func (self *ConnServer) SpawnTerminal(sid, bid string) {
 		return nil
 	}
 
-	req := NewRequest("terminal", map[string]interface{}{"sid": sid, "bid": bid})
+	req := NewRequest("terminal", map[string]interface{}{"sid": sid})
 	self.SendRequest(req, handler)
 }
 

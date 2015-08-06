@@ -35,7 +35,6 @@ const (
 
 type SpawnTerminalCmd struct {
 	Sid string // Session ID
-	Bid string // Browser ID
 }
 
 type SpawnShellCmd struct {
@@ -206,7 +205,7 @@ func (self *Overlord) AddWebsocketContext(wc *WebSocketContext) {
 func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	// Use session ID as download session ID instead of machine ID, so a machine
 	// can have multiple download at the same time
-	self.ioserver.BroadcastTo(conn.Bid, "file download", string(conn.Sid))
+	self.ioserver.BroadcastTo(conn.TerminalSid, "file download", string(conn.Sid))
 	self.downloads[conn.Sid] = conn
 }
 
@@ -214,7 +213,7 @@ func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
 	// Use session ID as upload session ID instead of machine ID, so a machine
 	// can have multiple upload at the same time
-	self.ioserver.BroadcastTo(conn.Bid, "file upload", string(conn.Sid))
+	self.ioserver.BroadcastTo(conn.TerminalSid, "file upload", string(conn.Sid))
 	self.uploads[conn.Sid] = conn
 }
 
@@ -267,16 +266,21 @@ func (self *Overlord) InitSocketIOServer() {
 	}
 
 	server.On("connection", func(so socketio.Socket) {
-		r := so.Request()
-		bid, err := r.Cookie("browser_id")
-		if err == nil {
-			so.Join(bid.Value)
-		}
 		so.Join("monitor")
 	})
 
 	server.On("error", func(so socketio.Socket, err error) {
 		log.Println("error:", err)
+	})
+
+	// Client initiated subscribtion
+	server.On("subscribe", func(so socketio.Socket, name string) {
+		so.Join(name)
+	})
+
+	// Client initiated unsubscribtion
+	server.On("unsubscribe", func(so socketio.Socket, name string) {
+		so.Leave(name)
 	})
 
 	self.ioserver = server
@@ -335,8 +339,8 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 
 type ByMid []map[string]interface{}
 
-func (a ByMid) Len() int           { return len(a) }
-func (a ByMid) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByMid) Len() int      { return len(a) }
+func (a ByMid) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a ByMid) Less(i, j int) bool {
 	return a[i]["mid"].(string) < a[j]["mid"].(string)
 }
@@ -359,19 +363,6 @@ func (self *Overlord) ServHTTP(port int) {
 		msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
 		ws.WriteMessage(websocket.CloseMessage, msg)
 		ws.Close()
-	}
-
-	IndexHandler := func(w http.ResponseWriter, r *http.Request) {
-		handler := http.FileServer(http.Dir(filepath.Join(appDir, "dashboard")))
-		cookie, err := r.Cookie("browser_id")
-		if err != nil {
-			cookie = &http.Cookie{
-				Name:  "browser_id",
-				Value: uuid.NewV4().String(),
-			}
-			http.SetCookie(w, cookie)
-		}
-		handler.ServeHTTP(w, r)
 	}
 
 	// List all apps available on Overlord.
@@ -493,19 +484,12 @@ func (self *Overlord) ServHTTP(port int) {
 			return
 		}
 
-		cookie, err := r.Cookie("browser_id")
-		if err != nil {
-			WebSocketSendError(conn, "No browser ID associated")
-			return
-		}
-		bid := cookie.Value
-
 		vars := mux.Vars(r)
 		mid := vars["mid"]
 		if agent, ok := self.agents[mid]; ok {
 			wc := NewWebsocketContext(conn)
 			self.AddWebsocketContext(wc)
-			agent.Bridge <- SpawnTerminalCmd{wc.Sid, bid}
+			agent.Bridge <- SpawnTerminalCmd{wc.Sid}
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
@@ -737,7 +721,8 @@ func (self *Overlord) ServHTTP(port int) {
 		http.FileServer(http.Dir(filepath.Join(appDir, "upgrade")))))
 	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
 		http.Dir(filepath.Join(appDir, "common")))))
-	http.Handle("/", auth.WrapHandlerFunc(IndexHandler))
+	http.Handle("/", auth.WrapHandler(http.FileServer(
+		http.Dir(filepath.Join(appDir, "dashboard")))))
 
 	// Serve all apps
 	appNames, err := self.GetAppNames(false)

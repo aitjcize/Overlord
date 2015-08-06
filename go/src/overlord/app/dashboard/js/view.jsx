@@ -91,6 +91,7 @@ var App = React.createClass({
 
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
+    this.socket = socket;
 
     socket.on("agent joined", function (msg) {
       // Add to recent client list
@@ -244,8 +245,15 @@ var ClientInfo = React.createClass({
 
 var TerminalGroup = React.createClass({
   render: function () {
+    var onControl = function (control) {
+      if (control.type == "sid") {
+        this.terminal_sid = control.data;
+        this.props.app.socket.emit("subscribe", control.data);
+      }
+    };
     var onClose = function (e) {
       this.props.app.removeTerminal(this.props.mid);
+      this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
     return (
       <div>
@@ -258,7 +266,7 @@ var TerminalGroup = React.createClass({
                  path={"/api/agent/pty/" + item.mid}
                  uploadPath={"/api/agent/upload/" + item.mid}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
-                 onClose={onClose} />
+                 onControl={onControl} onClose={onClose} />
               );
             }.bind(this))
           }
