@@ -37,6 +37,7 @@ const (
 	FAILED  = "failed"
 )
 
+// Terminal resize control
 const (
 	CONTROL_NONE  = 255 // Control State None
 	CONTROL_START = 128 // Control Start Code

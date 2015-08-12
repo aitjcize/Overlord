@@ -48,7 +48,8 @@ type FileDownloadContext struct {
 type ConnServer struct {
 	*RPCCore
 	Mode          int                    // Client mode, see constants.go
-	Bridge        chan interface{}       // Channel for overlord command
+	Command       chan interface{}       // Channel for overlord command
+	Response      chan string            // Channel for reponsing overlord command
 	Sid           string                 // Session ID
 	Mid           string                 // Machine ID
 	TerminalSid   string                 // Associated terminal session ID
@@ -67,7 +68,8 @@ func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 	return &ConnServer{
 		RPCCore:    NewRPCCore(conn),
 		Mode:       NONE,
-		Bridge:     make(chan interface{}),
+		Command:    make(chan interface{}),
+		Response:   make(chan string),
 		Properties: make(map[string]interface{}),
 		ovl:        ovl,
 		stopListen: make(chan bool, 1),
@@ -280,7 +282,7 @@ func (self *ConnServer) Listen() {
 				log.Printf("unknown network error for %s: %s\n", self.Sid, err)
 			}
 			return
-		case msg := <-self.Bridge:
+		case msg := <-self.Command:
 			self.handleOverlordRequest(msg)
 		case <-ticker.C:
 			if err := self.ScanForTimeoutRequests(); err != nil {
@@ -443,22 +445,28 @@ func (self *ConnServer) SendUpgradeRequest() error {
 	return self.SendRequest(req, nil)
 }
 
+// Generic handler for remote command
+func (self *ConnServer) getHandler(name string) func(res *Response) error {
+	return func(res *Response) error {
+		if res == nil {
+			self.Response <- "command timeout"
+			return errors.New(name + ": command timeout")
+		}
+
+		if res.Response != SUCCESS {
+			self.Response <- res.Response
+			return errors.New(name + " failed: " + res.Response)
+		}
+		self.Response <- ""
+		return nil
+	}
+}
+
 // Spawn a remote terminal connection (a ghost with mode TERMINAL).
 // sid is the session ID, which will be used as the session ID of the new ghost.
 // ttyDevice is the target terminal device to open. If it's an empty string, a
 // pseudo terminal will be open instead.
 func (self *ConnServer) SpawnTerminal(sid, ttyDevice string) {
-	handler := func(res *Response) error {
-		if res == nil {
-			return errors.New("SpawnTerminal: command timeout")
-		}
-
-		if res.Response != SUCCESS {
-			return errors.New("SpawnTerminal failed: " + res.Response)
-		}
-		return nil
-	}
-
 	params := map[string]interface{}{"sid": sid}
 	if ttyDevice != "" {
 		params["tty_device"] = ttyDevice
@@ -466,26 +474,16 @@ func (self *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 		params["tty_device"] = nil
 	}
 	req := NewRequest("terminal", params)
-	self.SendRequest(req, handler)
+	self.SendRequest(req, self.getHandler("SpawnTerminal"))
 }
 
 // Spawn a remote shell command connection (a ghost with mode SHELL).
 // sid is the session ID, which will be used as the session ID of the new ghost.
 // command is the command to execute.
 func (self *ConnServer) SpawnShell(sid string, command string) {
-	handler := func(res *Response) error {
-		if res == nil {
-			return errors.New("SpawnShell: command timeout ")
-		}
-		if res.Response != SUCCESS {
-			return errors.New("SpawnShell failed: " + res.Response)
-		}
-		return nil
-	}
-
 	req := NewRequest("shell", map[string]interface{}{
 		"sid": sid, "command": command})
-	self.SendRequest(req, handler)
+	self.SendRequest(req, self.getHandler("SpawnShell"))
 }
 
 // Spawn a remote file command connection (a ghost with mode FILE).
@@ -493,24 +491,14 @@ func (self *ConnServer) SpawnShell(sid string, command string) {
 // sid is used for uploading file, indicatiting which client's working
 // directory to upload to.
 func (self *ConnServer) SpawnFileServer(sid, terminalSid, action, filename string) {
-	handler := func(res *Response) error {
-		if res == nil {
-			return errors.New("SpawnFileServer: command timeout ")
-		}
-		if res.Response != SUCCESS {
-			return errors.New("SpawnFileServer failed: " + res.Response)
-		}
-		return nil
-	}
-
 	if action == "download" {
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
-		self.SendRequest(req, handler)
+		self.SendRequest(req, self.getHandler("SpawnFileServer: download"))
 	} else if action == "upload" {
 		req := NewRequest("file_upload", map[string]interface{}{
 			"sid": sid, "terminal_sid": terminalSid, "filename": filename})
-		self.SendRequest(req, handler)
+		self.SendRequest(req, self.getHandler("SpawnFileServer: upload"))
 	} else {
 		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)
 	}

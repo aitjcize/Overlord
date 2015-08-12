@@ -686,11 +686,13 @@ class Ghost(object):
           if write_buffer:
             os.write(fd, write_buffer)
             write_buffer = ''
-    except (OSError, socket.error, RuntimeError) as e:
+    except Exception as e:
+      logging.error('SpawnTTYServer: %s', e)
+    finally:
       self._sock.close()
-      logging.info('SpawnTTYServer: %s' % str(e))
-      logging.info('SpawnTTYServer: terminated')
-      sys.exit(0)
+
+    logging.info('SpawnTTYServer: terminated')
+    sys.exit(0)
 
   def SpawnShellServer(self, _):
     """Spawn a shell server and forward input/output from/to the TCP socket."""
@@ -724,14 +726,22 @@ class Ghost(object):
         p.poll()
         if p.returncode != None:
           break
+    except Exception as e:
+      logging.error('SpawnShellServer: %s', e)
     finally:
       self._sock.close()
-      logging.info('SpawnShellServer: terminated')
-      sys.exit(0)
+
+    logging.info('SpawnShellServer: terminated')
+    sys.exit(0)
 
   def InitiateFileOperation(self, _):
     if self._file_op[0] == 'download':
-      size = os.stat(self._file_op[1]).st_size
+      try:
+        size = os.stat(self._file_op[1]).st_size
+      except OSError as e:
+        logging.error('InitiateFileOperation: download: %s', e)
+        sys.exit(1)
+
       self.SendRequest('request_to_download',
                        {'terminal_sid': self._terminal_session_id,
                         'filename': os.path.basename(self._file_op[1]),
@@ -764,14 +774,26 @@ class Ghost(object):
     logging.info('StartUploadServer: started')
 
     try:
-      target_dir = os.getenv('HOME', '/tmp')
+      filepath = self._file_op[1]
 
-      # Get the client's working dir, which is our target upload dir
-      if self._file_op[2]:
-        target_dir = os.readlink('/proc/%d/cwd' % self._file_op[2])
+      if not filepath.startswith('/'):
+        target_dir = os.getenv('HOME', '/tmp')
+
+        # Get the client's working dir, which is our target upload dir
+        if self._file_op[2]:
+          target_dir = os.readlink('/proc/%d/cwd' % self._file_op[2])
+
+        filepath = os.path.join(target_dir, filepath)
+
+      dirname = os.path.dirname(filepath)
+      if not os.path.exists(dirname):
+        try:
+          os.makedirs(dirname)
+        except Exception:
+          pass
 
       self._sock.setblocking(False)
-      with open(os.path.join(target_dir, self._file_op[1]), 'wb') as f:
+      with open(filepath, 'wb') as f:
         while True:
           rd, _, _ = select.select([self._sock], [], [])
           if self._sock in rd:
@@ -797,6 +819,19 @@ class Ghost(object):
     self._last_ping = self.Timestamp()
     self.SendRequest('ping', {}, timeout_handler, 5)
 
+
+  def HanldeFileDownloadRequest(self, msg):
+    params = msg['params']
+    try:
+      os.stat(params['filename'])
+    except OSError as e:
+      self.SendResponse(msg, str(e))
+      return
+
+    self.SpawnGhost(self.FILE, params['sid'],
+                    file_op=('download', params['filename'], None))
+    self.SendResponse(msg, RESPONSE_SUCCESS)
+
   def HandleRequest(self, msg):
     command = msg['name']
     params = msg['params']
@@ -811,9 +846,7 @@ class Ghost(object):
       self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
     elif command == 'file_download':
-      self.SpawnGhost(self.FILE, params['sid'],
-                      file_op=('download', params['filename'], None))
-      self.SendResponse(msg, RESPONSE_SUCCESS)
+      self.HanldeFileDownloadRequest(msg)
     elif command == 'clear_to_download':
       self.StartDownloadServer()
     elif command == 'file_upload':
@@ -914,7 +947,7 @@ class Ghost(object):
           raise RuntimeError('Register request timeout')
 
         logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
-        self._connected_addr = addr
+        self._connected_addr = non_local['addr']
         self.Upgrade()  # Check for upgrade
         self._queue.put('pause', True)
 

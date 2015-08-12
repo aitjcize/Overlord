@@ -466,7 +466,7 @@ func (self *Overlord) ServHTTP(port int) {
 
 		if logcats, ok := self.logcats[mid]; ok {
 			if logcat, ok := logcats[sid]; ok {
-				logcat.Bridge <- ConnectLogcatCmd{conn}
+				logcat.Command <- ConnectLogcatCmd{conn}
 			} else {
 				WebSocketSendError(conn, "No client with sid "+sid)
 			}
@@ -497,7 +497,10 @@ func (self *Overlord) ServHTTP(port int) {
 		if agent, ok := self.agents[mid]; ok {
 			wc := NewWebsocketContext(conn)
 			self.AddWebsocketContext(wc)
-			agent.Bridge <- SpawnTerminalCmd{wc.Sid, ttyDevice}
+			agent.Command <- SpawnTerminalCmd{wc.Sid, ttyDevice}
+			if res := <-agent.Response; res != "" {
+				WebSocketSendError(conn, res)
+			}
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
@@ -521,7 +524,10 @@ func (self *Overlord) ServHTTP(port int) {
 			if command, ok := r.URL.Query()["command"]; ok {
 				wc := NewWebsocketContext(conn)
 				self.AddWebsocketContext(wc)
-				agent.Bridge <- SpawnShellCmd{wc.Sid, command[0]}
+				agent.Command <- SpawnShellCmd{wc.Sid, command[0]}
+				if res := <-agent.Response; res != "" {
+					WebSocketSendError(conn, res)
+				}
 			} else {
 				WebSocketSendError(conn, "No command specified for shell request "+mid)
 			}
@@ -594,7 +600,13 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		sid := uuid.NewV4().String()
-		agent.Bridge <- SpawnFileCmd{sid, "", "download", filename[0]}
+		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0]}
+
+		res := <-agent.Response
+		if res != "" {
+			http.NotFound(w, r)
+			return
+		}
 
 		var c *ConnServer
 		const maxTries = 100 // 20 seconds
@@ -669,8 +681,13 @@ func (self *Overlord) ServHTTP(port int) {
 			sids = []string{""}
 		}
 		sid := uuid.NewV4().String()
-		filename := filepath.Base(p.FileName())
-		agent.Bridge <- SpawnFileCmd{sid, sids[0], "upload", filename}
+		agent.Command <- SpawnFileCmd{sid, sids[0], "upload", p.FileName()}
+
+		res := <-agent.Response
+		if res != "" {
+			http.NotFound(w, r)
+			return
+		}
 
 		const maxTries = 100 // 20 seconds
 		count := 0
@@ -688,9 +705,13 @@ func (self *Overlord) ServHTTP(port int) {
 			time.Sleep(200 * time.Millisecond)
 		}
 
-		io.Copy(c.Conn, p)
+		_, err = io.Copy(c.Conn, p)
 		c.StopListen()
 
+		if err != nil {
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			return
+		}
 		w.Write([]byte(`{"status": "success"}`))
 		return
 	}

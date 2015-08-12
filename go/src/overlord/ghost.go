@@ -309,6 +309,12 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 		return err
 	}
 
+	_, err := os.Stat(params.Filename)
+	if err != nil {
+		res := NewResponse(req.Rid, err.Error(), nil)
+		return self.SendResponse(res)
+	}
+
 	go func() {
 		log.Println("Received file_download command, file agent spawned")
 		addrs := []string{self.connectedAddr}
@@ -376,22 +382,32 @@ func (self *Ghost) StartUploadServer() error {
 		log.Println("StartUploadServer: terminated")
 	}()
 
-	// Get the client's working dir, which is our target upload dir
-	target_dir := os.Getenv("HOME")
-	if target_dir == "" {
-		target_dir = "/tmp"
-	}
+	filePath := self.fileOperation.Filename
 
-	var err error
-	if self.fileOperation.Pid != 0 {
-		target_dir, err = os.Readlink(fmt.Sprintf("/proc/%d/cwd",
-			self.fileOperation.Pid))
-		if err != nil {
-			return err
+	if !strings.HasPrefix(filePath, "/") {
+		// Get the client's working dir, which is our target upload dir
+		targetDir := os.Getenv("HOME")
+		if targetDir == "" {
+			targetDir = "/tmp"
 		}
+
+		if self.fileOperation.Pid != 0 {
+			cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd",
+				self.fileOperation.Pid))
+			if err == nil {
+				targetDir = cwd
+			}
+		}
+
+		filePath = filepath.Join(targetDir, filePath)
 	}
 
-	file, err := os.Create(filepath.Join(target_dir, self.fileOperation.Filename))
+	dirPath := filepath.Dir(filePath)
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		os.MkdirAll(dirPath, 0755)
+	}
+
+	file, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
@@ -753,6 +769,7 @@ func (self *Ghost) InitiateFileOperation(res *Response) error {
 func (self *Ghost) Register() error {
 	for _, addr := range self.addrs {
 		log.Printf("Trying %s ...\n", addr)
+		self.Reset()
 		conn, err := net.DialTimeout("tcp", addr, DIAL_TIMEOUT*time.Second)
 		if err == nil {
 			log.Println("Connection established, registering...")
@@ -1017,9 +1034,9 @@ func (self *Ghost) Start(lanDisc bool, RPCServer bool) {
 		if self.quit {
 			break
 		}
-		self.Reset()
 		log.Printf("%s, retrying in %ds\n", err, RETRY_INTERVAL)
 		time.Sleep(RETRY_INTERVAL * time.Second)
+		self.Reset()
 	}
 }
 
