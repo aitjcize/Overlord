@@ -263,7 +263,7 @@ var TerminalGroup = React.createClass({
               return (
                 <TerminalWindow key={item.mid} mid={item.mid}
                  id={"terminal-" + item.mid} title={item.mid}
-                 path={"/api/agent/pty/" + item.mid}
+                 path={"/api/agent/tty/" + item.mid}
                  uploadPath={"/api/agent/upload/" + item.mid}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
                  onControl={onControl} onClose={onClose} />

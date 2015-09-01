@@ -310,7 +310,7 @@ class Ghost(object):
   RANDOM_MID = '##random_mid##'
 
   def __init__(self, overlord_addrs, mode=AGENT, mid=None, sid=None,
-               terminal_sid=None, command=None, file_op=None):
+               terminal_sid=None, tty_device=None, command=None, file_op=None):
     """Constructor.
 
     Args:
@@ -322,6 +322,8 @@ class Ghost(object):
         be set to the corresponding session id assigned by overlord.
       terminal_sid: the terminal session ID associate with this client. This is
         use for file download.
+      tty_device: the terminal device to open, if tty_device is None, as pseudo
+        terminal will be opened instead.
       command: the command to execute when we are in SHELL mode.
       file_op: a tuple (action, filepath, pid). action is either 'download' or
         'upload'. pid is the pid of the target shell, used to determine where
@@ -342,6 +344,7 @@ class Ghost(object):
     self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._terminal_session_id = terminal_sid
     self._properties = {}
+    self._tty_device = tty_device
     self._shell_command = command
     self._file_op = file_op
     self._buf = ''
@@ -446,8 +449,8 @@ class Ghost(object):
       except Exception:
         pass
 
-  def SpawnGhost(self, mode, sid=None, terminal_sid=None, command=None,
-                 file_op=None):
+  def SpawnGhost(self, mode, sid=None, terminal_sid=None, tty_device=None,
+                 command=None, file_op=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
@@ -460,7 +463,7 @@ class Ghost(object):
     if pid == 0:
       self.CloseSockets()
       g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid,
-                terminal_sid, command, file_op)
+                terminal_sid, tty_device, command, file_op)
       g.Start()
       sys.exit(0)
     else:
@@ -587,7 +590,7 @@ class Ghost(object):
     msg = {'rid': omsg['rid'], 'response': status, 'params': params}
     self.SendMessage(msg)
 
-  def HandlePTYControl(self, fd, control_string):
+  def HandleTTYControl(self, fd, control_string):
     msg = json.loads(control_string)
     command = msg['command']
     params = msg['params']
@@ -600,74 +603,79 @@ class Ghost(object):
     else:
       logging.warn('Invalid request command "%s"', command)
 
-  def SpawnPTYServer(self, _):
-    """Spawn a PTY server and forward I/O to the TCP socket."""
-    logging.info('SpawnPTYServer: started')
+  def SpawnTTYServer(self, _):
+    """Spawn a TTY server and forward I/O to the TCP socket."""
+    logging.info('SpawnTTYServer: started')
 
-    pid, fd = os.forkpty()
-    if pid == 0:
-      ttyname = os.readlink('/proc/%d/fd/0' % os.getpid())
-      try:
-        server = GhostRPCServer()
-        server.RegisterTTY(self._session_id, ttyname)
-        server.RegisterSession(self._session_id, os.getpid())
-      except Exception:
-        # If ghost is launched without RPC server, the call will fail but we
-        # can ignore it.
-        pass
+    try:
+      if self._tty_device is None:
+        pid, fd = os.forkpty()
 
-      # The directory that contains the current running ghost script
-      script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        if pid == 0:
+          ttyname = os.readlink('/proc/%d/fd/0' % os.getpid())
+          try:
+            server = GhostRPCServer()
+            server.RegisterTTY(self._session_id, ttyname)
+            server.RegisterSession(self._session_id, os.getpid())
+          except Exception:
+            # If ghost is launched without RPC server, the call will fail but we
+            # can ignore it.
+            pass
 
-      env = os.environ.copy()
-      env['USER'] = os.getenv('USER', 'root')
-      env['HOME'] = os.getenv('HOME', '/root')
-      env['PATH'] = os.getenv('PATH') + ':%s' % script_dir
-      os.chdir(env['HOME'])
-      os.execve(_SHELL, [_SHELL], env)
-    else:
-      try:
-        control_state = None
-        control_string = ''
-        write_buffer = ''
-        while True:
-          rd, _, _ = select.select([self._sock, fd], [], [])
+          # The directory that contains the current running ghost script
+          script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
 
-          if fd in rd:
-            self._sock.send(os.read(fd, _BUFSIZE))
+          env = os.environ.copy()
+          env['USER'] = os.getenv('USER', 'root')
+          env['HOME'] = os.getenv('HOME', '/root')
+          env['PATH'] = os.getenv('PATH') + ':%s' % script_dir
+          os.chdir(env['HOME'])
+          os.execve(_SHELL, [_SHELL], env)
+      else:
+        fd = os.open(self._tty_device, os.O_RDWR)
 
-          if self._sock in rd:
-            ret = self._sock.recv(_BUFSIZE)
-            if len(ret) == 0:
-              raise RuntimeError('socket closed')
-            while ret:
-              if control_state:
-                if chr(_CONTROL_END) in ret:
-                  index = ret.index(chr(_CONTROL_END))
-                  control_string += ret[:index]
-                  self.HandlePTYControl(fd, control_string)
-                  control_state = None
-                  control_string = ''
-                  ret = ret[index+1:]
-                else:
-                  control_string += ret
-                  ret = ''
+      control_state = None
+      control_string = ''
+      write_buffer = ''
+      while True:
+        rd, _, _ = select.select([self._sock, fd], [], [])
+
+        if fd in rd:
+          self._sock.send(os.read(fd, _BUFSIZE))
+
+        if self._sock in rd:
+          ret = self._sock.recv(_BUFSIZE)
+          if len(ret) == 0:
+            raise RuntimeError('socket closed')
+          while ret:
+            if control_state:
+              if chr(_CONTROL_END) in ret:
+                index = ret.index(chr(_CONTROL_END))
+                control_string += ret[:index]
+                self.HandleTTYControl(fd, control_string)
+                control_state = None
+                control_string = ''
+                ret = ret[index+1:]
               else:
-                if chr(_CONTROL_START) in ret:
-                  control_state = _CONTROL_START
-                  index = ret.index(chr(_CONTROL_START))
-                  write_buffer += ret[:index]
-                  ret = ret[index+1:]
-                else:
-                  write_buffer += ret
-                  ret = ''
-            if write_buffer:
-              os.write(fd, write_buffer)
-              write_buffer = ''
-      except (OSError, socket.error, RuntimeError):
-        self._sock.close()
-        logging.info('SpawnPTYServer: terminated')
-        sys.exit(0)
+                control_string += ret
+                ret = ''
+            else:
+              if chr(_CONTROL_START) in ret:
+                control_state = _CONTROL_START
+                index = ret.index(chr(_CONTROL_START))
+                write_buffer += ret[:index]
+                ret = ret[index+1:]
+              else:
+                write_buffer += ret
+                ret = ''
+          if write_buffer:
+            os.write(fd, write_buffer)
+            write_buffer = ''
+    except (OSError, socket.error, RuntimeError) as e:
+      self._sock.close()
+      logging.info('SpawnTTYServer: %s' % str(e))
+      logging.info('SpawnTTYServer: terminated')
+      sys.exit(0)
 
   def SpawnShellServer(self, _):
     """Spawn a shell server and forward input/output from/to the TCP socket."""
@@ -781,7 +789,8 @@ class Ghost(object):
     if command == 'upgrade':
       self.Upgrade()
     elif command == 'terminal':
-      self.SpawnGhost(self.TERMINAL, params['sid'])
+      self.SpawnGhost(self.TERMINAL, params['sid'],
+                      tty_device=params['tty_device'])
       self.SendResponse(msg, RESPONSE_SUCCESS)
     elif command == 'shell':
       self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
@@ -904,7 +913,7 @@ class Ghost(object):
         logging.info('Connection established, registering...')
         handler = {
             Ghost.AGENT: registered,
-            Ghost.TERMINAL: self.SpawnPTYServer,
+            Ghost.TERMINAL: self.SpawnTTYServer,
             Ghost.SHELL: self.SpawnShellServer,
             Ghost.FILE: self.InitiateFileOperation,
             }[self._mode]

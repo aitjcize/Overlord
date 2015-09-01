@@ -168,7 +168,7 @@ class TestOverlord(unittest.TestCase):
     assert len(clients) > 0
 
     for client in clients:
-      ws = TestClient('ws://' + _HOST + '/api/agent/pty/%s' %
+      ws = TestClient('ws://' + _HOST + '/api/agent/tty/%s' %
                       urllib.quote(client['mid']))
       ws.connect()
       try:

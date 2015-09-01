@@ -80,6 +80,7 @@ type Ghost struct {
 	readChan        chan []byte            // The incoming data channel
 	readErrChan     chan error             // The incoming data error channel
 	pauseLanDisc    bool                   // Stop LAN discovery
+	ttyDevice       string                 // Terminal device to open
 	shellCommand    string                 // Shell command to execute
 	fileOperation   FileOperation          // File operation name
 	downloadQueue   chan DownloadInfo      // Download queue
@@ -124,6 +125,11 @@ func (self *Ghost) SetSid(sid string) *Ghost {
 
 func (self *Ghost) SetTerminalSid(sid string) *Ghost {
 	self.terminalSid = sid
+	return self
+}
+
+func (self *Ghost) SetTtyDevice(ttyDevice string) *Ghost {
+	self.ttyDevice = ttyDevice
 	return self
 }
 
@@ -235,7 +241,8 @@ func (self *Ghost) Upgrade() error {
 
 func (self *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestParams struct {
-		Sid string `json:"sid"`
+		Sid       string `json:"sid"`
+		TtyDevice string `json:"tty_device"`
 	}
 
 	var params RequestParams
@@ -248,7 +255,8 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid)
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetTtyDevice(
+			params.TtyDevice)
 		g.Start(false, false)
 	}()
 
@@ -433,7 +441,7 @@ func (self *Ghost) Ping() error {
 	return self.SendRequest(req, pingHandler)
 }
 
-func (self *Ghost) HandlePTYControl(tty *os.File, control_string string) error {
+func (self *Ghost) HandleTTYControl(tty *os.File, control_string string) error {
 	// Terminal Command for ghost
 	// Implements the Message interface.
 	type TerminalCommand struct {
@@ -479,69 +487,90 @@ func (self *Ghost) getTTYName() (string, error) {
 	return ttyName, nil
 }
 
-// Spawn a PTY server and forward I/O to the TCP socket.
-func (self *Ghost) SpawnPTYServer(res *Response) error {
-	log.Println("SpawnPTYServer: started")
+// Spawn a TTY server and forward I/O to the TCP socket.
+func (self *Ghost) SpawnTTYServer(res *Response) error {
+	log.Println("SpawnTTYServer: started")
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = DEFAULT_SHELL
-	}
-
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/"
-	}
-
-	// Add ghost executable to PATH
-	exePath, err := GetExecutablePath()
-	os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
-		filepath.Dir(exePath)))
-
-	os.Chdir(home)
-	cmd := exec.Command(shell)
-	tty, err := pty.Start(cmd)
-	if err != nil {
-		return errors.New(`SpawnPTYServer: Cannot start "` + shell + `", abort`)
-	}
+	var tty *os.File
+	var err error
+	stopConn := make(chan bool, 1)
 
 	defer func() {
 		self.quit = true
-		cmd.Process.Kill()
-		tty.Close()
-		log.Println("SpawnPTYServer: terminated")
+		if tty != nil {
+			tty.Close()
+		}
+		log.Println("SpawnTTYServer: terminated")
 	}()
 
-	// Register the mapping of sid and ttyName
-	ttyName, err := PtsName(tty)
-	if err != nil {
-		return err
-	}
+	if self.ttyDevice == "" {
+		// No TTY device specified, open a PTY (pseudo terminal) instead.
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = DEFAULT_SHELL
+		}
 
-	client, err := GhostRPCServer()
+		home := os.Getenv("HOME")
+		if home == "" {
+			home = "/"
+		}
 
-	// Ghost could be launched without RPC server, ignore registraion in that case
-	if err == nil {
-		err = client.Call("rpc.RegisterTTY", []string{self.sid, ttyName},
-			&EmptyReply{})
+		// Add ghost executable to PATH
+		exePath, err := GetExecutablePath()
+		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
+			filepath.Dir(exePath)))
+
+		os.Chdir(home)
+		cmd := exec.Command(shell)
+		tty, err = pty.Start(cmd)
+		if err != nil {
+			return errors.New(`SpawnTTYServer: Cannot start "` + shell + `", abort`)
+		}
+
+		defer func() {
+			cmd.Process.Kill()
+		}()
+
+		// Register the mapping of sid and ttyName
+		ttyName, err := PtsName(tty)
 		if err != nil {
 			return err
 		}
 
-		err = client.Call("rpc.RegisterSession", []string{
-			self.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
+		client, err := GhostRPCServer()
+
+		// Ghost could be launched without RPC server, ignore registraion
+		if err == nil {
+			err = client.Call("rpc.RegisterTTY", []string{self.sid, ttyName},
+				&EmptyReply{})
+			if err != nil {
+				return err
+			}
+
+			err = client.Call("rpc.RegisterSession", []string{
+				self.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
+			if err != nil {
+				return err
+			}
+		}
+
+		go func() {
+			io.Copy(self.Conn, tty)
+			cmd.Wait()
+			stopConn <- true
+		}()
+	} else {
+		// Open a TTY device
+		tty, err = os.OpenFile(self.ttyDevice, os.O_RDWR, 0)
 		if err != nil {
 			return err
 		}
+
+		go func() {
+			io.Copy(self.Conn, tty)
+			stopConn <- true
+		}()
 	}
-
-	stopConn := make(chan bool, 1)
-
-	go func() {
-		io.Copy(self.Conn, tty)
-		cmd.Wait()
-		stopConn <- true
-	}()
 
 	var control_buffer bytes.Buffer
 	var write_buffer bytes.Buffer
@@ -556,7 +585,7 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 					index := bytes.IndexByte(buffer, CONTROL_END)
 					if index != -1 {
 						control_buffer.Write(buffer[:index])
-						err := self.HandlePTYControl(tty, control_buffer.String())
+						err := self.HandleTTYControl(tty, control_buffer.String())
 						control_state = CONTROL_NONE
 						control_buffer.Reset()
 						if err != nil {
@@ -584,7 +613,7 @@ func (self *Ghost) SpawnPTYServer(res *Response) error {
 			}
 		case err := <-self.readErrChan:
 			if err == io.EOF {
-				log.Println("SpawnPTYServer: connection dropped")
+				log.Println("SpawnTTYServer: connection dropped")
 				return nil
 			} else {
 				return err
@@ -727,7 +756,7 @@ func (self *Ghost) Register() error {
 			case AGENT:
 				handler = registered
 			case TERMINAL:
-				handler = self.SpawnPTYServer
+				handler = self.SpawnTTYServer
 			case SHELL:
 				handler = self.SpawnShellServer
 			case FILE:

@@ -34,7 +34,8 @@ const (
 )
 
 type SpawnTerminalCmd struct {
-	Sid string // Session ID
+	Sid       string // Session ID
+	TtyDevice string // Termainl device to open
 }
 
 type SpawnShellCmd struct {
@@ -474,10 +475,10 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 	}
 
-	// PTY stream request handler.
+	// TTY stream request handler.
 	// We first create a WebSocketContext to store the connection, then send a
 	// command to Overlord to client to spawn a terminal connection.
-	AgentPtyHandler := func(w http.ResponseWriter, r *http.Request) {
+	AgentTtyHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Terminal request from %s\n", r.RemoteAddr)
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -485,12 +486,18 @@ func (self *Overlord) ServHTTP(port int) {
 			return
 		}
 
+		var ttyDevice string
+
 		vars := mux.Vars(r)
 		mid := vars["mid"]
+		if _ttyDevice, ok := r.URL.Query()["tty_device"]; ok {
+			ttyDevice = _ttyDevice[0]
+		}
+
 		if agent, ok := self.agents[mid]; ok {
 			wc := NewWebsocketContext(conn)
 			self.AddWebsocketContext(wc)
-			agent.Bridge <- SpawnTerminalCmd{wc.Sid}
+			agent.Bridge <- SpawnTerminalCmd{wc.Sid, ttyDevice}
 		} else {
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
@@ -707,7 +714,7 @@ func (self *Overlord) ServHTTP(port int) {
 	r.HandleFunc("/api/log/{mid}/{sid}", LogcatHandler)
 
 	// Agent methods
-	r.HandleFunc("/api/agent/pty/{mid}", AgentPtyHandler)
+	r.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
 	r.HandleFunc("/api/agent/shell/{mid}", AgentShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)

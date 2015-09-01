@@ -198,7 +198,7 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 	log.Printf("Received %T command from overlord\n", obj)
 	switch v := obj.(type) {
 	case SpawnTerminalCmd:
-		self.SpawnTerminal(v.Sid)
+		self.SpawnTerminal(v.Sid, v.TtyDevice)
 	case SpawnShellCmd:
 		self.SpawnShell(v.Sid, v.Command)
 	case ConnectLogcatCmd:
@@ -445,7 +445,9 @@ func (self *ConnServer) SendUpgradeRequest() error {
 
 // Spawn a remote terminal connection (a ghost with mode TERMINAL).
 // sid is the session ID, which will be used as the session ID of the new ghost.
-func (self *ConnServer) SpawnTerminal(sid string) {
+// ttyDevice is the target terminal device to open. If it's an empty string, a
+// pseudo terminal will be open instead.
+func (self *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 	handler := func(res *Response) error {
 		if res == nil {
 			return errors.New("SpawnTerminal: command timeout")
@@ -457,7 +459,13 @@ func (self *ConnServer) SpawnTerminal(sid string) {
 		return nil
 	}
 
-	req := NewRequest("terminal", map[string]interface{}{"sid": sid})
+	params := map[string]interface{}{"sid": sid}
+	if ttyDevice != "" {
+		params["tty_device"] = ttyDevice
+	} else {
+		params["tty_device"] = nil
+	}
+	req := NewRequest("terminal", params)
 	self.SendRequest(req, handler)
 }
 

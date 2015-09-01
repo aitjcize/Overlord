@@ -129,7 +129,7 @@ var App = React.createClass({
             Object.keys(this.state.terminals).map(function (mid) {
               return (
                 <TerminalWindow key={mid} mid={mid} id={"terminal-" + mid}
-                 title={mid} path={"/api/agent/pty/" + mid}
+                 title={mid} path={"/api/agent/tty/" + mid}
                  onClose={onClose} app={this} />
               );
             }.bind(this))
