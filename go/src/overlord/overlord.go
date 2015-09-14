@@ -48,6 +48,7 @@ type SpawnFileCmd struct {
 	Action      string
 	Filename    string
 }
+
 type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
 }
