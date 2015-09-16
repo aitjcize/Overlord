@@ -275,9 +275,9 @@ func (self *ConnServer) Listen() {
 					self.Download.Data <- nil
 					return
 				}
-				log.Printf("connection dropped: %s\n", self.Mid)
+				log.Printf("connection dropped: %s\n", self.Sid)
 			} else {
-				log.Printf("unknown network error for %s: %s\n", self.Mid, err.Error())
+				log.Printf("unknown network error for %s: %s\n", self.Sid, err.Error())
 			}
 			return
 		case msg := <-self.Bridge:

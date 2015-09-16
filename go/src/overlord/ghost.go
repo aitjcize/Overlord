@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/flynn/go-shlex"
 	"github.com/kr/pty"
 	"github.com/satori/go.uuid"
 	"io"
@@ -615,13 +614,7 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 		log.Println("SpawnShellServer: terminated")
 	}()
 
-	parts, err := shlex.Split(self.shellCommand)
-	cmd_name, err := exec.LookPath(parts[0])
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(cmd_name, parts[1:]...)
+	cmd := exec.Command(DEFAULT_SHELL, "-c", self.shellCommand)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
