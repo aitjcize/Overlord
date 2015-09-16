@@ -20,6 +20,7 @@
 
 
 LOG_BUF_SIZE = 8192
+DEFAULT_LIGHT_POLL_INTERVAL = 3000
 
 var App = React.createClass({
   loadClientsFromServer: function () {
@@ -58,50 +59,32 @@ var App = React.createClass({
     if (data.properties.context != "fixture") {
       return;
     }
-    var ip = data.properties.ip;
-    if (typeof(this.state.fixture_groups[ip]) == "undefined") {
-      this.state.fixture_groups[ip] = [];
-    }
-    this.clientIPMap[data.mid] = ip;
-    this.state.fixture_groups[ip].push(data);
+    this.state.fixtures.push(data);
     this.forceUpdate();
   },
   removeClient: function (data) {
-    var ip = this.clientIPMap[data.mid];
-    var group = this.state.fixture_groups[ip];
-
-    if (typeof(group) == "undefined") {
-      return;
-    }
-
-    for (var i = 0; i < group.length; i++) {
-      if (group[i].mid == data.mid) {
-        group.splice(i, 1);
-
-        if (group.length == 0) {
-          delete this.state.fixture_groups[ip];
-        }
+    var fixtures = this.state.fixtures;
+    for (var i = 0; i < fixtures.length; i++) {
+      if (fixtures[i].mid == data.mid) {
+        fixtures.splice(i, 1);
         this.forceUpdate();
         return;
       }
     }
     return;
   },
-  addTerminal: function (mid) {
-    if (typeof(this.state.terminals[mid]) == "undefined") {
-      this.state.terminals[mid] = true;
-    }
+  addTerminal: function (id, term) {
+    this.state.terminals[id] = term;
     this.forceUpdate();
   },
-  removeTerminal: function (mid) {
-    if (typeof(this.state.terminals[mid]) != "undefined") {
-      delete this.state.terminals[mid];
+  removeTerminal: function (id) {
+    if (typeof(this.state.terminals[id]) != "undefined") {
+      delete this.state.terminals[id];
     }
     this.forceUpdate();
   },
   getInitialState: function () {
-    this.clientIPMap = {};
-    return {fixture_groups: {}, terminals: {}};
+    return {fixtures: [], terminals: {}};
   },
   componentDidMount: function () {
     this.loadClientsFromServer();
@@ -119,17 +102,22 @@ var App = React.createClass({
   },
   render: function () {
     onClose = function (e) {
-      this.props.app.removeTerminal(this.props.mid);
+      this.props.app.removeTerminal(this.props.id);
     };
     return (
       <div id="main">
         <NavBar name="Fixture Dashboard" url="/api/apps/list" />
         <div className="terminals">
           {
-            Object.keys(this.state.terminals).map(function (mid) {
+            Object.keys(this.state.terminals).map(function (id) {
+              var term = this.state.terminals[id];
+              var extra = "";
+              if (typeof(term.path) != "undefined") {
+                extra = "?tty_device=" + term.path;
+              }
               return (
-                <TerminalWindow key={mid} mid={mid} id={"terminal-" + mid}
-                 title={mid} path={"/api/agent/tty/" + mid}
+                <TerminalWindow key={id} mid={term.mid} id={id}
+                 title={id} path={"/api/agent/tty/" + term.mid + extra}
                  onClose={onClose} app={this} />
               );
             }.bind(this))
@@ -139,10 +127,9 @@ var App = React.createClass({
           <div className="panel-heading">Clients</div>
           <div className="panel-body">
             {
-              Object.keys(this.state.fixture_groups).map(function (key) {
-                var group = this.state.fixture_groups[key];
+              this.state.fixtures.map(function (data) {
                 return (
-                  <Fixture key={key} members={group} app={this}/>
+                  <Fixture key={data.mid} client={data} app={this}/>
                 );
               }.bind(this))
             }
@@ -154,17 +141,33 @@ var App = React.createClass({
 });
 
 var Fixture = React.createClass({
+  executeRemoteCmd: function (mid, cmd) {
+    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
+              "://" + window.location.host + "/api/agent/shell/" + mid +
+              "?command=" + encodeURIComponent(cmd);
+    var sock = new WebSocket(url);
+
+    sock.onopen = function () {
+      sock.onmessage = function (msg) {
+        if (msg.data instanceof Blob) {
+          ReadBlobAsText(msg.data, function(text) {
+            this.refs.mainlog.appendLog(text);
+          }.bind(this));
+        }
+      }.bind(this)
+    }.bind(this)
+  },
   render: function () {
-    var ip = this.props.members[0].properties.ip;
+    var client = this.props.client;
     return (
       <div className="fixture-block panel panel-success">
-        <div className="panel-heading">{ip}</div>
+        <div className="panel-heading text-center">{client.mid}</div>
         <div className="panel-body">
-          <Lights ref="lights" members={this.props.members} />
-          <Terminals members={this.props.members} app={this.props.app}/>
-          <Controls members={this.props.members} fixture={this} />
-          <MainLog ref="mainlog" fixture={this} ip={ip} />
-          <AuxLogs members={this.props.members} fixture={this} />
+          <Lights ref="lights" client={this.props.client} fixture={this} />
+          <Terminals client={client} app={this.props.app} />
+          <Controls ref="controls" client={client} fixture={this} />
+          <MainLog ref="mainlog" fixture={this} id={client.mid} />
+          <AuxLogs client={client} fixture={this} />
         </div>
       </div>
     );
@@ -182,24 +185,52 @@ var Lights = React.createClass({
       this.updateLightStatus(found[1], found[2]);
     }
   },
-  render: function () {
-    var ip = this.props.members[0].properties.ip;
-    var members = this.props.members;
-    var status_lights = [];
-    for (var i = 0; i < members.length; i++) {
-      if (typeof(members[i].properties.ui) != "undefined" &&
-          typeof(members[i].properties.ui.lights) != "undefined") {
-        status_lights = status_lights.concat(members[i].properties.ui.lights);
+  componentDidMount: function() {
+    var client = this.props.client;
+    var lights = [];
+
+    if (typeof(client.properties.ui) != "undefined") {
+      lights = client.properties.ui.lights || [];
+    }
+    for (var i = 0; i < lights.length; i++) {
+      if (typeof(lights[i].init_cmd) != "undefined") {
+        this.props.fixture.executeRemoteCmd(client.mid, lights[i].init_cmd);
       }
+
+      var poll = lights[i].poll;
+      if (typeof(poll) != "undefined" &&
+          typeof(poll.cmd != "undefined")) {
+        var interval = DEFAULT_LIGHT_POLL_INTERVAL;
+        if (typeof(poll.interval != "undefined")) {
+          interval = poll.interval;
+        }
+        // Execute for the first time to update light status
+        this.props.fixture.executeRemoteCmd(client.mid, poll.cmd);
+
+        // Execute every *interval* to update the light status
+        if (interval > 0) {
+          setInterval(function() {
+            this.props.fixture.executeRemoteCmd(client.mid, poll.cmd);
+          }.bind(this), interval);
+        }
+      }
+    }
+  },
+  render: function () {
+    var client = this.props.client;
+    var lights = [];
+
+    if (typeof(client.properties.ui) != "undefined") {
+      lights = client.properties.ui.lights || [];
     }
     return (
       <div className="status-block well well-sm">
       {
-        status_lights.map(function (light) {
+        lights.map(function (light) {
           return (
-            <span key={light[0]} className={"label status-light " + light[2]}
-              ref={light[0]}>
-              {light[1]}
+            <span key={light.id} className={"label status-light " + light.class}
+              ref={light.id}>
+              {light.label}
             </span>
           );
         })
@@ -210,28 +241,78 @@ var Lights = React.createClass({
 });
 
 var Terminals = React.createClass({
+  getCmdOutput: function (mid, cmd) {
+    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
+              "://" + window.location.host + "/api/agent/shell/" + mid +
+              "?command=" + cmd;
+    var sock = new WebSocket(url);
+    var deferred = $.Deferred();
+
+    sock.onopen = function (e) {
+      var blobs = [];
+      sock.onmessage = function (msg) {
+        if (msg.data instanceof Blob) {
+          blobs.push(msg.data);
+        }
+      }
+      sock.onclose = function (e) {
+        var value = "";
+        if (blobs.length == 0) {
+          deferred.resolve("");
+        }
+        for (var i = 0; i < blobs.length; i++) {
+          ReadBlobAsText(blobs[i], function(current) {
+            return function(text) {
+              value += text;
+              if (current == blobs.length - 1) {
+                deferred.resolve(value);
+              }
+            }
+          }(i));
+        }
+      }
+    }
+    return deferred.promise();
+  },
   onTerminalClick: function (e) {
     var target = $(e.target);
-    this.props.app.addTerminal(target.data("mid"));
+    var mid = target.data("mid");
+    var term = target.data("term");
+    var id = mid + "::" + term.name;
+
+    // Add mid reference to term object
+    term.mid = mid;
+
+    if (typeof(term.path_cmd) != "undefined" &&
+        term.path_cmd.match(/^\s+$/) == null) {
+      this.getCmdOutput(mid, term.path_cmd).done(function(path) {
+        if (path.replace(/^\s+|\s+$/g, "") == "") {
+          alert("This TTY device does not exist!");
+        } else {
+          term.path = path;
+          this.props.app.addTerminal(id, term);
+        }
+      }.bind(this));
+      return;
+    }
+
+    this.props.app.addTerminal(id, term);
   },
   render: function () {
-    var members = this.props.members;
+    var client = this.props.client;
     var terminals = [];
-    for (var i = 0; i < members.length; i++) {
-      if (typeof(members[i].properties.terminal) != "undefined") {
-        terminals.push([members[i].mid, members[i].properties.terminal]);
-      }
+
+    if (typeof(client.properties.ui) != "undefined") {
+      terminals = client.properties.ui.terminals || [];
     }
     return (
       <div className="status-block well well-sm">
       {
-        terminals.map(function (pair) {
-          var mid = pair[0];
-          var name = pair[1];
+        terminals.map(function (term) {
           return (
-            <button key={mid} className="btn btn-xs btn-info" data-mid={mid}
-                onClick={this.onTerminalClick}>
-            {name}
+            <button className="btn btn-xs btn-info" data-mid={client.mid}
+                data-term={JSON.stringify(term)} onClick={this.onTerminalClick}>
+            {term.name}
             </button>
           );
         }.bind(this))
@@ -242,70 +323,60 @@ var Terminals = React.createClass({
 });
 
 var Controls = React.createClass({
-  executeRemoteCmd: function (mid, cmd) {
-    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
-              "://" + window.location.host + "/api/agent/shell/" + mid +
-              "?command=" + encodeURIComponent(cmd);
-    var sock = new WebSocket(url);
-
-    sock.onopen = function () {
-      sock.onmessage = function (msg) {
-        if (msg.data instanceof Blob) {
-          ReadBlobAsText(msg.data, function(text) {
-            this.props.fixture.refs.mainlog.appendLog(text);
-          }.bind(this));
-        }
-      }.bind(this)
-    }.bind(this)
-  },
   onCommandClicked: function (e) {
     var target = $(e.target);
-    this.executeRemoteCmd(target.data('mid'), target.data('cmd'));
+    var ctrl = target.data("ctrl");
+    if (ctrl.type == "toggle") {
+      if (target.hasClass("active")) {
+        this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.off_command);
+        target.removeClass("active");
+      } else {
+        this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.on_command);
+        target.addClass("active");
+      }
+    } else {
+      this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.command);
+    }
   },
   render: function () {
-    var members = this.props.members;
-    var member_controls = [];
-    for (var i = 0; i < members.length; i++) {
-      if (typeof(members[i].properties.ui) != "undefined" &&
-          typeof(members[i].properties.ui.controls) != "undefined") {
-        member_controls.push([members[i].mid, members[i].properties.ui.controls]);
-      }
+    var client = this.props.client;
+    var controls = [];
+    var mid = client.mid;
+
+    if (typeof(client.properties.ui) != "undefined") {
+      controls = client.properties.ui.controls || [];
     }
     return (
       <div className="controls-block well well-sm">
       {
-        member_controls.map(function (el) {
-          var mid = el[0];
-          var controls = el[1];
-          return controls.map(function (control) {
-            if (typeof(control[1]) != "string") { // submenu
-              return (
-                <div className="well well-sm well-inner" key={control[0]}>
-                {control[0]}<br />
-                {
-                  control[1].map(function (ctrl) {
-                    return (
-                      <button key={ctrl[0]}
-                          className="command-btn btn btn-xs btn-warning"
-                          data-mid={mid} data-cmd={ctrl[1]}
-                          onClick={this.onCommandClicked}>
-                        {ctrl[0]}
-                      </button>
-                    );
-                  }.bind(this))
-                }
-                </div>
-              );
-            }
+        controls.map(function (control) {
+          if (typeof(control.group) != "undefined") { // sub-group
             return (
-              <div key={control[0]}
-                  className="command-btn btn btn-xs btn-primary"
-                  data-mid={mid} data-cmd={control[1]}
-                  onClick={this.onCommandClicked}>
-                {control[0]}
+              <div className="well well-sm well-inner" key={control.name}>
+              {control.name}<br />
+              {
+                control.group.map(function (ctrl) {
+                  return (
+                    <button key={ctrl.name}
+                        className="command-btn btn btn-xs btn-warning"
+                        data-mid={mid} data-ctrl={JSON.stringify(ctrl)}
+                        onClick={this.onCommandClicked}>
+                      {ctrl.name}
+                    </button>
+                  );
+                }.bind(this))
+              }
               </div>
             );
-          }.bind(this))
+          }
+          return (
+            <div key={control.name}
+                className="command-btn btn btn-xs btn-primary"
+                data-mid={mid} data-ctrl={JSON.stringify(control)}
+                onClick={this.onCommandClicked}>
+              {control.name}
+            </div>
+          );
         }.bind(this))
       }
       </div>
@@ -325,11 +396,11 @@ var MainLog = React.createClass({
     odiv.scrollTop = odiv.scrollHeight;
   },
   componentDidMount: function () {
-    this.odiv = this.refs["log-" + this.props.ip].getDOMNode();
+    this.odiv = this.refs["log-" + this.props.id].getDOMNode();
   },
   render: function () {
     return (
-      <div className="log log-main well well-sm" ref={"log-" + this.props.ip}>
+      <div className="log log-main well well-sm" ref={"log-" + this.props.id}>
       </div>
     );
   }
@@ -337,26 +408,20 @@ var MainLog = React.createClass({
 
 var AuxLogs = React.createClass({
   render: function () {
-    var ip = this.props.members[0].properties.ip;
-    var members = this.props.members;
-    var log_pairs = [];
-    for (var i = 0; i < members.length; i++) {
-      if (typeof(members[i].properties.ui) != "undefined" &&
-          typeof(members[i].properties.ui.log) != "undefined") {
-        log_pairs.push([members[i].mid, members[i].properties.ui.log]);
-      }
+    var client = this.props.client;
+    var logs = [];
+
+    if (typeof(client.properties.ui) != "undefined") {
+      logs = client.properties.ui.logs || [];
     }
     return (
       <div className="log-block">
         {
-          log_pairs.map(function (pair) {
-            var mid = pair[0];
-            var logs = pair[1];
-            return logs.map(function (filename) {
-              return (
-                <AuxLog mid={mid} filename={filename} fixture={this.props.fixture}/>
-              )
-            }.bind(this))
+          logs.map(function (filename) {
+            return (
+              <AuxLog mid={client.mid} filename={filename}
+               fixture={this.props.fixture}/>
+            )
           }.bind(this))
         }
       </div>

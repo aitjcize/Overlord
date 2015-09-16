@@ -66,7 +66,7 @@ var TerminalWindow = React.createClass({
       screenKeys: true
     });
 
-     var bindDragAndDropEvents = function() {
+    var bindDragAndDropEvents = function() {
       var termDom = $el.find(".terminal");
       var overlay = $el.find(".terminal-drop-overlay");
 
