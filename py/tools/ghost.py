@@ -383,8 +383,9 @@ class Ghost(object):
     logging.info('Upgrade: initiating upgrade sequence...')
 
     scriptpath = os.path.abspath(sys.argv[0])
-    url = 'http%s://%s:%d/upgrade/ghost.py' % ('s' if self.UseSSL() else '',
-        self._connected_addr[0], _OVERLORD_HTTP_PORT)
+    url = 'http%s://%s:%d/upgrade/ghost.py' % (
+        's' if self.UseSSL() else '', self._connected_addr[0],
+        _OVERLORD_HTTP_PORT)
 
     # Download sha1sum for ghost.py for verification
     try:
@@ -1180,9 +1181,9 @@ def main():
   parser.add_argument('--no-rpc-server', dest='rpc_server',
                       action='store_false', default=True,
                       help='disable RPC server')
-  parser.add_argument('--no-forward-ssh', dest='forward_ssh',
-                      action='store_false', default=True,
-                      help='disable target SSH port forwarding')
+  parser.add_argument('--forward-ssh', dest='forward_ssh',
+                      action='store_true', default=False,
+                      help='enable target SSH port forwarding')
   parser.add_argument('--prop-file', metavar='PROP_FILE', dest='prop_file',
                       type=str, default=None,
                       help='file containing the JSON representation of client '
