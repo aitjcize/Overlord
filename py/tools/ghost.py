@@ -367,11 +367,23 @@ class Ghost(object):
     with open(filename, 'r') as f:
       return hashlib.sha1(f.read()).hexdigest()
 
+  def UseSSL(self):
+    """Determine if SSL is enabled on the Overlord server."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+      sock.connect((self._connected_addr[0], _OVERLORD_HTTP_PORT))
+      sock.send('GET\r\n')
+
+      data = sock.recv(16)
+      return 'HTTP' not in data
+    except Exception:
+      return False  # For whatever reason above failed, assume HTTP
+
   def Upgrade(self):
     logging.info('Upgrade: initiating upgrade sequence...')
 
     scriptpath = os.path.abspath(sys.argv[0])
-    url = 'http://%s:%d/upgrade/ghost.py' % (
+    url = 'http%s://%s:%d/upgrade/ghost.py' % ('s' if self.UseSSL() else '',
         self._connected_addr[0], _OVERLORD_HTTP_PORT)
 
     # Download sha1sum for ghost.py for verification
