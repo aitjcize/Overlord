@@ -372,7 +372,9 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 
 	self.wsConn, err = self.ovl.Register(self)
 	if err != nil {
-		return RegistrationFailedError(err)
+		res := NewResponse(req.Rid, err.Error(), nil)
+		self.SendResponse(res)
+		return RegistrationFailedError(errors.New("Register: " + err.Error()))
 	}
 
 	// Notify client of our Terminal ssesion ID

@@ -23,6 +23,11 @@ func (self *GhostRPC) Reconnect(args *EmptyArgs, reply *EmptyReply) error {
 	return nil
 }
 
+func (self *GhostRPC) GetStatus(args *EmptyArgs, reply *string) error {
+	*reply = self.ghost.RegisterStatus
+	return nil
+}
+
 func (self *GhostRPC) RegisterTTY(args []string, reply *EmptyReply) error {
 	self.ghost.RegisterTTY(args[0], args[1])
 	return nil

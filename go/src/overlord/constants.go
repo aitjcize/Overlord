@@ -33,8 +33,9 @@ const (
 )
 
 const (
-	SUCCESS = "success"
-	FAILED  = "failed"
+	SUCCESS      = "success"
+	FAILED       = "failed"
+	DISCONNECTED = "disconnected"
 )
 
 // Terminal resize control

@@ -76,6 +76,7 @@ type Ghost struct {
 	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
 	propFile        string                 // Properties file filename
 	properties      map[string]interface{} // Client properties
+	RegisterStatus  string                 // Register status from server response
 	reset           bool                   // Whether to reset the connection
 	quit            bool                   // Whether to quit the connection
 	readChan        chan []byte            // The incoming data channel
@@ -111,6 +112,7 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 		ttyName2Sid:     make(map[string]string),
 		terminalSid2Pid: make(map[string]int),
 		properties:      make(map[string]interface{}),
+		RegisterStatus:  DISCONNECTED,
 		reset:           false,
 		quit:            false,
 		pauseLanDisc:    false,
@@ -785,6 +787,8 @@ func (self *Ghost) Register() error {
 				if res == nil {
 					self.reset = true
 					return errors.New("Register request timeout")
+				} else if res.Response != SUCCESS {
+					log.Println("Register:", res.Response)
 				} else {
 					log.Printf("Registered with Overlord at %s", addr)
 					self.connectedAddr = addr
@@ -793,6 +797,7 @@ func (self *Ghost) Register() error {
 					}
 					self.pauseLanDisc = true
 				}
+				self.RegisterStatus = res.Response
 				return nil
 			}
 
@@ -828,6 +833,7 @@ func (self *Ghost) Reset() {
 	self.ClearRequests()
 	self.reset = false
 	self.LoadProperties()
+	self.RegisterStatus = DISCONNECTED
 }
 
 // Main routine for listen to socket messages.

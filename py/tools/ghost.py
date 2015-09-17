@@ -54,8 +54,9 @@ _CONTROL_END = 129
 
 _BLOCK_SIZE = 4096
 
-RESPONSE_SUCCESS = 'success'
-RESPONSE_FAILED = 'failed'
+SUCCESS = 'success'
+FAILED = 'failed'
+DISCONNECTED = 'disconnected'
 
 
 class PingTimeoutError(Exception):
@@ -340,9 +341,9 @@ class Ghost(object):
 
     self._overlord_addrs = overlord_addrs
     self._connected_addr = None
-    self._mode = mode
     self._mid = mid
     self._sock = None
+    self._mode = mode
     self._machine_id = self.GetMachineID()
     self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._terminal_session_id = terminal_sid
@@ -350,19 +351,26 @@ class Ghost(object):
     self._terminal_sid_to_pid = {}
     self._prop_file = prop_file
     self._properties = {}
+    self._register_status = DISCONNECTED
+    self._reset = threading.Event()
+
+    # RPC
+    self._buf = ''  # Read buffer
+    self._requests = {}
+    self._queue = Queue.Queue()
+
+    # Protocol specific
+    self._last_ping = 0
     self._tty_device = tty_device
     self._shell_command = command
     self._file_op = file_op
-    self._buf = ''
-    self._requests = {}
-    self._reset = threading.Event()
-    self._last_ping = 0
-    self._queue = Queue.Queue()
+    self._download_queue = Queue.Queue()
+
+    # SSH Forwarding related
     self._forward_ssh = False
     self._ssh_port_forwarder = None
     self._target_identity_file = os.path.join(os.path.dirname(
         os.path.abspath(os.path.realpath(__file__))), 'ghost_rsa')
-    self._download_queue = Queue.Queue()
 
   def SetIgnoreChild(self, status):
     # Only ignore child for Agent since only it could spawn child Ghost.
@@ -577,6 +585,7 @@ class Ghost(object):
     self._last_ping = 0
     self._requests = {}
     self.LoadProperties()
+    self._register_status = DISCONNECTED
 
   def SendMessage(self, msg):
     """Serialize the message and send it through the socket."""
@@ -830,7 +839,7 @@ class Ghost(object):
 
     self.SpawnGhost(self.FILE, params['sid'],
                     file_op=('download', params['filename'], None))
-    self.SendResponse(msg, RESPONSE_SUCCESS)
+    self.SendResponse(msg, SUCCESS)
 
   def HandleRequest(self, msg):
     command = msg['name']
@@ -841,10 +850,10 @@ class Ghost(object):
     elif command == 'terminal':
       self.SpawnGhost(self.TERMINAL, params['sid'],
                       tty_device=params['tty_device'])
-      self.SendResponse(msg, RESPONSE_SUCCESS)
+      self.SendResponse(msg, SUCCESS)
     elif command == 'shell':
       self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
-      self.SendResponse(msg, RESPONSE_SUCCESS)
+      self.SendResponse(msg, SUCCESS)
     elif command == 'file_download':
       self.HanldeFileDownloadRequest(msg)
     elif command == 'clear_to_download':
@@ -853,7 +862,7 @@ class Ghost(object):
       pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
       self.SpawnGhost(self.FILE, params['sid'],
                       file_op=('upload', params['filename'], pid))
-      self.SendResponse(msg, RESPONSE_SUCCESS)
+      self.SendResponse(msg, SUCCESS)
 
   def HandleResponse(self, response):
     rid = str(response['rid'])
@@ -946,14 +955,19 @@ class Ghost(object):
           self._reset.set()
           raise RuntimeError('Register request timeout')
 
-        logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
-        self._connected_addr = non_local['addr']
-        self.Upgrade()  # Check for upgrade
-        self._queue.put('pause', True)
+        self._register_status = response['response']
+        if response['response'] != SUCCESS:
+          self._reset.set()
+          raise RuntimeError('Reigster: ' + response['response'])
+        else:
+          logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
+          self._connected_addr = non_local['addr']
+          self.Upgrade()  # Check for upgrade
+          self._queue.put('pause', True)
 
-        if self._forward_ssh:
-          logging.info('Starting target SSH port negotiation')
-          self.NegotiateTargetSSHPort()
+          if self._forward_ssh:
+            logging.info('Starting target SSH port negotiation')
+            self.NegotiateTargetSSHPort()
 
       try:
         logging.info('Trying %s:%d ...', *addr)
@@ -988,6 +1002,9 @@ class Ghost(object):
   def Reconnect(self):
     logging.info('Received reconnect request from RPC server, reconnecting...')
     self._reset.set()
+
+  def GetStatus(self):
+    return self._register_status
 
   def AddToDownloadQueue(self, ttyname, filename):
     self._download_queue.put((ttyname, filename))
@@ -1047,6 +1064,7 @@ class Ghost(object):
     rpc_server = SimpleJSONRPCServer((_DEFAULT_BIND_ADDRESS, _GHOST_RPC_PORT),
                                      logRequests=False)
     rpc_server.register_function(self.Reconnect, 'Reconnect')
+    rpc_server.register_function(self.GetStatus, 'GetStatus')
     rpc_server.register_function(self.RegisterTTY, 'RegisterTTY')
     rpc_server.register_function(self.RegisterSession, 'RegisterSession')
     rpc_server.register_function(self.AddToDownloadQueue, 'AddToDownloadQueue')
@@ -1191,8 +1209,7 @@ class Ghost(object):
         # Don't show stack trace for RuntimeError, which we use in this file for
         # plausible and expected errors (such as can't connect to server).
         except RuntimeError as e:
-          logging.info('%s: %s, retrying in %ds',
-                       e.__class__.__name__, e.message, _RETRY_INTERVAL)
+          logging.info('%s, retrying in %ds', e.message, _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
         except Exception as e:
           _, _, exc_traceback = sys.exc_info()

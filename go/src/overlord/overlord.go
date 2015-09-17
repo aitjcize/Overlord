@@ -114,15 +114,14 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	switch conn.Mode {
 	case AGENT:
 		if _, ok := self.agents[conn.Mid]; ok {
-			return nil, errors.New("Register: duplicate machine ID: " + conn.Mid)
+			return nil, errors.New("duplicate machine ID: " + conn.Mid)
 		}
 
 		self.agents[conn.Mid] = conn
 		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
 	case TERMINAL, SHELL:
 		if ctx, ok := self.wsctxs[conn.Sid]; !ok {
-			return nil, errors.New("Register: client " + conn.Sid +
-				" registered without context")
+			return nil, errors.New("client " + conn.Sid + " registered without context")
 		} else {
 			wsconn = ctx.Conn
 		}
@@ -131,7 +130,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 			self.logcats[conn.Mid] = make(map[string]*ConnServer)
 		}
 		if _, ok := self.logcats[conn.Mid][conn.Sid]; ok {
-			return nil, errors.New("Register: duplicate session ID: " + conn.Sid)
+			return nil, errors.New("duplicate session ID: " + conn.Sid)
 		}
 		self.logcats[conn.Mid][conn.Sid] = conn
 		self.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
@@ -139,7 +138,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		// Do nothing, we wait until 'request_to_download' call from client to
 		// send the message to the browser
 	default:
-		return nil, errors.New("Register: Unknown client mode")
+		return nil, errors.New("Unknown client mode")
 	}
 
 	var id string
