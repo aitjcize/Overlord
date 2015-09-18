@@ -903,11 +903,15 @@ class Ghost(object):
         if response is None:
           self._reset.set()
           raise RuntimeError('Register request timeout')
+
         logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
+        self._connected_addr = addr
+        self.Upgrade()  # Check for upgrade
+        self._queue.put('pause', True)
+
         if self._forward_ssh:
           logging.info('Starting target SSH port negotiation')
           self.NegotiateTargetSSHPort()
-        self._queue.put('pause', True)
 
       try:
         logging.info('Trying %s:%d ...', *addr)
@@ -935,7 +939,6 @@ class Ghost(object):
         pass
       else:
         self._sock.settimeout(None)
-        self._connected_addr = addr
         self.Listen()
 
     raise RuntimeError('Cannot connect to any server')

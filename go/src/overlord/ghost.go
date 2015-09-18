@@ -265,8 +265,8 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(
-			params.Sid).SetTtyDevice(params.TtyDevice)
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetTtyDevice(
+			params.TtyDevice)
 		g.Start(false, false)
 	}()
 
@@ -756,6 +756,9 @@ func (self *Ghost) Register() error {
 				} else {
 					log.Printf("Registered with Overlord at %s", addr)
 					self.connectedAddr = addr
+					if err := self.Upgrade(); err != nil {
+						log.Println(err)
+					}
 					self.pauseLanDisc = true
 				}
 				return nil
