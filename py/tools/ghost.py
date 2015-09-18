@@ -310,7 +310,8 @@ class Ghost(object):
   RANDOM_MID = '##random_mid##'
 
   def __init__(self, overlord_addrs, mode=AGENT, mid=None, sid=None,
-               terminal_sid=None, tty_device=None, command=None, file_op=None):
+               prop_file=None, terminal_sid=None, tty_device=None,
+               command=None, file_op=None):
     """Constructor.
 
     Args:
@@ -320,6 +321,7 @@ class Ghost(object):
         id is randomly generated.
       sid: session ID. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
+      prop_file: properties file filename.
       terminal_sid: the terminal session ID associate with this client. This is
         use for file download.
       tty_device: the terminal device to open, if tty_device is None, as pseudo
@@ -343,6 +345,9 @@ class Ghost(object):
     self._machine_id = self.GetMachineID()
     self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._terminal_session_id = terminal_sid
+    self._ttyname_to_sid = {}
+    self._terminal_sid_to_pid = {}
+    self._prop_file = prop_file
     self._properties = {}
     self._tty_device = tty_device
     self._shell_command = command
@@ -357,8 +362,6 @@ class Ghost(object):
     self._target_identity_file = os.path.join(os.path.dirname(
         os.path.abspath(os.path.realpath(__file__))), 'ghost_rsa')
     self._download_queue = Queue.Queue()
-    self._ttyname_to_sid = {}
-    self._terminal_sid_to_pid = {}
 
   def SetIgnoreChild(self, status):
     # Only ignore child for Agent since only it could spawn child Ghost.
@@ -432,12 +435,13 @@ class Ghost(object):
     self.SetIgnoreChild(False)
     os.execve(python, [python, scriptpath] + sys.argv[1:], os.environ)
 
-  def LoadPropertiesFromFile(self, filename):
+  def LoadProperties(self):
     try:
-      with open(filename, 'r') as f:
-        self._properties = json.loads(f.read())
+      if self._prop_file:
+        with open(self._prop_file, 'r') as f:
+          self._properties = json.loads(f.read())
     except Exception as e:
-      logging.exception('LoadPropertiesFromFile: ' + str(e))
+      logging.exception('LoadProperties: ' + str(e))
 
   def CloseSockets(self):
     # Close sockets opened by parent process, since we don't use it anymore.
@@ -463,7 +467,8 @@ class Ghost(object):
     if pid == 0:
       self.CloseSockets()
       g = Ghost([self._connected_addr], mode, Ghost.RANDOM_MID, sid,
-                terminal_sid, tty_device, command, file_op)
+                terminal_sid=terminal_sid, tty_device=tty_device,
+                command=command, file_op=file_op)
       g.Start()
       sys.exit(0)
     else:
@@ -570,6 +575,7 @@ class Ghost(object):
     self._buf = ''
     self._last_ping = 0
     self._requests = {}
+    self.LoadProperties()
 
   def SendMessage(self, msg):
     """Serialize the message and send it through the socket."""
@@ -1199,9 +1205,16 @@ def main():
                            'properties')
   parser.add_argument('--download', metavar='FILE', dest='download', type=str,
                       default=None, help='file to download')
+  parser.add_argument('--reset', dest='reset', default=False,
+                      action='store_true',
+                      help='reset ghost and reload all configs')
   parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,
                       nargs='*', help='overlord server address')
   args = parser.parse_args()
+
+  if args.reset:
+    GhostRPCServer().Reconnect()
+    sys.exit()
 
   if args.download:
     DownloadFile(args.download)
@@ -1209,9 +1222,7 @@ def main():
   addrs = [('localhost', _OVERLORD_PORT)]
   addrs += [(x, _OVERLORD_PORT) for x in args.overlord_ip]
 
-  g = Ghost(addrs, Ghost.AGENT, args.mid)
-  if args.prop_file:
-    g.LoadPropertiesFromFile(args.prop_file)
+  g = Ghost(addrs, Ghost.AGENT, args.mid, prop_file=args.prop_file)
   g.Start(args.lan_disc, args.rpc_server, args.forward_ssh)
 
 

@@ -19,7 +19,7 @@ func NewGhostRPC(ghost *Ghost) *GhostRPC {
 }
 
 func (self *GhostRPC) Reconnect(args *EmptyArgs, reply *EmptyReply) error {
-	self.ghost.Reset()
+	self.ghost.reset = true
 	return nil
 }
 

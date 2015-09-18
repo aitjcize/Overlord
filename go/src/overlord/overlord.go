@@ -373,12 +373,12 @@ func (self *Overlord) ServHTTP(port int) {
 
 		apps, err := self.GetAppNames(true)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		}
 
 		result, err := json.Marshal(map[string][]string{"apps": apps})
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		} else {
 			w.Write(result)
 		}
@@ -405,7 +405,7 @@ func (self *Overlord) ServHTTP(port int) {
 
 		result, err := json.Marshal(data)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		} else {
 			w.Write(result)
 		}
@@ -442,7 +442,7 @@ func (self *Overlord) ServHTTP(port int) {
 
 		result, err := json.Marshal(data)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		} else {
 			w.Write(result)
 		}
@@ -539,7 +539,7 @@ func (self *Overlord) ServHTTP(port int) {
 		if agent, ok := self.agents[mid]; ok {
 			jsonResult, err := json.Marshal(agent.Properties)
 			if err != nil {
-				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 				return
 			}
 			w.Write(jsonResult)

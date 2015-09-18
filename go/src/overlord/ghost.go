@@ -66,14 +66,15 @@ type FileUploadContext struct {
 type Ghost struct {
 	*RPCCore
 	addrs           []string               // List of possible Overlord addresses
-	ttyName2Sid     map[string]string      // Mapping between ttyName and Sid
-	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
 	server          *rpc.Server            // RPC server handle
 	connectedAddr   string                 // Current connected Overlord address
+	mode            int                    // mode, see constants.go
 	mid             string                 // Machine ID
 	sid             string                 // Session ID
 	terminalSid     string                 // Associated terminal session ID
-	mode            int                    // mode, see constants.go
+	ttyName2Sid     map[string]string      // Mapping between ttyName and Sid
+	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
+	propFile        string                 // Properties file filename
 	properties      map[string]interface{} // Client properties
 	reset           bool                   // Whether to reset the connection
 	quit            bool                   // Whether to quit the connection
@@ -103,12 +104,12 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 	}
 	return &Ghost{
 		RPCCore:         NewRPCCore(nil),
-		ttyName2Sid:     make(map[string]string),
-		terminalSid2Pid: make(map[string]int),
 		addrs:           addrs,
+		mode:            mode,
 		mid:             finalMid,
 		sid:             uuid.NewV4().String(),
-		mode:            mode,
+		ttyName2Sid:     make(map[string]string),
+		terminalSid2Pid: make(map[string]int),
 		properties:      make(map[string]interface{}),
 		reset:           false,
 		quit:            false,
@@ -125,6 +126,11 @@ func (self *Ghost) SetSid(sid string) *Ghost {
 
 func (self *Ghost) SetTerminalSid(sid string) *Ghost {
 	self.terminalSid = sid
+	return self
+}
+
+func (self *Ghost) SetPropFile(propFile string) *Ghost {
+	self.propFile = propFile
 	return self
 }
 
@@ -154,15 +160,19 @@ func (self *Ghost) ExistsInAddr(target string) bool {
 	return false
 }
 
-func (self *Ghost) LoadPropertiesFromFile(filename string) {
-	bytes, err := ioutil.ReadFile(filename)
+func (self *Ghost) LoadProperties() {
+	if self.propFile == "" {
+		return
+	}
+
+	bytes, err := ioutil.ReadFile(self.propFile)
 	if err != nil {
-		log.Printf("LoadPropertiesFromFile: %s\n", err)
+		log.Printf("LoadProperties: %s\n", err)
 		return
 	}
 
 	if err := json.Unmarshal(bytes, &self.properties); err != nil {
-		log.Printf("LoadPropertiesFromFile: %s\n", err)
+		log.Printf("LoadProperties: %s\n", err)
 		return
 	}
 }
@@ -225,13 +235,13 @@ func (self *Ghost) Upgrade() error {
 	}
 	_, err = buffer.WriteTo(exeFile)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Upgrade: %s", err.Error()))
+		return errors.New(fmt.Sprintf("Upgrade: %s", err))
 	}
 	exeFile.Close()
 
 	err = os.Chmod(exePath, 0755)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Upgrade: %s", err.Error()))
+		return errors.New(fmt.Sprintf("Upgrade: %s", err))
 	}
 
 	log.Println("Upgrade: restarting ghost...")
@@ -255,8 +265,8 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetTtyDevice(
-			params.TtyDevice)
+		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(
+			params.Sid).SetTtyDevice(params.TtyDevice)
 		g.Start(false, false)
 	}()
 
@@ -782,6 +792,7 @@ func (self *Ghost) InitiateDownload(info DownloadInfo) {
 func (self *Ghost) Reset() {
 	self.ClearRequests()
 	self.reset = false
+	self.LoadProperties()
 }
 
 // Main routine for listen to socket messages.
@@ -838,6 +849,9 @@ func (self *Ghost) Listen() error {
 		case <-reqTicker.C:
 			err := self.ScanForTimeoutRequests()
 			if self.reset {
+				if err == nil {
+					err = errors.New("reset request")
+				}
 				return err
 			}
 		}
@@ -866,7 +880,7 @@ func (self *Ghost) StartLanDiscovery() {
 	buf := make([]byte, BUFSIZ)
 	conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", OVERLORD_LD_PORT))
 	if err != nil {
-		log.Printf("LAN discovery: %s, abort\n", err.Error())
+		log.Printf("LAN discovery: %s, abort\n", err)
 		return
 	}
 
@@ -1012,7 +1026,7 @@ func GhostRPCServer() (*rpc.Client, error) {
 func DownloadFile(filename string) {
 	client, err := GhostRPCServer()
 	if err != nil {
-		log.Printf("error: %s\n", err.Error())
+		log.Printf("error: %s\n", err)
 		os.Exit(1)
 	}
 
@@ -1037,17 +1051,34 @@ func DownloadFile(filename string) {
 
 	err = client.Call("rpc.AddToDownloadQueue", []string{ttyName, absPath},
 		&EmptyReply{})
-
+	if err != nil {
+		goto fail
+	}
 	os.Exit(0)
 
 fail:
-	log.Println(err.Error())
+	log.Println(err)
 	os.Exit(1)
 }
 
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
-	propFile string, download string) {
+	propFile string, download string, reset bool) {
 	var addrs []string
+
+	if reset {
+		client, err := GhostRPCServer()
+		if err != nil {
+			log.Printf("error: %s\n", err)
+			os.Exit(1)
+		}
+
+		err = client.Call("rpc.Reconnect", &EmptyArgs{}, &EmptyReply{})
+		if err != nil {
+			log.Printf("Reset: %s\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	if download != "" {
 		DownloadFile(download)
@@ -1059,9 +1090,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	addrs = append(addrs, fmt.Sprintf("%s:%d", LOCALHOST, OVERLORD_PORT))
 
 	g := NewGhost(addrs, AGENT, mid)
-	if propFile != "" {
-		g.LoadPropertiesFromFile(propFile)
-	}
+	g.SetPropFile(propFile)
 	go g.Start(!noLanDisc, !noRPCServer)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))

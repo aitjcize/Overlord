@@ -18,6 +18,7 @@ var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
 var noRPCServer = flag.Bool("no-rpc-server", false, "disable RPC server")
 var propFile = flag.String("prop-file", "", "file containing the JSON representation of client properties")
 var download = flag.String("download", "", "file to download")
+var reset = flag.Bool("reset", false, "reset ghost and reload all configs")
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
@@ -42,5 +43,6 @@ func main() {
 		finalMid = *mid
 	}
 
-	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *propFile, *download)
+	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *propFile,
+		*download, *reset)
 }
