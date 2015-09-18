@@ -137,3 +137,30 @@ func GetFileSha1(filename string) (string, error) {
 
 	return fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())), nil
 }
+
+func TcGetAttr(fd uintptr) (*syscall.Termios, error) {
+	var termios syscall.Termios
+	if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TCGETS,
+		uintptr(unsafe.Pointer(&termios))); err != 0 {
+		return nil, err
+	}
+	return &termios, nil
+}
+
+func TcSetAttr(fd uintptr, termios *syscall.Termios) error {
+	if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TCSETS,
+		uintptr(unsafe.Pointer(termios))); err != 0 {
+		return err
+	}
+	return nil
+}
+
+func CfMakeRaw(termios *syscall.Termios) {
+	termios.Iflag &^= (syscall.IGNBRK | syscall.BRKINT | syscall.PARMRK |
+		syscall.ISTRIP | syscall.INLCR | syscall.IGNCR | syscall.ICRNL | syscall.IXON)
+	termios.Oflag &^= syscall.OPOST
+	termios.Lflag &^= (syscall.ECHO | syscall.ECHONL | syscall.ICANON |
+		syscall.ISIG | syscall.IEXTEN)
+	termios.Cflag &^= (syscall.CSIZE | syscall.PARENB)
+	termios.Cflag |= syscall.CS8
+}

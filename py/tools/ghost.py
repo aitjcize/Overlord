@@ -26,6 +26,7 @@ import termios
 import threading
 import time
 import traceback
+import tty
 import urllib
 import uuid
 
@@ -639,6 +640,14 @@ class Ghost(object):
           os.execve(_SHELL, [_SHELL], env)
       else:
         fd = os.open(self._tty_device, os.O_RDWR)
+        tty.setraw(fd)
+        attr = termios.tcgetattr(fd)
+        attr[0] &= ~(termios.IXON | termios.IXOFF)
+        attr[2] |= termios.CLOCAL
+        attr[2] &= ~termios.CRTSCTS
+        attr[4] = termios.B115200
+        attr[5] = termios.B115200
+        termios.tcsetattr(fd, termios.TCSANOW, attr)
 
       control_state = None
       control_string = ''

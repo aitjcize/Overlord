@@ -576,6 +576,21 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 			return err
 		}
 
+		termios, err := TcGetAttr(tty.Fd())
+		if err != nil {
+			return nil
+		}
+
+		CfMakeRaw(termios)
+		termios.Iflag &= (syscall.IXON | syscall.IXOFF)
+		termios.Cflag |= syscall.CLOCAL
+		termios.Ispeed = syscall.B115200
+		termios.Ospeed = syscall.B115200
+
+		if err = TcSetAttr(tty.Fd(), termios); err != nil {
+			return err
+		}
+
 		go func() {
 			io.Copy(self.Conn, tty)
 			stopConn <- true
