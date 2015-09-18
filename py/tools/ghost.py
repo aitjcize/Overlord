@@ -1166,10 +1166,20 @@ class Ghost(object):
 
 
 def GhostRPCServer():
+  """Returns handler to Ghost's JSON RPC server."""
   return jsonrpclib.Server('http://localhost:%d' % _GHOST_RPC_PORT)
 
 
+def ForkToBackground():
+  """Fork process to run in background."""
+  pid = os.fork()
+  if pid != 0:
+    logging.info('Ghost(%d) running in background.', pid)
+    sys.exit(0)
+
+
 def DownloadFile(filename):
+  """Initiate a client-initiated file download."""
   filepath = os.path.abspath(filename)
   if not os.path.exists(filepath):
     logging.error('file `%s\' does not exist', filename)
@@ -1190,6 +1200,8 @@ def main():
   logger.setLevel(logging.INFO)
 
   parser = argparse.ArgumentParser()
+  parser.add_argument('--fork', dest='fork', action='store_true', default=False,
+                      help='fork procecess to run in background')
   parser.add_argument('--mid', metavar='MID', dest='mid', action='store',
                       default=None, help='use MID as machine ID')
   parser.add_argument('--rand-mid', dest='mid', action='store_const',
@@ -1214,6 +1226,9 @@ def main():
   parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,
                       nargs='*', help='overlord server address')
   args = parser.parse_args()
+
+  if args.fork:
+    ForkToBackground()
 
   if args.reset:
     GhostRPCServer().Reconnect()

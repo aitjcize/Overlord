@@ -5,4 +5,4 @@
 
 FACTORY_BASE="/usr/local/factory"
 
-${FACTORY_BASE}/bin/ghost > /dev/null 2>&1 &
+${FACTORY_BASE}/bin/ghost --fork > /dev/null 2>&1
