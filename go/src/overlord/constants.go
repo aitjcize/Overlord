@@ -24,6 +24,7 @@ const (
 	SHELL
 	LOGCAT
 	FILE
+	FORWARD
 )
 
 // Logcat format
@@ -53,5 +54,6 @@ func ModeStr(mode int) string {
 		SHELL:    "Shell",
 		LOGCAT:   "Logcat",
 		FILE:     "File",
+		FORWARD:  "Forward",
 	}[mode]
 }

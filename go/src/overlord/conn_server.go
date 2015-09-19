@@ -149,7 +149,7 @@ func (self *ConnServer) forwardWSInput(allowBinary bool) {
 }
 
 // Forward the PTY output to WebSocket.
-func (self *ConnServer) forwardTerminalOutput(buffer string) {
+func (self *ConnServer) forwardWSOutput(buffer string) {
 	if self.wsConn == nil {
 		self.stopListen <- true
 	}
@@ -209,6 +209,8 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 		self.logcat.WsConns = append(self.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
 		self.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename)
+	case SpawnForwarderCmd:
+		self.SpawnForwarder(v.Sid, v.Port)
 	}
 }
 
@@ -226,8 +228,8 @@ func (self *ConnServer) Listen() {
 			buffer := string(buf)
 			// Some modes completely ignore the RPC call, process them.
 			switch self.Mode {
-			case TERMINAL:
-				self.forwardTerminalOutput(buffer)
+			case TERMINAL, FORWARD:
+				self.forwardWSOutput(buffer)
 				continue
 			case SHELL:
 				self.forwardShellOutput(buffer)
@@ -258,7 +260,7 @@ func (self *ConnServer) Listen() {
 			// If self.mode changed, means we just got a registration message and
 			// are in a different mode.
 			switch self.Mode {
-			case TERMINAL:
+			case TERMINAL, FORWARD:
 				// Start a goroutine to forward the WebSocket Input
 				go self.forwardWSInput(true)
 			case SHELL:
@@ -511,4 +513,14 @@ func (self *ConnServer) SendClearToDownload() {
 	req := NewRequest("clear_to_download", nil)
 	req.SetTimeout(-1)
 	self.SendRequest(req, nil)
+}
+
+// Spawn a forwarder connection (a ghost with mode FORWARD).
+// sid is the session ID, which will be used as the session ID of the new ghost.
+func (self *ConnServer) SpawnForwarder(sid string, port int) {
+	req := NewRequest("forward", map[string]interface{}{
+		"sid":  sid,
+		"port": port,
+	})
+	self.SendRequest(req, self.getHandler("SpawnForwarder"))
 }

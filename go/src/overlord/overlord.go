@@ -39,15 +39,20 @@ type SpawnTerminalCmd struct {
 }
 
 type SpawnShellCmd struct {
-	Sid     string
-	Command string
+	Sid     string // Session ID
+	Command string // Command to execute
 }
 
 type SpawnFileCmd struct {
-	Sid         string
-	TerminalSid string
-	Action      string
-	Filename    string
+	Sid         string // Session ID
+	TerminalSid string // Target terminal's session ID
+	Action      string // Action, download or upload
+	Filename    string // File to perform action on
+}
+
+type SpawnForwarderCmd struct {
+	Sid  string // Session ID
+	Port int    // Port to forward
 }
 
 type ConnectLogcatCmd struct {
@@ -61,8 +66,8 @@ type ConnectLogcatCmd struct {
 // This way, the ConnServer can retreive the connresponding WebSocketContext
 // with it's the given session ID and get the WebSocket.
 type WebSocketContext struct {
-	Sid  string
-	Conn *websocket.Conn
+	Sid  string          // Session ID
+	Conn *websocket.Conn // WebSocket connection
 }
 
 func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
@@ -119,7 +124,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 
 		self.agents[conn.Mid] = conn
 		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
-	case TERMINAL, SHELL:
+	case TERMINAL, SHELL, FORWARD:
 		if ctx, ok := self.wsctxs[conn.Sid]; !ok {
 			return nil, errors.New("client " + conn.Sid + " registered without context")
 		} else {
@@ -715,6 +720,41 @@ func (self *Overlord) ServHTTP(port int) {
 		return
 	}
 
+	// Port forwarding request handler
+	AgentForwardHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Forward request from %s\n", r.RemoteAddr)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		var port int
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+		if _port, ok := r.URL.Query()["port"]; ok {
+			if port, err = strconv.Atoi(_port[0]); err != nil {
+				WebSocketSendError(conn, "invalid port")
+				return
+			}
+		} else {
+			WebSocketSendError(conn, "no port specified")
+			return
+		}
+
+		if agent, ok := self.agents[mid]; ok {
+			wc := NewWebsocketContext(conn)
+			self.AddWebsocketContext(wc)
+			agent.Command <- SpawnForwarderCmd{wc.Sid, port}
+			if res := <-agent.Response; res != "" {
+				WebSocketSendError(conn, res)
+			}
+		} else {
+			WebSocketSendError(conn, "No client with mid "+mid)
+		}
+	}
+
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
 		self.noAuth)
@@ -739,6 +779,7 @@ func (self *Overlord) ServHTTP(port int) {
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 	r.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
+	r.HandleFunc("/api/agent/forward/{mid}", AgentForwardHandler)
 
 	// File methods
 	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)

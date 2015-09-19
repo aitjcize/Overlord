@@ -87,6 +87,7 @@ type Ghost struct {
 	fileOperation   FileOperation          // File operation name
 	downloadQueue   chan DownloadInfo      // Download queue
 	upload          FileUploadContext      // File upload context
+	port            int                    // Port number to forward
 }
 
 func NewGhost(addrs []string, mode int, mid string) *Ghost {
@@ -150,6 +151,11 @@ func (self *Ghost) SetFileOp(operation, filename string, pid int) *Ghost {
 	self.fileOperation.Action = operation
 	self.fileOperation.Filename = filename
 	self.fileOperation.Pid = pid
+	return self
+}
+
+func (self *Ghost) SetPort(port int) *Ghost {
+	self.port = port
 	return self
 }
 
@@ -263,7 +269,7 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Printf("Received terminal command, Terminal %s spawned\n", params.Sid)
+		log.Printf("Received terminal command, Terminal agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
@@ -288,7 +294,7 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Printf("Received shell command: %s, shell %s spawned\n", params.Cmd, params.Sid)
+		log.Printf("Received shell command: %s, Shell agent %s spawned\n", params.Cmd, params.Sid)
 		addrs := []string{self.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
@@ -318,7 +324,7 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Println("Received file_download command, file agent spawned")
+		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
 		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
 			"download", params.Filename, 0)
@@ -347,10 +353,33 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Println("Received file_upload command, file agent spawned")
+		log.Printf("Received file_upload command, File agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
 		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
 			"upload", params.Filename, pid)
+		g.Start(false, false)
+	}()
+
+	res := NewResponse(req.Rid, SUCCESS, nil)
+	return self.SendResponse(res)
+}
+
+func (self *Ghost) handleForwardRequest(req *Request) error {
+	type RequestParams struct {
+		Sid  string `json:"sid"`
+		Port int    `json:"port"`
+	}
+
+	var params RequestParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return err
+	}
+
+	go func() {
+		log.Printf("Received forward command, Forward agent %s spawned\n", params.Sid)
+		addrs := []string{self.connectedAddr}
+		g := NewGhost(addrs, FORWARD, RANDOM_MID).SetSid(params.Sid).SetPort(
+			params.Port)
 		g.Start(false, false)
 	}()
 
@@ -441,6 +470,8 @@ func (self *Ghost) handleRequest(req *Request) error {
 		err = self.StartDownloadServer()
 	case "file_upload":
 		err = self.handleFileUploadRequest(req)
+	case "forward":
+		err = self.handleForwardRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
@@ -656,7 +687,7 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 			}
 		case err := <-self.readErrChan:
 			if err == io.EOF {
-				log.Println("SpawnTTYServer: connection dropped")
+				log.Println("SpawnTTYServer: connection terminated")
 				return nil
 			} else {
 				return err
@@ -720,7 +751,7 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 		case err := <-self.readErrChan:
 			if err == io.EOF {
 				cmd.Process.Kill()
-				return errors.New("SpawnShellServer: connection dropped")
+				return errors.New("SpawnShellServer: connection terminated")
 			} else {
 				return err
 			}
@@ -764,6 +795,59 @@ func (self *Ghost) InitiateFileOperation(res *Response) error {
 	} else {
 		return errors.New("InitiateFileOperation: unknown file operation, ignored")
 	}
+	return nil
+}
+
+// Spawn a port forwarding server and forward I/O to the TCP socket.
+func (self *Ghost) SpawnPortForwardServer(res *Response) error {
+	log.Println("SpawnPortForwardServer: started")
+
+	var err error
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", self.port))
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			self.Conn.Write([]byte(err.Error() + "\n"))
+		}
+		self.quit = true
+		self.Conn.Close()
+		conn.Close()
+		log.Println("SpawnPortForwardServer: terminated")
+	}()
+
+	stopConn := make(chan bool, 1)
+
+	go func() {
+		io.Copy(self.Conn, conn)
+		stopConn <- true
+	}()
+
+	if self.ReadBuffer != "" {
+		conn.Write([]byte(self.ReadBuffer))
+	}
+
+	for {
+		select {
+		case buf := <-self.readChan:
+			conn.Write([]byte(buf))
+		case err := <-self.readErrChan:
+			if err == io.EOF {
+				log.Println("SpawnPortForwardServer: connection terminated")
+				return nil
+			} else {
+				return err
+			}
+		case s := <-stopConn:
+			if s {
+				return nil
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -811,6 +895,8 @@ func (self *Ghost) Register() error {
 				handler = self.SpawnShellServer
 			case FILE:
 				handler = self.InitiateFileOperation
+			case FORWARD:
+				handler = self.SpawnPortForwardServer
 			}
 			err = self.SendRequest(req, handler)
 			return nil
@@ -855,14 +941,14 @@ func (self *Ghost) Listen() error {
 		case buffer := <-readChan:
 			if self.upload.Ready {
 				if self.ReadBuffer != "" {
-					// Write the left over from previous ReadBuffer
+					// Write the leftover from previous ReadBuffer
 					self.upload.Data <- []byte(self.ReadBuffer)
 					self.ReadBuffer = ""
 				}
 				self.upload.Data <- buffer
 				continue
 			}
-			reqs := self.ParseRequests(string(buffer), false)
+			reqs := self.ParseRequests(string(buffer), self.RegisterStatus != SUCCESS)
 			if self.quit {
 				return nil
 			}
@@ -883,8 +969,7 @@ func (self *Ghost) Listen() error {
 		case info := <-self.downloadQueue:
 			self.InitiateDownload(info)
 		case <-pingTicker.C:
-			// When upload is in progress, we don't want to send any ping message.
-			if !self.upload.Ready {
+			if self.mode == AGENT {
 				self.Ping()
 			}
 		case <-reqTicker.C:
