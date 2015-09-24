@@ -330,9 +330,8 @@ class Ghost(object):
       tty_device: the terminal device to open, if tty_device is None, as pseudo
         terminal will be opened instead.
       command: the command to execute when we are in SHELL mode.
-      file_op: a tuple (action, filepath, pid). action is either 'download' or
-        'upload'. pid is the pid of the target shell, used to determine where
-        the current working is and thus where to upload to.
+      file_op: a tuple (action, filepath). action is either 'download' or
+        'upload'.
       port: port number to forward.
     """
     assert mode in [Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL, Ghost.FILE,
@@ -785,19 +784,8 @@ class Ghost(object):
 
   def StartUploadServer(self):
     logging.info('StartUploadServer: started')
-
     try:
       filepath = self._file_op[1]
-
-      if not filepath.startswith('/'):
-        target_dir = os.getenv('HOME', '/tmp')
-
-        # Get the client's working dir, which is our target upload dir
-        if self._file_op[2]:
-          target_dir = os.readlink('/proc/%d/cwd' % self._file_op[2])
-
-        filepath = os.path.join(target_dir, filepath)
-
       dirname = os.path.dirname(filepath)
       if not os.path.exists(dirname):
         try:
@@ -871,16 +859,59 @@ class Ghost(object):
     self._last_ping = self.Timestamp()
     self.SendRequest('ping', {}, timeout_handler, 5)
 
-  def HanldeFileDownloadRequest(self, msg):
+  def HandleFileDownloadRequest(self, msg):
     params = msg['params']
+    filepath = params['filename']
+    if not os.path.isabs(filepath):
+      filepath = os.path.join(os.getenv('HOME', '/tmp'), filepath)
+
     try:
-      os.stat(params['filename'])
+      os.stat(filepath)
     except OSError as e:
-      self.SendResponse(msg, str(e))
-      return
+      return self.SendResponse(msg, str(e))
 
     self.SpawnGhost(self.FILE, params['sid'],
-                    file_op=('download', params['filename'], None))
+                    file_op=('download', filepath))
+    self.SendResponse(msg, SUCCESS)
+
+  def HandleFileUploadRequest(self, msg):
+    params = msg['params']
+
+    # Resolve upload filepath
+    filename = params['filename']
+    dest_path = filename
+
+    # If dest is specified, use it first
+    dest_path = params.get('dest', '')
+    if dest_path:
+      if not os.path.isabs(dest_path):
+        dest_path = os.path.join(os.getenv('HOME', '/tmp'), dest_path)
+
+      if os.path.isdir(dest_path):
+        dest_path = os.path.join(dest_path, filename)
+    else:
+      target_dir = os.getenv('HOME', '/tmp')
+
+      # Terminal session ID found, upload to it's current working directory
+      if params.has_key('terminal_sid'):
+        pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
+        if pid:
+          target_dir = os.readlink('/proc/%d/cwd' % pid)
+
+      dest_path = os.path.join(target_dir, filename)
+
+    try:
+      os.makedirs(os.path.dirname(dest_path))
+    except Exception:
+      pass
+
+    try:
+      with open(dest_path, 'w') as _:
+        pass
+    except Exception as e:
+      return self.SendResponse(msg, str(e))
+
+    self.SpawnGhost(self.FILE, params['sid'], file_op=('upload', dest_path))
     self.SendResponse(msg, SUCCESS)
 
   def HandleRequest(self, msg):
@@ -897,14 +928,11 @@ class Ghost(object):
       self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
       self.SendResponse(msg, SUCCESS)
     elif command == 'file_download':
-      self.HanldeFileDownloadRequest(msg)
+      self.HandleFileDownloadRequest(msg)
     elif command == 'clear_to_download':
       self.StartDownloadServer()
     elif command == 'file_upload':
-      pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
-      self.SpawnGhost(self.FILE, params['sid'],
-                      file_op=('upload', params['filename'], pid))
-      self.SendResponse(msg, SUCCESS)
+      self.HandleFileUploadRequest(msg)
     elif command == 'forward':
       self.SpawnGhost(self.FORWARD, params['sid'], port=params['port'])
       self.SendResponse(msg, SUCCESS)
@@ -963,7 +991,7 @@ class Ghost(object):
     ttyname, filename = self._download_queue.get()
     sid = self._ttyname_to_sid[ttyname]
     self.SpawnGhost(self.FILE, terminal_sid=sid,
-                    file_op=('download', filename, None))
+                    file_op=('download', filename))
 
   def Listen(self):
     try:

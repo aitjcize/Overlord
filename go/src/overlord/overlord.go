@@ -48,6 +48,7 @@ type SpawnFileCmd struct {
 	TerminalSid string // Target terminal's session ID
 	Action      string // Action, download or upload
 	Filename    string // File to perform action on
+	Dest        string // Destination, use for upload
 }
 
 type SpawnForwarderCmd struct {
@@ -604,7 +605,7 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		sid := uuid.NewV4().String()
-		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0]}
+		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0], ""}
 
 		res := <-agent.Response
 		if res != "" {
@@ -680,12 +681,21 @@ func (self *Overlord) ServHTTP(port int) {
 			return
 		}
 
-		var sids []string
-		if sids, ok = r.URL.Query()["sid"]; !ok {
-			sids = []string{""}
+		// Target terminal session ID
+		var terminalSids []string
+		if terminalSids, ok = r.URL.Query()["terminal_sid"]; !ok {
+			terminalSids = []string{""}
 		}
 		sid := uuid.NewV4().String()
-		agent.Command <- SpawnFileCmd{sid, sids[0], "upload", p.FileName()}
+
+		// Upload destination
+		var dsts []string
+		if dsts, ok = r.URL.Query()["dest"]; !ok {
+			dsts = []string{""}
+		}
+
+		agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
+			p.FileName(), dsts[0]}
 
 		res := <-agent.Response
 		if res != "" {

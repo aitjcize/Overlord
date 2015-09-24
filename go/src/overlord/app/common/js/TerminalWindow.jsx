@@ -117,7 +117,7 @@ var TerminalWindow = React.createClass({
                 return xhr;
               }
             }(files[i], id),
-            url: this.props.uploadPath + "?sid=" + this.state.sid,
+            url: this.props.uploadPath + "?terminal_sid=" + this.state.sid,
             data: formData,
             cache: false,
             contentType: false,
