@@ -351,6 +351,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 		Filename    string `json:"filename"`
 		Dest        string `json:"dest"`
 		Perm        int    `json:"perm"`
+		CheckOnly   bool   `json:"check_only"`
 	}
 
 	var params RequestParams
@@ -391,18 +392,24 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 
 	os.MkdirAll(filepath.Dir(destPath), 0755)
 
-	if _, err := os.Create(destPath); err != nil {
+	if f, err := os.Create(destPath); err != nil {
 		res := NewResponse(req.Rid, err.Error(), nil)
 		return self.SendResponse(res)
+	} else {
+		f.Close()
 	}
 
-	go func() {
-		log.Printf("Received file_upload command, File agent %s spawned\n", params.Sid)
-		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-			"upload", destPath, params.Perm)
-		g.Start(false, false)
-	}()
+	// If not check_only, spawn FILE mode ghost agent to handle upload
+	if !params.CheckOnly {
+		go func() {
+			log.Printf("Received file_upload command, File agent %s spawned\n",
+				params.Sid)
+			addrs := []string{self.connectedAddr}
+			g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
+				"upload", destPath, params.Perm)
+			g.Start(false, false)
+		}()
+	}
 
 	res := NewResponse(req.Rid, SUCCESS, nil)
 	return self.SendResponse(res)

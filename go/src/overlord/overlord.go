@@ -50,6 +50,7 @@ type SpawnFileCmd struct {
 	Filename    string // File to perform action on
 	Dest        string // Destination, use for upload
 	Perm        int    // File permissions to set
+	CheckOnly   bool   // Check permission only (writable?)
 }
 
 type SpawnForwarderCmd struct {
@@ -606,7 +607,8 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		sid := uuid.NewV4().String()
-		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0], "", 0}
+		agent.Command <- SpawnFileCmd{
+			Sid: sid, Action: "download", Filename: filename[0]}
 
 		res := <-agent.Response
 		if res != "" {
@@ -653,13 +655,14 @@ func (self *Overlord) ServHTTP(port int) {
 	// File upload request handler.
 	AgentUploadHandler := func(w http.ResponseWriter, r *http.Request) {
 		var ok bool
+		var err error
 		var agent *ConnServer
 		var errMsg string
 
 		defer func() {
 			if errMsg != "" {
-				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, errMsg)))
-				http.Error(w, "", http.StatusBadRequest)
+				http.Error(w, fmt.Sprintf(`{"error": "%s"}`, errMsg),
+					http.StatusBadRequest)
 			}
 		}()
 
@@ -667,18 +670,6 @@ func (self *Overlord) ServHTTP(port int) {
 		mid := vars["mid"]
 		if agent, ok = self.agents[mid]; !ok {
 			errMsg = fmt.Sprintf("No client with mid %s", mid)
-			return
-		}
-
-		mr, err := r.MultipartReader()
-		if err != nil {
-			errMsg = err.Error()
-			return
-		}
-
-		p, err := mr.NextPart()
-		if err != nil {
-			errMsg = err.Error()
 			return
 		}
 
@@ -704,8 +695,36 @@ func (self *Overlord) ServHTTP(port int) {
 			}
 		}
 
+		// Check only
+		if r.Method == "GET" {
+			// If we are checking only, we need a extra filename parameters since
+			// we don't have a form to supply the filename.
+			var filenames []string
+			if filenames, ok = r.URL.Query()["filename"]; !ok {
+				filenames = []string{""}
+			}
+
+			agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
+				filenames[0], dsts[0], int(perm), true}
+
+			errMsg = <-agent.Response
+			return
+		}
+
+		mr, err := r.MultipartReader()
+		if err != nil {
+			errMsg = err.Error()
+			return
+		}
+
+		p, err := mr.NextPart()
+		if err != nil {
+			errMsg = err.Error()
+			return
+		}
+
 		agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
-			p.FileName(), dsts[0], int(perm)}
+			p.FileName(), dsts[0], int(perm), false}
 
 		res := <-agent.Response
 		if res != "" {

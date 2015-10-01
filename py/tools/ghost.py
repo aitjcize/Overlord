@@ -914,8 +914,10 @@ class Ghost(object):
     except Exception as e:
       return self.SendResponse(msg, str(e))
 
-    self.SpawnGhost(self.FILE, params['sid'],
-                    file_op=('upload', dest_path, params.get('perm', None)))
+    # If not check_only, spawn FILE mode ghost agent to handle upload
+    if not params.get('check_only', False):
+      self.SpawnGhost(self.FILE, params['sid'],
+                      file_op=('upload', dest_path, params.get('perm', None)))
     self.SendResponse(msg, SUCCESS)
 
   def HandleRequest(self, msg):

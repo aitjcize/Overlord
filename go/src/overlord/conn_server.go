@@ -209,7 +209,7 @@ func (self *ConnServer) handleOverlordRequest(obj interface{}) {
 		self.logcat.WsConns = append(self.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
 		self.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
-			v.Perm)
+			v.Perm, v.CheckOnly)
 	case SpawnForwarderCmd:
 		self.SpawnForwarder(v.Sid, v.Port)
 	}
@@ -496,7 +496,7 @@ func (self *ConnServer) SpawnShell(sid string, command string) {
 // sid is used for uploading file, indicatiting which client's working
 // directory to upload to.
 func (self *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
-	dest string, perm int) {
+	dest string, perm int, checkOnly bool) {
 	if action == "download" {
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
@@ -504,7 +504,7 @@ func (self *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
 	} else if action == "upload" {
 		req := NewRequest("file_upload", map[string]interface{}{
 			"sid": sid, "terminal_sid": terminalSid, "filename": filename,
-			"dest": dest, "perm": perm})
+			"dest": dest, "perm": perm, "check_only": checkOnly})
 		self.SendRequest(req, self.getHandler("SpawnFileServer: upload"))
 	} else {
 		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)
