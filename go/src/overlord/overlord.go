@@ -49,6 +49,7 @@ type SpawnFileCmd struct {
 	Action      string // Action, download or upload
 	Filename    string // File to perform action on
 	Dest        string // Destination, use for upload
+	Perm        int    // File permissions to set
 }
 
 type SpawnForwarderCmd struct {
@@ -605,7 +606,7 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		sid := uuid.NewV4().String()
-		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0], ""}
+		agent.Command <- SpawnFileCmd{sid, "", "download", filename[0], "", 0}
 
 		res := <-agent.Response
 		if res != "" {
@@ -694,8 +695,17 @@ func (self *Overlord) ServHTTP(port int) {
 			dsts = []string{""}
 		}
 
+		// Upload destination
+		var perm int64 = 0
+		if perms, ok := r.URL.Query()["perm"]; ok {
+			if perm, err = strconv.ParseInt(perms[0], 8, 32); err != nil {
+				errMsg = err.Error()
+				return
+			}
+		}
+
 		agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
-			p.FileName(), dsts[0]}
+			p.FileName(), dsts[0], int(perm)}
 
 		res := <-agent.Response
 		if res != "" {

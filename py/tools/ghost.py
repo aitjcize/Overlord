@@ -330,8 +330,8 @@ class Ghost(object):
       tty_device: the terminal device to open, if tty_device is None, as pseudo
         terminal will be opened instead.
       command: the command to execute when we are in SHELL mode.
-      file_op: a tuple (action, filepath). action is either 'download' or
-        'upload'.
+      file_op: a tuple (action, filepath, perm). action is either 'download' or
+        'upload'. perm is the permission to set for the file.
       port: port number to forward.
     """
     assert mode in [Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL, Ghost.FILE,
@@ -795,6 +795,9 @@ class Ghost(object):
 
       self._sock.setblocking(False)
       with open(filepath, 'wb') as f:
+        if self._file_op[2]:
+          os.fchmod(f.fileno(), self._file_op[2])
+
         while True:
           rd, _, _ = select.select([self._sock], [], [])
           if self._sock in rd:
@@ -911,7 +914,8 @@ class Ghost(object):
     except Exception as e:
       return self.SendResponse(msg, str(e))
 
-    self.SpawnGhost(self.FILE, params['sid'], file_op=('upload', dest_path))
+    self.SpawnGhost(self.FILE, params['sid'],
+                    file_op=('upload', dest_path, params.get('perm', None)))
     self.SendResponse(msg, SUCCESS)
 
   def HandleRequest(self, msg):

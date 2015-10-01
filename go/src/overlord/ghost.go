@@ -55,6 +55,7 @@ type DownloadInfo struct {
 type FileOperation struct {
 	Action   string
 	Filename string
+	Perm     int
 }
 
 type FileUploadContext struct {
@@ -146,9 +147,10 @@ func (self *Ghost) SetCommand(command string) *Ghost {
 	return self
 }
 
-func (self *Ghost) SetFileOp(operation, filename string) *Ghost {
+func (self *Ghost) SetFileOp(operation, filename string, perm int) *Ghost {
 	self.fileOperation.Action = operation
 	self.fileOperation.Filename = filename
+	self.fileOperation.Perm = perm
 	return self
 }
 
@@ -334,7 +336,7 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
 		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-			"download", filename)
+			"download", filename, 0)
 		g.Start(false, false)
 	}()
 
@@ -348,6 +350,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 		TerminalSid string `json:"terminal_sid"`
 		Filename    string `json:"filename"`
 		Dest        string `json:"dest"`
+		Perm        int    `json:"perm"`
 	}
 
 	var params RequestParams
@@ -397,7 +400,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 		log.Printf("Received file_upload command, File agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
 		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-			"upload", destPath)
+			"upload", destPath, params.Perm)
 		g.Start(false, false)
 	}()
 
@@ -472,6 +475,10 @@ func (self *Ghost) StartUploadServer() error {
 			break
 		}
 		file.Write(buffer)
+	}
+
+	if self.fileOperation.Perm > 0 {
+		file.Chmod(os.FileMode(self.fileOperation.Perm))
 	}
 
 	return nil
@@ -932,7 +939,7 @@ func (self *Ghost) Register() error {
 func (self *Ghost) InitiateDownload(info DownloadInfo) {
 	addrs := []string{self.connectedAddr}
 	g := NewGhost(addrs, FILE, RANDOM_MID).SetTerminalSid(
-		self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename)
+		self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
 	g.Start(false, false)
 }
 
