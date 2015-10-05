@@ -869,8 +869,9 @@ class Ghost(object):
       filepath = os.path.join(os.getenv('HOME', '/tmp'), filepath)
 
     try:
-      os.stat(filepath)
-    except OSError as e:
+      with open(filepath, 'r') as f:
+        pass
+    except Exception as e:
       return self.SendResponse(msg, str(e))
 
     self.SpawnGhost(self.FILE, params['sid'],

@@ -612,7 +612,8 @@ func (self *Overlord) ServHTTP(port int) {
 
 		res := <-agent.Response
 		if res != "" {
-			http.NotFound(w, r)
+			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, res),
+				http.StatusBadRequest)
 			return
 		}
 

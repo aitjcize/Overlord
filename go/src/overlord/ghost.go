@@ -326,11 +326,12 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 		filename = filepath.Join(home, filename)
 	}
 
-	_, err := os.Stat(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		res := NewResponse(req.Rid, err.Error(), nil)
 		return self.SendResponse(res)
 	}
+	f.Close()
 
 	go func() {
 		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
@@ -1193,19 +1194,24 @@ func DownloadFile(filename string) {
 	}
 
 	var ttyName string
+	var f *os.File
 
 	absPath, err := filepath.Abs(filename)
 	if err != nil {
 		goto fail
 	}
+
 	_, err = os.Stat(absPath)
 	if err != nil {
 		goto fail
 	}
-	_, err = os.Open(absPath)
+
+	f, err = os.Open(absPath)
 	if err != nil {
 		goto fail
 	}
+	f.Close()
+
 	ttyName, err = TtyName(os.Stdout)
 	if err != nil {
 		goto fail
