@@ -64,4 +64,10 @@ html, body, #main {
 
 .status-light-clickable {
   cursor: pointer;
-};
+}
+
+.upload-progress-bars {
+  position: fixed;
+  right: 50px;
+  bottom: 0px;
+}

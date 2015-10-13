@@ -22,13 +22,6 @@
 //    - UploadProgress
 
 
-function abbr(str, len) {
-  if (str.length > len) {
-    return str.substr(0, len - 3) + "...";
-  }
-  return str
-}
-
 var App = React.createClass({
   loadClientsFromServer: function () {
     $.ajax({
@@ -110,6 +103,7 @@ var App = React.createClass({
       this.state.clients.push(obj);
       this.forceUpdate();
     }.bind(this));
+
     socket.on("agent left", function (msg) {
       var obj = JSON.parse(msg);
 

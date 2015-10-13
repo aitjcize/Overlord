@@ -100,14 +100,31 @@ var App = React.createClass({
       var obj = JSON.parse(msg);
       this.addClient(obj);
     }.bind(this));
+
     socket.on("agent left", function (msg) {
       var obj = JSON.parse(msg);
       this.removeClient(obj);
     }.bind(this));
+
+    // Initiate a file download
+    socket.on("file download", function (sid) {
+      var url = window.location.protocol + "//" + window.location.host +
+                "/api/file/download/" + sid;
+      $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
+        "</iframe>").appendTo('body');
+    });
+    this.socket = socket;
   },
   render: function () {
-    onClose = function (e) {
+    var onControl = function (control) {
+      if (control.type == "sid") {
+        this.terminal_sid = control.data;
+        this.props.app.socket.emit("subscribe", control.data);
+      }
+    };
+    var onClose = function (e) {
       this.props.app.removeTerminal(this.props.id);
+      this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
     return (
       <div id="main">
@@ -121,12 +138,17 @@ var App = React.createClass({
                 extra = "?tty_device=" + term.path;
               }
               return (
-                <TerminalWindow key={id} mid={term.mid} id={id}
-                 title={id} path={"/api/agent/tty/" + term.mid + extra}
-                 onClose={onClose} app={this} />
+                <TerminalWindow key={id} mid={term.mid} id={id} title={id}
+                 path={"/api/agent/tty/" + term.mid + extra}
+                 uploadPath={"/api/agent/upload/" + term.mid}
+                 app={this} progressBars={this.refs.uploadProgress}
+                 onControl={onControl} onClose={onClose} />
               );
             }.bind(this))
           }
+        </div>
+        <div className="upload-progress">
+          <UploadProgress ref="uploadProgress" />
         </div>
         <div className="app-box panel panel-info">
           <div className="panel-heading">Clients</div>
@@ -166,7 +188,7 @@ var Fixture = React.createClass({
     var client = this.props.client;
     return (
       <div className="fixture-block panel panel-success">
-        <div className="panel-heading text-center">{client.mid}</div>
+        <div className="panel-heading text-center">{abbr(client.mid, 60)}</div>
         <div className="panel-body">
           <Lights ref="lights" client={this.props.client} fixture={this} />
           <Terminals client={client} app={this.props.app} />
@@ -472,6 +494,10 @@ var AuxLog = React.createClass({
         }
       }.bind(this)
     }.bind(this)
+    this.sock = sock;
+  },
+  componentWillUnmount: function() {
+    this.sock.close();
   },
   render: function () {
     return (
