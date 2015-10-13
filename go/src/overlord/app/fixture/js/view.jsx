@@ -181,7 +181,10 @@ var Fixture = React.createClass({
 
 var Lights = React.createClass({
   updateLightStatus: function (id, status_class) {
-    $(this.refs[id].getDOMNode()).attr("class", "label status-light " + status_class);
+    var node = $(this.refs[id].getDOMNode());
+    node.removeClass(this.refs[id].props.prevLight);
+    node.addClass(status_class);
+    this.refs[id].props.prevLight = status_class;
   },
   scanForLightMsg: function (msg) {
     var patt = /LIGHT\[(.*)\]\s*=\s*'(\S*)'/g;
@@ -232,13 +235,22 @@ var Lights = React.createClass({
       <div className="status-block well well-sm">
       {
         lights.map(function (light) {
+          var extra_css = "";
+          var extra = {};
+          if (typeof(light.command) != "undefined") {
+            extra_css = "status-light-clickable";
+            extra.onClick = function() {
+              this.props.fixture.executeRemoteCmd(client.mid, light.command);
+            }.bind(this);
+          }
+          var light_css = LIGHT_CSS_MAP[light.light];
           return (
-            <span key={light.id} className={"label status-light " +
-              LIGHT_CSS_MAP[light.light]} ref={light.id}>
+            <span key={light.id} className={"label " + extra_css + " " +
+              light_css} prevLight={light_css} ref={light.id} {...extra}>
               {light.label}
             </span>
           );
-        })
+        }.bind(this))
       }
       </div>
     );

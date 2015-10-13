@@ -61,3 +61,7 @@ html, body, #main {
 .btn-primary.active {
   background-color: #194367;
 }
+
+.status-light-clickable {
+  cursor: pointer;
+};
