@@ -2,9 +2,9 @@
   "context": "fixture",
   "ui": {
     "lights": [
-      {"id": "nuc", "label": "NUC", "class": "label-success"},
-      {"id": "bone", "label": "BeagleBone", "class": "label-success"},
-      {"id": "ccd", "label": "CCD", "class": "label-danger",
+      {"id": "nuc", "label": "NUC", "light": "light-toggle-on"},
+      {"id": "bone", "label": "BeagleBone", "light": "light-toggle-on"},
+      {"id": "ccd", "label": "CCD", "light": "light-toggle-off",
        "init_cmd": "case_close_debug status"}
     ],
     "terminals": [

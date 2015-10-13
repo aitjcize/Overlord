@@ -22,6 +22,11 @@
 LOG_BUF_SIZE = 8192
 DEFAULT_LIGHT_POLL_INTERVAL = 3000
 
+var LIGHT_CSS_MAP = {
+  'light-toggle-off': 'label-danger',
+  'light-toggle-on': 'label-success'
+};
+
 var App = React.createClass({
   loadClientsFromServer: function () {
     $.ajax({
@@ -182,7 +187,7 @@ var Lights = React.createClass({
     var patt = /LIGHT\[(.*)\]\s*=\s*'(\S*)'/g;
     var found;
     while (found = patt.exec(msg)) {
-      this.updateLightStatus(found[1], found[2]);
+      this.updateLightStatus(found[1], LIGHT_CSS_MAP[found[2]]);
     }
   },
   componentDidMount: function() {
@@ -228,8 +233,8 @@ var Lights = React.createClass({
       {
         lights.map(function (light) {
           return (
-            <span key={light.id} className={"label status-light " + light.class}
-              ref={light.id}>
+            <span key={light.id} className={"label status-light " +
+              LIGHT_CSS_MAP[light.light]} ref={light.id}>
               {light.label}
             </span>
           );
