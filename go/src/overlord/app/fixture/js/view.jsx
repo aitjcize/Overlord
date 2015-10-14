@@ -217,9 +217,11 @@ var Lights = React.createClass({
 
         // Execute every *interval* to update the light status
         if (interval > 0) {
-          setInterval(function() {
-            this.props.fixture.executeRemoteCmd(client.mid, poll.cmd);
-          }.bind(this), interval);
+          setInterval(function(cmd) {
+            return function() {
+              this.props.fixture.executeRemoteCmd(client.mid, cmd);
+            }.bind(this);
+          }.bind(this)(poll.cmd), interval);
         }
       }
     }
