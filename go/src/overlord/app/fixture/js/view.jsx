@@ -217,43 +217,21 @@ var Lights = React.createClass({
   },
   componentDidMount: function() {
     var client = this.props.client;
-    var lights = [];
+    var update_command;
 
     if (typeof(client.properties.ui) != "undefined") {
-      lights = client.properties.ui.lights || [];
+      update_command = client.properties.ui.lights.update_command;
     }
-    for (var i = 0; i < lights.length; i++) {
-      if (typeof(lights[i].init_cmd) != "undefined") {
-        this.props.fixture.executeRemoteCmd(client.mid, lights[i].init_cmd);
-      }
-
-      var poll = lights[i].poll;
-      if (typeof(poll) != "undefined" &&
-          typeof(poll.cmd != "undefined")) {
-        var interval = DEFAULT_LIGHT_POLL_INTERVAL;
-        if (typeof(poll.interval != "undefined")) {
-          interval = poll.interval;
-        }
-        // Execute for the first time to update light status
-        this.props.fixture.executeRemoteCmd(client.mid, poll.cmd);
-
-        // Execute every *interval* to update the light status
-        if (interval > 0) {
-          setInterval(function(cmd) {
-            return function() {
-              this.props.fixture.executeRemoteCmd(client.mid, cmd);
-            }.bind(this);
-          }.bind(this)(poll.cmd), interval);
-        }
-      }
-    }
+    setTimeout(function() {
+      this.props.fixture.executeRemoteCmd(client.mid, update_command);
+    }.bind(this), 5000);
   },
   render: function () {
     var client = this.props.client;
     var lights = [];
 
     if (typeof(client.properties.ui) != "undefined") {
-      lights = client.properties.ui.lights || [];
+      lights = client.properties.ui.lights.items || [];
     }
     return (
       <div className="status-block well well-sm">
