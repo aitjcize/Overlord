@@ -1,19 +1,29 @@
 {
   "context": "fixture",
   "ui": {
-    "lights": [
-      {"id": "nuc", "label": "NUC", "light": "light-toggle-on"},
-      {"id": "bone", "label": "BeagleBone", "light": "light-toggle-on"},
-      {"id": "ccd", "label": "CCD", "light": "light-toggle-off",
-       "init_cmd": "case_close_debug status"}
-    ],
+    "lights": {
+      "update_command": "update_light_status",
+      "items": [
+        {"id": "ccd", "label": "CCD", "light": "light-toggle-off",
+         "command": "case_close_debug",
+         "init_cmd": "case_close_debug status"},
+        {"id": "battery", "label": "Battery", "light": "light-toggle-off",
+         "command": "battery_switch",
+         "poll": {"cmd": "battery_switch status", "interval": 20000}},
+        {"id": "dut-lid", "label": "DUT LID", "light": "light-toggle-off",
+         "poll": {"cmd": "check_dut_exists -t lid", "interval": 20000}},
+        {"id": "dut-base", "label": "DUT BASE", "light": "light-toggle-off",
+         "poll": {"cmd": "check_dut_exists -t base", "interval": 20000}}
+      ]
+    },
     "terminals": [
       {"name": "NUC"},
-      {"name": "AP", "path_cmd": "ls /dev/google/Ryu_debug-*/serial/AP 2>/dev/null"},
-      {"name": "EC_PD", "path_cmd": "ls /dev/google/Ryu_debug-*/serial/EC_PD 2>/dev/null"}
+      {"name": "AP",
+       "path_cmd": "ls /dev/google/Ryu_debug-*/serial/AP 2>/dev/null"},
+      {"name": "EC_PD",
+       "path_cmd": "ls /dev/google/Ryu_debug-*/serial/EC_PD 2>/dev/null"}
     ],
     "controls": [
-      {"name": "CCD", "command": "case_close_debug"},
       {"name": "Voltage Measurement", "type": "toggle",
        "on_command": "measure voltage", "off_command": "measure off"},
       {"name": "Upgrade Firmware", "command": "whale firmware upgrade"},
@@ -21,7 +31,6 @@
         {"name": "whale close", "command": "whale close"},
         {"name": "whale open", "command": "whale open"},
         {"name": "io insertion", "command": "whale insert"},
-        {"name": "battery", "command": "whale battery"},
         {"name": "charging", "command": "whale charge"}
       ]}
     ],
