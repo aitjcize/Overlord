@@ -7,7 +7,6 @@ package overlord
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/gorilla/websocket"
 	"io"
 	"log"
@@ -47,21 +46,20 @@ type FileDownloadContext struct {
 // them.
 type ConnServer struct {
 	*RPCCore
-	Mode          int                    // Client mode, see constants.go
-	Command       chan interface{}       // Channel for overlord command
-	Response      chan string            // Channel for reponsing overlord command
-	Sid           string                 // Session ID
-	Mid           string                 // Machine ID
-	TerminalSid   string                 // Associated terminal session ID
-	Properties    map[string]interface{} // Client properties
-	TargetSSHPort int                    // Target SSH port for forwarding
-	ovl           *Overlord              // Overlord handle
-	registered    bool                   // Whether we are registered or not
-	wsConn        *websocket.Conn        // WebSocket for Terminal and Shell
-	logcat        LogcatContext          // Logcat context
-	Download      FileDownloadContext    // File download context
-	stopListen    chan bool              // Stop the Listen() loop
-	lastPing      int64                  // Last time the client pinged
+	Mode        int                    // Client mode, see constants.go
+	Command     chan interface{}       // Channel for overlord command
+	Response    chan string            // Channel for reponsing overlord command
+	Sid         string                 // Session ID
+	Mid         string                 // Machine ID
+	TerminalSid string                 // Associated terminal session ID
+	Properties  map[string]interface{} // Client properties
+	ovl         *Overlord              // Overlord handle
+	registered  bool                   // Whether we are registered or not
+	wsConn      *websocket.Conn        // WebSocket for Terminal and Shell
+	logcat      LogcatContext          // Logcat context
+	Download    FileDownloadContext    // File download context
+	stopListen  chan bool              // Stop the Listen() loop
+	lastPing    int64                  // Last time the client pinged
 }
 
 func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
@@ -313,38 +311,6 @@ func (self *ConnServer) handlePingRequest(req *Request) error {
 	return self.SendResponse(res)
 }
 
-func (self *ConnServer) handleRequestTargetSSHPortRequest(req *Request) error {
-	// Assume this means that the client's old port is no longer used.
-	self.TargetSSHPort = 0
-	// Request port number from Overlord.
-	port := self.ovl.SuggestTargetSSHPort()
-	log.Printf("Offering port %d to client\n", port)
-	res := NewResponse(req.Rid, SUCCESS, map[string]interface{}{"port": port})
-	return self.SendResponse(res)
-}
-
-func (self *ConnServer) handleRegisterTargetSSHPortRequest(req *Request) error {
-	type RequestArgs struct {
-		Port int `json:"port"`
-	}
-
-	var args RequestArgs
-	if err := json.Unmarshal(req.Params, &args); err != nil {
-		return err
-	}
-	if args.Port < TARGET_SSH_PORT_START || args.Port > TARGET_SSH_PORT_END {
-		return errors.New(
-			fmt.Sprintf("handleRegisterTargetSSHPortRequest: Registered port (%d) must be in between %d and %d inclusive",
-				args.Port, TARGET_SSH_PORT_START, TARGET_SSH_PORT_END))
-	}
-
-	// Save port number.
-	log.Printf("Registering port %d for client\n", args.Port)
-	self.TargetSSHPort = args.Port
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
-}
-
 func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	type RequestArgs struct {
 		Sid        string                 `json:"sid"`
@@ -435,10 +401,6 @@ func (self *ConnServer) handleRequest(req *Request) error {
 		err = self.handleDownloadRequest(req)
 	case "clear_to_upload":
 		err = self.handleClearToUploadRequest(req)
-	case "request_target_ssh_port":
-		err = self.handleRequestTargetSSHPortRequest(req)
-	case "register_target_ssh_port":
-		err = self.handleRegisterTargetSSHPortRequest(req)
 	}
 	return err
 }

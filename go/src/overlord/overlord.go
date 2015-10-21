@@ -81,29 +81,27 @@ func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 }
 
 type Overlord struct {
-	lanDiscInterface  string                            // Network interface used for broadcasting LAN discovery packet
-	noAuth            bool                              // Disable HTTP basic authentication
-	TLSSettings       string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
-	agents            map[string]*ConnServer            // Normal ghost agents
-	logcats           map[string]map[string]*ConnServer // logcat clients
-	wsctxs            map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
-	downloads         map[string]*ConnServer            // Download file agents
-	uploads           map[string]*ConnServer            // Upload file agents
-	ioserver          *socketio.Server
-	lastTargetSSHPort int // Last target SSH port suggested to ConnServer
+	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
+	noAuth           bool                              // Disable HTTP basic authentication
+	TLSSettings      string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
+	agents           map[string]*ConnServer            // Normal ghost agents
+	logcats          map[string]map[string]*ConnServer // logcat clients
+	wsctxs           map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
+	downloads        map[string]*ConnServer            // Download file agents
+	uploads          map[string]*ConnServer            // Upload file agents
+	ioserver         *socketio.Server
 }
 
 func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Overlord {
 	return &Overlord{
-		lanDiscInterface:  lanDiscInterface,
-		noAuth:            noAuth,
-		TLSSettings:       TLSSettings,
-		agents:            make(map[string]*ConnServer),
-		logcats:           make(map[string]map[string]*ConnServer),
-		wsctxs:            make(map[string]*WebSocketContext),
-		downloads:         make(map[string]*ConnServer),
-		uploads:           make(map[string]*ConnServer),
-		lastTargetSSHPort: TARGET_SSH_PORT_START - 1,
+		lanDiscInterface: lanDiscInterface,
+		noAuth:           noAuth,
+		TLSSettings:      TLSSettings,
+		agents:           make(map[string]*ConnServer),
+		logcats:          make(map[string]map[string]*ConnServer),
+		wsctxs:           make(map[string]*WebSocketContext),
+		downloads:        make(map[string]*ConnServer),
+		uploads:          make(map[string]*ConnServer),
 	}
 }
 
@@ -224,17 +222,6 @@ func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
 	// can have multiple upload at the same time
 	self.ioserver.BroadcastTo(conn.TerminalSid, "file upload", string(conn.Sid))
 	self.uploads[conn.Sid] = conn
-}
-
-// It's not that important to worry about race conditions here, since
-// after all the port is just a suggestion.  If it doesn't work, ConnServer
-// will come back and request another one.
-func (self *Overlord) SuggestTargetSSHPort() int {
-	self.lastTargetSSHPort++
-	if self.lastTargetSSHPort > TARGET_SSH_PORT_END {
-		self.lastTargetSSHPort = TARGET_SSH_PORT_START - 1
-	}
-	return self.lastTargetSSHPort
 }
 
 // Handle TCP Connection.
@@ -400,11 +387,6 @@ func (self *Overlord) ServHTTP(port int) {
 			data[idx] = map[string]interface{}{
 				"mid": agent.Mid,
 				"sid": agent.Sid,
-			}
-			if agent.TargetSSHPort == 0 {
-				data[idx]["target_ssh_port"] = nil
-			} else {
-				data[idx]["target_ssh_port"] = agent.TargetSSHPort
 			}
 			idx++
 		}

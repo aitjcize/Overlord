@@ -9,11 +9,9 @@ const (
 )
 
 const (
-	OVERLORD_PORT         = 4455  // Socket server port
-	OVERLORD_LD_PORT      = 4456  // LAN discovery port
-	OVERLORD_HTTP_PORT    = 9000  // Overlord HTTP server port
-	TARGET_SSH_PORT_START = 50000 // First port for SSH forwarding
-	TARGET_SSH_PORT_END   = 55000 // Last port for SSH forwarding
+	OVERLORD_PORT      = 4455 // Socket server port
+	OVERLORD_LD_PORT   = 4456 // LAN discovery port
+	OVERLORD_HTTP_PORT = 9000 // Overlord HTTP server port
 )
 
 // ConnServer Client mode
