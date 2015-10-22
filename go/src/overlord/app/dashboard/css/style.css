@@ -5,11 +5,10 @@ html, body, #main {
 }
 
 .sidebar {
-  position: absolute;
-  left: 2%;
-  top: 70px;
+  margin-left: 2%;
   display: inline-block;
-  width: 430px;
+  float: left;
+  width: 450px;
   height: calc(100% - 120px);
 }
 
@@ -50,7 +49,7 @@ html, body, #main {
 
 .client-info-mid {
   display: inline-block;
-  width: 310px;
+  width: 37ch;
   font-family: monospace;
 }
 
@@ -67,6 +66,12 @@ html, body, #main {
   position: fixed;
   left: 25%;
   top: 10%;
+}
+
+.fixture-group {
+  display: inline-block;
+  margin: -10px 10px 0px 10px;
+  width: calc(95% - 435px);
 }
 
 .upload-progress-bars {

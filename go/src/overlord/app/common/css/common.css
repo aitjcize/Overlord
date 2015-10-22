@@ -9,6 +9,7 @@
   float: none;
 }
 
+/** styles for terminal */
 .terminal-window {
   float: left;
   border: 5px solid #eee;
@@ -82,6 +83,7 @@
   border: 5px dashed #777;
 }
 
+/** styles for progress bar */
 .progress {
   margin: 3px;
 }
@@ -104,4 +106,56 @@
 
 .upload-progress-bars > .panel-body {
   padding: 2px;
+}
+
+/** styles for fixture */
+.fixture-block {
+  display: inline-block;
+  /** width and margin are defined in FixtureWindow.jsx */
+  vertical-align: text-top;
+}
+
+.fixture-block > .panel-heading {
+  padding: 7px !important;
+}
+
+.label {
+  margin: 2px;
+}
+
+.btn {
+  margin: 2px;
+}
+
+.well {
+  margin-top: 5px !important;
+  margin-bottom: 5px !important;
+}
+
+.well-inner {
+  background-color: #fff !important;
+}
+
+.log {
+  color: white;
+  background-color: black !important;
+  font-size: 8px;
+  font-family: monospace;
+  height: 80px;
+  width: calc(48em + 4px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0px !important;
+}
+
+.log::-webkit-scrollbar {
+  display: none;
+}
+
+.btn-primary.active {
+  background-color: #194367;
+}
+
+.status-light-clickable {
+  cursor: pointer;
 }

@@ -1,5 +1,5 @@
 {
-  "context": "fixture",
+  "context": ["ui", "whale"],
   "ui": {
     "lights": {
       "update_command": "update_light_status",

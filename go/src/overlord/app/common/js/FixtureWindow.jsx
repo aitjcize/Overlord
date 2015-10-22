@@ -2,173 +2,170 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// View for Fixture dashboard App
+// View for Fixture Window
 //
-// Requires:
-//   NavBar.jsx :: NavBar
-//   TerminalWindow.jsx :: TerminalWindow
-//
-// - App
-//  - NavBar
-//  - Fixture
-//    - Lights
-//    - Terminals
-//    - Controls
-//    - MainLog
-//    - AuxLogs
-//      - AuxLog
-
+// - FixtureWindow
+//   - Lights
+//   - Terminals
+//   - Controls
+//   - MainLog
+//   - AuxLogs
+//     - AuxLog
 
 LOG_BUF_SIZE = 8192
-DEFAULT_LIGHT_POLL_INTERVAL = 3000
+
+var FIXTURE_WINDOW_WIDTH = 420;
+var FIXTURE_WINDOW_MARGIN = 10;
 
 var LIGHT_CSS_MAP = {
   'light-toggle-off': 'label-danger',
   'light-toggle-on': 'label-success'
 };
 
-var App = React.createClass({
-  loadClientsFromServer: function () {
-    $.ajax({
-      url: this.props.url,
-      dataType: "json",
-      success: function (data) {
-        for (var i = 0; i < data.length; i++) {
-          this.addClient(data[i]);
-        }
-      }.bind(this),
-      error: function (xhr, status, err) {
-        console.error(this.props.url, status, err.toString());
-      }.bind(this)
-    });
-  },
-  fetchProperties: function (mid) {
-    var result = undefined;
-    var url = '/api/agent/properties/' + mid;
-    $.ajax({
-      url: url,
-      async: false,
-      dataType: "json",
-      success: function (data) {
-        result = data;
-      }.bind(this),
-      error: function (xhr, status, err) {
-        console.error(url, status, err.toString());
-      }.bind(this)
-    });
-    return result;
-  },
-  addClient: function (data) {
-    // Data should have the format {mid: "mid", sid: "sid"}
-    data.properties = this.fetchProperties(data.mid);
-    if (data.properties.context != "fixture") {
+// FixtureWindow defines the layout and behavior of a fixture window,
+// which has lights, terminals, controls and logs.
+//
+// Usage:
+//   <FixtureWindow client={client} app={app}
+//       [other attributes...] />
+// where
+//  @app: FixtureWindow will invoke app.addTerminal(id, term) to open an
+//        terminal, where @id is a string used to distinguish different
+//        terminals, @term is a terminal description object.
+//  @client: an agent object, should have "properties" attribute,
+//           which is an object defined by file "properties.json".
+// A terminal description object would looks like the following in json:
+// {
+//   "name":"NUC",
+//   "mid":"ghost 1"
+//   // @path attribute is optional, without @path, it means that we are
+//   // connecting to the fixture itself.
+//   "path": "some path"
+// }
+// Given @id as identifier, and @term as a terminal description object, to open
+// a terminal connection, you can use TerminalWindow:
+//   <TerminalWindow key={id} mid={term.mid} id={id} title={id}
+//       path={"/api/agent/tty/" + term.mid + extra}
+//       uploadPath={"/api/agent/upload/" + term.mid}
+//       app={this.props.app} progressBars={this.refs.uploadProgress}
+//       onControl={onControl} onClose={onClose} />
+//   where @extra = "?tty_device=" + term.path if term.path is defined.
+//
+// A client object would looks like the following in json:
+// {
+//   "mid": "machine ID",
+//   "sid": "serial ID",
+//   // see properties.sample.json
+//   "properties": {
+//     "ip": "127.0.0.1",
+//     "ui": {
+//       // Lights are used to show current status of the fixture, lights has
+//       // two states: on and off, which is represent by setting "light"
+//       // attribute to 'light-toggle-on' or 'light-toggle-off' (see below)
+//       "lights": {
+//         // A list of lights
+//         "items": [
+//           {
+//             // Identifier of this light, if the output of @command contains
+//             // LIGHT[@id]='light-toggle-on', then @light will be set to on.
+//             "id": "ccd",
+//             // Text to be shown
+//             "label": "CCD",
+//             // Set default state to off
+//             "light": "light-toggle-off",
+//             // Command to execute when clicked
+//             "command": "case_close_debug",
+//             // Will be called when the FixtureWindow is opened.
+//             "init_cmd": "case_close_debug status"
+//           },
+//           {
+//             "id": "dut-lid",
+//             "label": "DUT LID"
+//             "light": "light-toggle-off",
+//             // @cmd will be execute every @interval milliseconds, you can
+//             // output LIGHT[@id]='light-toggle-on' to change the light.
+//             "poll": {
+//               "cmd": "check_dut_exists -t lid",
+//               "interval": 20000
+//             },
+//           }, ...
+//         ],
+//         // A master command which updates light status.
+//         // "update_light_status" is a script we wrote that will respect
+//         // @init_cmd and @poll attributes in items, you can implement your
+//         // own script instead.
+//         "update_command": "update_light_status"
+//       },
+//       // A list of terminals connected to this fixture, for example, there
+//       // might be a terminal for fixture itself and a terminal for DUT.
+//       "terminals": [
+//         // Without @path_cmd attribute, will connect to fixture itself.
+//         {
+//           "name": "NUC"
+//         },
+//         // @path_cmd will be used to get the path of device.
+//         {
+//           "name": "AP"
+//           "path_cmd": "ls /dev/google/Ryu_debug-*/serial/AP 2>/dev/null",
+//         },
+//       ],
+//       // A list of buttons to control some functionality of the fixture.
+//       "controls": [
+//         // A command
+//         {
+//           "name": "Upgrade Firmware"
+//           "command": "whale firmware upgrade",
+//         },
+//         // A command that will be toggled between two state.
+//         {
+//           "name": "Voltage Measurement",
+//           "type": "toggle",
+//           "on_command": "command to start measuring voltage",
+//           "off_command": "command to stop measuring"
+//         },
+//         // A group of commands
+//         {
+//           "name": "Fixture control"
+//           "group": [
+//             {
+//               "name": "whale close"
+//               "command": "whale close",
+//             },
+//             {
+//               "name": "whale open"
+//               "command": "whale open",
+//             },
+//             {
+//               "name": "io insertion"
+//               "command": "whale insert",
+//             },
+//             {
+//               "name": "charging"
+//               "command": "whale charge",
+//             }
+//           ],
+//         }
+//       ],
+//       // Path to the log files, FixtureWindow will keep polling the latest
+//       // content of these file.
+//       "logs": [
+//         "/var/log/factory.log", ...
+//       ]
+//     },
+//     // What catagories this fixture belongs to. If it contains "ui", an "UI"
+//     // button will be shown on the /dashboard page. If it contains "whale",
+//     // it will be shown on the /whale page.
+//     "context": [
+//       "ui", "whale", ...
+//     ]
+//   },
+// }
+var FixtureWindow = React.createClass({
+  executeRemoteCmd: function (mid, cmd) {
+    if (!this.isMounted()) {
+      sock.close();
       return;
     }
-    this.state.fixtures.push(data);
-    this.forceUpdate();
-  },
-  removeClient: function (data) {
-    var fixtures = this.state.fixtures;
-    for (var i = 0; i < fixtures.length; i++) {
-      if (fixtures[i].mid == data.mid) {
-        fixtures.splice(i, 1);
-        this.forceUpdate();
-        return;
-      }
-    }
-    return;
-  },
-  addTerminal: function (id, term) {
-    this.state.terminals[id] = term;
-    this.forceUpdate();
-  },
-  removeTerminal: function (id) {
-    if (typeof(this.state.terminals[id]) != "undefined") {
-      delete this.state.terminals[id];
-    }
-    this.forceUpdate();
-  },
-  getInitialState: function () {
-    return {fixtures: [], terminals: {}};
-  },
-  componentDidMount: function () {
-    this.loadClientsFromServer();
-
-    var socket = io(window.location.protocol + "//" + window.location.host,
-                    {path: "/api/socket.io/"});
-    socket.on("agent joined", function (msg) {
-      var obj = JSON.parse(msg);
-      this.addClient(obj);
-    }.bind(this));
-
-    socket.on("agent left", function (msg) {
-      var obj = JSON.parse(msg);
-      this.removeClient(obj);
-    }.bind(this));
-
-    // Initiate a file download
-    socket.on("file download", function (sid) {
-      var url = window.location.protocol + "//" + window.location.host +
-                "/api/file/download/" + sid;
-      $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
-        "</iframe>").appendTo('body');
-    });
-    this.socket = socket;
-  },
-  render: function () {
-    var onControl = function (control) {
-      if (control.type == "sid") {
-        this.terminal_sid = control.data;
-        this.props.app.socket.emit("subscribe", control.data);
-      }
-    };
-    var onClose = function (e) {
-      this.props.app.removeTerminal(this.props.id);
-      this.props.app.socket.emit("unsubscribe", this.terminal_sid);
-    };
-    return (
-      <div id="main">
-        <NavBar name="Fixture Dashboard" url="/api/apps/list" />
-        <div className="terminals">
-          {
-            Object.keys(this.state.terminals).map(function (id) {
-              var term = this.state.terminals[id];
-              var extra = "";
-              if (typeof(term.path) != "undefined") {
-                extra = "?tty_device=" + term.path;
-              }
-              return (
-                <TerminalWindow key={id} mid={term.mid} id={id} title={id}
-                 path={"/api/agent/tty/" + term.mid + extra}
-                 uploadPath={"/api/agent/upload/" + term.mid}
-                 app={this} progressBars={this.refs.uploadProgress}
-                 onControl={onControl} onClose={onClose} />
-              );
-            }.bind(this))
-          }
-        </div>
-        <div className="upload-progress">
-          <UploadProgress ref="uploadProgress" />
-        </div>
-        <div className="app-box panel panel-info">
-          <div className="panel-heading">Clients</div>
-          <div className="panel-body">
-            {
-              this.state.fixtures.map(function (data) {
-                return (
-                  <Fixture key={data.mid} client={data} app={this}/>
-                );
-              }.bind(this))
-            }
-          </div>
-        </div>
-      </div>
-    );
-  }
-});
-
-var Fixture = React.createClass({
-  executeRemoteCmd: function (mid, cmd) {
     var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
               "://" + window.location.host + "/api/agent/shell/" + mid +
               "?command=" + encodeURIComponent(cmd);
@@ -183,14 +180,28 @@ var Fixture = React.createClass({
         }
       }.bind(this)
     }.bind(this)
+    this.socks.push(sock);
+  },
+  componentWillUnmount: function() {
+    for (var i = 0; i < this.socks.length; ++i) {
+      this.socks[i].close();
+    }
+  },
+  getInitialState: function () {
+    this.socks = [];
+    return {};
   },
   render: function () {
     var client = this.props.client;
+    var style = {
+      width: FIXTURE_WINDOW_WIDTH + 'px',
+      margin: FIXTURE_WINDOW_MARGIN + 'px',
+    };
     return (
-      <div className="fixture-block panel panel-success">
+      <div className="fixture-block panel panel-success" style={style}>
         <div className="panel-heading text-center">{abbr(client.mid, 60)}</div>
         <div className="panel-body">
-          <Lights ref="lights" client={this.props.client} fixture={this} />
+          <Lights ref="lights" client={client} fixture={this} />
           <Terminals client={client} app={this.props.app} />
           <Controls ref="controls" client={client} fixture={this} />
           <MainLog ref="mainlog" fixture={this} id={client.mid} />
@@ -200,6 +211,7 @@ var Fixture = React.createClass({
     );
   }
 });
+
 
 var Lights = React.createClass({
   updateLightStatus: function (id, status_class) {
@@ -484,8 +496,3 @@ var AuxLog = React.createClass({
     );
   }
 });
-
-React.render(
-  <App url="/api/agents/list" pollInterval={60000} />,
-  document.body
-);
