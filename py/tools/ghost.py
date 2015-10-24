@@ -5,8 +5,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from __future__ import print_function
-
 import argparse
 import contextlib
 import fcntl
@@ -203,7 +201,6 @@ class Ghost(object):
       logging.error('Upgrade: sha1sum mismatch, abort')
       return
 
-    python = os.readlink('/proc/self/exe')
     try:
       with open(scriptpath, 'w') as f:
         f.write(data)
@@ -214,7 +211,7 @@ class Ghost(object):
     logging.info('Upgrade: restarting ghost...')
     self.CloseSockets()
     self.SetIgnoreChild(False)
-    os.execve(python, [python, scriptpath] + sys.argv[1:], os.environ)
+    os.execve(scriptpath, [scriptpath] + sys.argv[1:], os.environ)
 
   def LoadProperties(self):
     try:
@@ -442,7 +439,7 @@ class Ghost(object):
         if self._sock in rd:
           ret = self._sock.recv(_BUFSIZE)
           if len(ret) == 0:
-            raise RuntimeError('socket closed')
+            raise RuntimeError('connection terminated')
           while ret:
             if control_state:
               if chr(_CONTROL_END) in ret:
@@ -479,9 +476,17 @@ class Ghost(object):
     """Spawn a shell server and forward input/output from/to the TCP socket."""
     logging.info('SpawnShellServer: started')
 
+    # Add ghost executable to PATH
+    script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    env = os.environ.copy()
+    env['PATH'] = os.getenv('PATH') + ':%s' % script_dir
+
+    # Execute shell command from HOME directory
+    os.chdir(os.getenv('HOME', '/tmp'))
+
     p = subprocess.Popen(self._shell_command, stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         shell=True)
+                         shell=True, env=env)
 
     def make_non_block(fd):
       fl = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -502,7 +507,7 @@ class Ghost(object):
         if self._sock in rd:
           ret = self._sock.recv(_BUFSIZE)
           if len(ret) == 0:
-            raise RuntimeError('socket closed')
+            raise RuntimeError('connection terminated')
           p.stdin.write(ret)
         p.poll()
         if p.returncode != None:
@@ -510,6 +515,16 @@ class Ghost(object):
     except Exception as e:
       logging.error('SpawnShellServer: %s', e)
     finally:
+      # Send SIGTERM to process, then wait for 1 second. Send another SIGKILL
+      # to make sure the process is terminated.
+      try:
+        p.terminate()
+        time.sleep(1)
+        p.kill()
+      except Exception:
+        pass
+
+      p.wait()
       self._sock.close()
 
     logging.info('SpawnShellServer: terminated')
@@ -604,13 +619,13 @@ class Ghost(object):
 
         if self._sock in rd:
           data = self._sock.recv(_BUFSIZE)
-          if not data:
-            break
+          if len(data) == 0:
+            raise RuntimeError('connection terminated')
           src_sock.send(data)
 
         if src_sock in rd:
           data = src_sock.recv(_BUFSIZE)
-          if not data:
+          if len(data) == 0:
             break
           self._sock.send(data)
     except Exception as e:
@@ -721,7 +736,6 @@ class Ghost(object):
       if callable(handler):
         handler(response)
     else:
-      print(response, self._requests.keys())
       logging.warning('Received unsolicited response, ignored')
 
   def ParseMessage(self, single=True):
@@ -1008,8 +1022,13 @@ def DownloadFile(filename):
 
 
 def main():
+  # Setup logging format
   logger = logging.getLogger()
   logger.setLevel(logging.INFO)
+  handler = logging.StreamHandler()
+  formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
+  handler.setFormatter(formatter)
+  logger.addHandler(handler)
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--fork', dest='fork', action='store_true', default=False,

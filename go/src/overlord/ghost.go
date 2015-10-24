@@ -372,11 +372,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 		}
 
 		st, err := os.Stat(destPath)
-		if err != nil {
-			return err
-		}
-
-		if st.Mode().IsDir() {
+		if err == nil && st.Mode().IsDir() {
 			destPath = filepath.Join(destPath, params.Filename)
 		}
 	} else {
@@ -613,8 +609,10 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 
 		// Add ghost executable to PATH
 		exePath, err := GetExecutablePath()
-		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
-			filepath.Dir(exePath)))
+		if err == nil {
+			os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
+				filepath.Dir(exePath)))
+		}
 
 		os.Chdir(home)
 		cmd := exec.Command(shell)
@@ -754,6 +752,20 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 		log.Println("SpawnShellServer: terminated")
 	}()
 
+	// Execute shell command from HOME directory
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/tmp"
+	}
+	os.Chdir(home)
+
+	// Add ghost executable to PATH
+	exePath, err := GetExecutablePath()
+	if err == nil {
+		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
+			filepath.Dir(exePath)))
+	}
+
 	cmd := exec.Command(DEFAULT_SHELL, "-c", self.shellCommand)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -773,7 +785,6 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 	go io.Copy(self.Conn, stdout)
 	go func() {
 		io.Copy(self.Conn, stderr)
-		cmd.Wait()
 		stopConn <- true
 	}()
 
@@ -781,14 +792,23 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 		return err
 	}
 
+	defer func() {
+		// Send SIGTERM to process, then wait for 1 second. Send another SIGKILL
+		// to make sure the process is terminated.
+		cmd.Process.Signal(syscall.SIGTERM)
+		time.Sleep(time.Second)
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
 	for {
 		select {
 		case buf := <-self.readChan:
 			stdin.Write([]byte(buf))
 		case err := <-self.readErrChan:
 			if err == io.EOF {
-				cmd.Process.Kill()
-				return errors.New("SpawnShellServer: connection terminated")
+				log.Println("SpawnShellServer: connection terminated")
+				return nil
 			} else {
 				return err
 			}
