@@ -419,11 +419,13 @@ var MainLog = React.createClass({
   appendLog: function (text) {
     var odiv = this.odiv;
     this.props.fixture.refs.lights.scanForLightMsg(text);
-    odiv.innerText += text;
-    if (odiv.innerText.length > LOG_BUF_SIZE) {
-      odiv.innerText = odiv.innerText.substr(odiv.innerText.length -
-                                             LOG_BUF_SIZE, LOG_BUF_SIZE);
+    var innerHTML = $(odiv).html();
+    innerHTML += text.replace(/\n/g, "<br />");
+    if (innerHTML.length > LOG_BUF_SIZE) {
+      innerHTML = innerHTML.substr(innerHTML.length -
+                                   LOG_BUF_SIZE, LOG_BUF_SIZE);
     }
+    $(odiv).html(innerHTML);
     odiv.scrollTop = odiv.scrollHeight;
   },
   componentDidMount: function () {
@@ -474,11 +476,13 @@ var AuxLog = React.createClass({
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function (text) {
             this.props.fixture.refs.lights.scanForLightMsg(text);
-            odiv.innerText += text;
-            if (odiv.innerText.length > LOG_BUF_SIZE) {
-              odiv.innerText = odiv.innerText.substr(odiv.innerText.length -
-                                                     LOG_BUF_SIZE, LOG_BUF_SIZE);
+            var innerHTML = $(odiv).html();
+            innerHTML += text.replace(/\n/g, "<br />");
+            if (innerHTML.length > LOG_BUF_SIZE) {
+              innerHTML = innerHTML.substr(innerHTML.length -
+                                           LOG_BUF_SIZE, LOG_BUF_SIZE);
             }
+            $(odiv).html(innerHTML);
             odiv.scrollTop = odiv.scrollHeight;
           }.bind(this));
         }
