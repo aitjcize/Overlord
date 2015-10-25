@@ -339,7 +339,7 @@ var TerminalGroup = React.createClass({
         this.props.app.socket.emit("subscribe", control.data);
       }
     };
-    var onClose = function (e) {
+    var onCloseClicked = function (e) {
       this.props.app.removeTerminal(this.props.id);
       this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
@@ -358,7 +358,7 @@ var TerminalGroup = React.createClass({
                  path={"/api/agent/tty/" + term.mid + extra}
                  uploadPath={"/api/agent/upload/" + term.mid}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
-                 onControl={onControl} onClose={onClose} />
+                 onControl={onControl} onCloseClicked={onCloseClicked} />
               );
             }.bind(this))
           }
