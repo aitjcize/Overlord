@@ -59,32 +59,32 @@ var App = React.createClass({
   onLockClicked: function (e) {
     this.state.locked = !this.state.locked;
     this.forceUpdate();
-    this.saveCookies('locked', this.state.locked);
+    this.saveCookies("locked", this.state.locked);
     if (this.state.locked) {
-      var locked_mids = this.state.clients.map(function (e) {return e['mid'];});
-      this.saveCookies('locked_mids', locked_mids);
+      var locked_mids = this.state.clients.map(function (e) {return e["mid"];});
+      this.saveCookies("locked_mids", locked_mids);
     }
   },
   onTimeoutClicked: function (e) {
-    $('#timeout-dialog').modal();
+    $("#timeout-dialog").modal();
   },
   getTimeout: function (e) {
     return this.state.boot_timeout_secs;
   },
   onTimeoutDialogSaveClicked: function (e) {
-    this.state.boot_timeout_secs = Math.max(1, $('#boot_timeout_secs').val());
+    this.state.boot_timeout_secs = Math.max(1, $("#boot_timeout_secs").val());
     this.forceUpdate();
-    this.saveCookies('boot_timeout_secs', this.state.boot_timeout_secs);
+    this.saveCookies("boot_timeout_secs", this.state.boot_timeout_secs);
   },
   onLayoutClicked: function (e) {
-    $('#layout-dialog').modal();
+    $("#layout-dialog").modal();
   },
   onLayoutDialogSaveClicked: function (e) {
-    var nrow = $('#nrow').val();
+    var nrow = $("#nrow").val();
     if (nrow < 1) {
       nrow = 1;
     }
-    var width = ($('#client-box-body').width() - 15) / nrow - 10;
+    var width = ($("#client-box-body").width() - 15) / nrow - 10;
 
     // Hack: the last stylesheet is the oldest one
     var st = document.styleSheets[document.styleSheets.length - 1];
@@ -94,16 +94,16 @@ var App = React.createClass({
     st.insertRule(".client-info { width: " + width + " !important }", 0);
   },
   getInitialState: function () {
-    var locked = this.loadCookies('locked', false);
+    var locked = this.loadCookies("locked", false);
     var clients = [];
     if (locked) {
-      clients = this.loadCookies('locked_mids', []).map(
-          function (mid) {return {mid: mid, sids: [], status: 'disconnected'}});
+      clients = this.loadCookies("locked_mids", []).map(
+          function (mid) {return {mid: mid, sids: [], status: "disconnected"}});
     }
     return {
         locked: locked,
         clients: clients,
-        boot_timeout_secs: this.loadCookies('boot_timeout_secs', 60)};
+        boot_timeout_secs: this.loadCookies("boot_timeout_secs", 60)};
   },
   componentDidMount: function () {
     this.onLayoutDialogSaveClicked();
@@ -227,14 +227,14 @@ var ClientInfo = React.createClass({
     if (typeof(this.props.data.status) != "undefined") {
       return {status: this.props.data.status};
     }
-    return {status: 'in-progress'};
+    return {status: "in-progress"};
   },
   updateStatus: function (status) {
     this.setState({status: status});
   },
   onTagClick: function (e) {
-    var sid = $(e.target).data('sid');
-    $(this.refs["term-" + sid].getDOMNode()).css('display', 'block');
+    var sid = $(e.target).data("sid");
+    $(this.refs["term-" + sid].getDOMNode()).css("display", "block");
   },
   onPanelClick: function (e) {
     // Workaround: crosbug.com/p/39839#11
@@ -297,18 +297,21 @@ var ClientInfo = React.createClass({
         {
           this.props.data.sids.map(function (sid) {
             return (
+              <div className="client-info-tag-container">
                 <div className="client-info-tag">
                   <span className="label label-warning client-info-terminal"
                       data-sid={sid} onClick={this.onTagClick}>
                     {sid}
                   </span>
-                  <TerminalWindow key={sid} id={"terminal-" + mid + "-" + sid}
-                   title={mid + ' / ' + sid}
-                   path={"/api/log/" + mid + "/" + sid}
-                   onError={onError} onMessage={onMessage}
-                   onCloseClicked={onCloseClicked} client={this}
-                   ref={"term-" + sid} />
                 </div>
+                <TerminalWindow key={sid} id={"terminal-" + mid + "-" + sid}
+                 title={mid + " / " + sid}
+                 path={"/api/log/" + mid + "/" + sid}
+                 enableCopy={true}
+                 onError={onError} onMessage={onMessage}
+                 onCloseClicked={onCloseClicked} client={this}
+                 ref={"term-" + sid} />
+              </div>
             );
           }.bind(this))
         }

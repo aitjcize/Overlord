@@ -24,19 +24,25 @@ html, body, #main {
 
 .client-info {
   vertical-align: top;
-  height: 90px;
   margin: 5px;
   display: inline-block;
   margin-bottom: 5px !important;
 }
 
-.client-info-tag {
+.client-info-tag-container {
   display: inline-block;
-  margin: 2px;
+}
+
+.client-info-tag {
+  margin: 0px;
   cursor: pointer;
 }
 
 .terminal-window {
   display: none;
-  position: absolute !important;
+  position: fixed !important;
+}
+
+.panel-body {
+  padding: 10px !important;
 }
