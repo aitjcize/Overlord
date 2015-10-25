@@ -10,16 +10,37 @@
 //     path: path to websocket
 //     uploadPath: path to upload the file (without terminal sid)
 //     title: window title
+//     enableMinimize: a boolean value for enable minimize button
+//     enableCopy: a boolean value for enable the copy icon, which allow
+//      copying of terminal buffer
 //     onOpen: callback for connection open
 //     onClose: callback for connection close
 //     onError: callback for connection error
 //     onMessage: callback for message (binary)
 //     onMessage: callback for control message (JSON)
 //     onCloseClicked: callback for close button clicked
+//     onMinimizeClicked: callback for mininize button clicked
 //
 // - UploadProgress
 //   - ProgressBar
 
+Terminal.prototype.CopyAll = function() {
+  var term = this;
+  var textarea = term.getCopyTextarea();
+  var text = term.grabText(
+    0, term.cols - 1,
+    0, term.lines.length - 1);
+  term.emit('copy', text);
+  textarea.focus();
+  textarea.textContent = text;
+  textarea.value = text;
+  textarea.setSelectionRange(0, text.length);
+  document.execCommand("Copy");
+  setTimeout(function() {
+    term.element.focus();
+    term.focus();
+  }, 1);
+};
 
 var TerminalWindow = React.createClass({
   randomID: function() {
@@ -65,6 +86,7 @@ var TerminalWindow = React.createClass({
       useStyle: true,
       screenKeys: true
     });
+    this.term = term;
 
     var bindDragAndDropEvents = function() {
       var termDom = $el.find(".terminal");
@@ -275,13 +297,38 @@ var TerminalWindow = React.createClass({
     }
     this.sock.close();
   },
+  onMinimizeMouseUp: function (e) {
+    var callback = this.props.onMinimizeClicked;
+    if (typeof(callback) != "undefined") {
+      (callback.bind(this))(e);
+    }
+  },
+  onCopyMouseUp: function (e) {
+    this.term.CopyAll();
+  },
   render: function () {
+    var minimize_icon_node = "", copy_icon_node = "";
+    if (this.props.enableMinimize) {
+      copy_icon_node = (
+          <div className="terminal-icon terminal-minimize"
+           onMouseUp={this.onMinimizeMouseUp}></div>
+      );
+    }
+    if (this.props.enableCopy) {
+      copy_icon_node = (
+          <div className="terminal-icon terminal-copy"
+           onMouseUp={this.onCopyMouseUp}></div>
+      );
+    }
     return (
       <div className="terminal-window" id={this.props.id}
           onMouseDown={this.onWindowMouseDown}>
         <div className="terminal-title">{this.props.title}</div>
         <div className="terminal-control">
-          <div className="terminal-close" onMouseUp={this.onCloseMouseUp}></div>
+          {copy_icon_node}
+          {minimize_icon_node}
+          <div className="terminal-icon terminal-close"
+           onMouseUp={this.onCloseMouseUp}></div>
         </div>
         <div className="terminal-drop-overlay">
           Drop files here to upload

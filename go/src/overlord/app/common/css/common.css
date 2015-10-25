@@ -44,22 +44,26 @@
   display: inline-block;
 }
 
-.terminal-close:hover, .terminal-minimize:hover {
+.terminal-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 0.5;
+}
+
+.terminal-icon:hover {
   opacity: 0.7;
 }
 
 .terminal-close {
   background-image: url(/common/img/close.png);
-  width: 20px;
-  height: 20px;
-  opacity: 0.5;
 }
 
 .terminal-minimize {
   background-image: url(/common/img/minimize.png);
-  width: 20px;
-  height: 20px;
-  opacity: 0.5;
+}
+
+.terminal-copy {
+  background-image: url(/common/img/copy.png);
 }
 
 .terminal {
