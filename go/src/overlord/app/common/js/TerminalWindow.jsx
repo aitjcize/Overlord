@@ -24,29 +24,29 @@
 // - UploadProgress
 //   - ProgressBar
 
-Terminal.prototype.CopyAll = function() {
+Terminal.prototype.CopyAll = function () {
   var term = this;
   var textarea = term.getCopyTextarea();
   var text = term.grabText(
     0, term.cols - 1,
     0, term.lines.length - 1);
-  term.emit('copy', text);
+  term.emit("copy", text);
   textarea.focus();
   textarea.textContent = text;
   textarea.value = text;
   textarea.setSelectionRange(0, text.length);
   document.execCommand("Copy");
-  setTimeout(function() {
+  setTimeout(function () {
     term.element.focus();
     term.focus();
   }, 1);
 };
 
 var TerminalWindow = React.createClass({
-  randomID: function() {
-    return Math.random().toString(36).replace(/[^a-z]+/g, '').substr(0, 6);
+  randomID: function () {
+    return Math.random().toString(36).replace(/[^a-z]+/g, "").substr(0, 6);
   },
-  getInitialState: function() {
+  getInitialState: function () {
     return {sid: ""};
   },
   componentDidMount: function () {
@@ -88,14 +88,21 @@ var TerminalWindow = React.createClass({
     });
     this.term = term;
 
-    var bindDragAndDropEvents = function() {
+    var bindDisconnectEvent = function () {
+      var overlay = $el.find(".terminal-disconnected-overlay");
+      overlay.on("click", function (e) {
+        overlay.css("display", "none");
+      })
+    }
+
+    var bindDragAndDropEvents = function () {
       var termDom = $el.find(".terminal");
       var overlay = $el.find(".terminal-drop-overlay");
 
       termDom.on("dragenter", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        $el.find(".terminal-drop-overlay").css("display", "block");
+        overlay.css("display", "block");
       }.bind(this));
 
       overlay.on("dragenter", function (e) {
@@ -111,7 +118,7 @@ var TerminalWindow = React.createClass({
       overlay.on("dragleave", function (e) {
         e.preventDefault();
         e.stopPropagation();
-        $el.find(".terminal-drop-overlay").css("display", "none");
+        overlay.css("display", "none");
       });
 
       overlay.on("drop", function (e) {
@@ -126,14 +133,14 @@ var TerminalWindow = React.createClass({
           formData.append("file", files[i]);
 
           $.ajax({
-            xhr: function(file, id) {
-              return function() {
+            xhr: function (file, id) {
+              return function () {
                 var xhr = new window.XMLHttpRequest();
-                xhr.upload.addEventListener("progress", function(e) {
+                xhr.upload.addEventListener("progress", function (e) {
                   if (e.lengthComputable) {
                     var percentComplete = Math.round(e.loaded * 100 / e.total);
-                    $('#' + id).css('width', percentComplete + '%');
-                    $('#' + id + ' > .percent').text(percentComplete + '%');
+                    $("#" + id).css("width", percentComplete + "%");
+                    $("#" + id + " > .percent").text(percentComplete + "%");
                   }
                 }, false);
                 return xhr;
@@ -144,10 +151,10 @@ var TerminalWindow = React.createClass({
             cache: false,
             contentType: false,
             processData: false,
-            type: 'POST',
+            type: "POST",
             success: function (id) {
               return function (data) {
-                $('#' + id).css('width', '100%');
+                $("#" + id).css("width", "100%");
                 // Display the progressbar for 1 more seconds after complete.
                 setTimeout(function () {
                   this.props.progressBars.removeRecord(id);
@@ -160,7 +167,7 @@ var TerminalWindow = React.createClass({
       }.bind(this));
     }.bind(this);
 
-    var bindResizeEvent = function() {
+    var bindResizeEvent = function () {
       // Calculate terminal and terminal-window width/height relation.  Used for
       // resize procedure we will hide right and bottom border of teriminal.
       // and add the same size to terminal-window for good looking and resize
@@ -233,13 +240,15 @@ var TerminalWindow = React.createClass({
       });
 
       term.on("data", function (data) {
-        sock.send(data);
+        if (sock.readyState == 1) { // OPEN
+          sock.send(data);
+        }
       });
 
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           var callback = this.props.onMessage;
-          ReadBlobAsText(msg.data, function(text) {
+          ReadBlobAsText(msg.data, function (text) {
             term.write(text);
             if (typeof(callback) != "undefined") {
               (callback.bind(this))(text);
@@ -260,6 +269,18 @@ var TerminalWindow = React.createClass({
       }.bind(this);
 
       sock.onclose = function (e) {
+        // If the current focus element is same as this terminal, we assume that
+        // this connection close is initiated by the user (i.e. by typing 'exit'
+        // in the shell). If the current focus element is not this terminal, it
+        // means the connection dropped unexpectedly. We show a 'connection
+        // lost' overlay to indicate this situation in this case.
+        if (document.activeElement == $el.find(".terminal")[0]) {
+          this.onCloseMouseUp();
+        } else {
+          term.write("\r\nConnection lost.");
+          $el.find(".terminal-disconnected-overlay").css("display", "block");
+        }
+
         var callback = this.props.onClose;
         if (typeof(callback) != "undefined") {
           (callback.bind(this))(e);
@@ -268,6 +289,7 @@ var TerminalWindow = React.createClass({
 
       // Bind events
       bindResizeEvent();
+      bindDisconnectEvent();
 
       // Only bind drag and drop event if uploadPath is provided
       if (typeof(this.props.uploadPath) != "undefined") {
@@ -330,8 +352,11 @@ var TerminalWindow = React.createClass({
           <div className="terminal-icon terminal-close"
            onMouseUp={this.onCloseMouseUp}></div>
         </div>
-        <div className="terminal-drop-overlay">
+        <div className="terminal-overlay terminal-drop-overlay">
           Drop files here to upload
+        </div>
+        <div className="terminal-overlay terminal-disconnected-overlay">
+          Connection lost
         </div>
       </div>
     );
@@ -378,6 +403,7 @@ var UploadProgress = React.createClass({
     );
   }
 });
+
 
 var ProgressBar = React.createClass({
   render: function () {
