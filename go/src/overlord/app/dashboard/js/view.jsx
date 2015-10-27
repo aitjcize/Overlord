@@ -55,35 +55,50 @@ var App = React.createClass({
       return el.mid == client.mid;
     }).length > 0;
   },
-  fetchProperties: function (mid) {
-    var result = undefined;
+  fetchProperties: function (mid, callback) {
     var url = '/api/agent/properties/' + mid;
     $.ajax({
       url: url,
-      async: false,
       dataType: "json",
-      success: function (data) {
-        result = data;
-      }.bind(this),
+      success: callback,
       error: function (xhr, status, err) {
         console.error(url, status, err.toString());
       }.bind(this)
     });
-    return result;
   },
   addClient: function(client, add_to_recent) {
-    client.properties = this.fetchProperties(client.mid);
-
-    if (add_to_recent) {
-      // Add to recent client list
-      // We are making a copy of client since we don't want to hide the client in
-      // recentclient list (and Javascript is passed-by reference).
-      this.state.recentclients.splice(0, 0, JSON.parse(JSON.stringify(client)));
-      this.state.recentclients = this.state.recentclients.slice(0, 5);
+    if (this.isClientInList(this.state.clients, client)) {
+      return;
     }
 
-    this.state.clients.push(client);
-    this.forceUpdate();
+    this.fetchProperties(client.mid, function(data) {
+      client.properties = data;
+
+      // Set status to hidden if the machine ID does not match search pattern
+      if (typeof(this.lastPattern) != "undefined" &&
+          !this.lastPattern.test(client.mid)) {
+        client.status = "hidden";
+      }
+
+      if (this.isClientInList(this.state.clients, client)) {
+        return;
+      }
+      this.state.clients.push(client);
+      this.state.clients.sort(function(a, b) {
+        return a.mid.localeCompare(b.mid);
+      });
+
+      if (add_to_recent) {
+        // Add to recent client list
+        // We are making a copy of client since we don't want to hide the
+        // client in recentclient list (and Javascript is passed-by reference).
+        client = JSON.parse(JSON.stringify(client))
+        this.state.recentclients.splice(0, 0, client);
+        this.state.recentclients = this.state.recentclients.slice(0, 5);
+      }
+
+      this.forceUpdate();
+    }.bind(this));
   },
   addTerminal: function (id, term) {
     this.state.terminals[id] = term;
@@ -150,7 +165,6 @@ var App = React.createClass({
   },
   componentDidMount: function () {
     this.loadClientsFromServer();
-    setInterval(this.loadClientsFromServer, this.props.pollInterval);
 
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
@@ -158,14 +172,7 @@ var App = React.createClass({
 
     socket.on("agent joined", function (msg) {
       var obj = JSON.parse(msg);
-
-      // Add to client list and filter it if pattern does not matched
       this.addClient(obj, true);
-      if (typeof(this.lastPattern) != "undefined" &&
-          !this.lastPattern.test(obj.mid)) {
-        obj.status = "hidden";
-      }
-      this.forceUpdate();
     }.bind(this));
 
     socket.on("agent left", function (msg) {
@@ -382,6 +389,6 @@ var FixtureGroup = React.createClass({
 });
 
 React.render(
-  <App url="/api/agents/list" pollInterval={60000} />,
+  <App url="/api/agents/list" />,
   document.body
 );
