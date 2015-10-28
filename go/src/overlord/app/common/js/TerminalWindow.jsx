@@ -73,6 +73,8 @@ var TerminalWindow = React.createClass({
       cancel: ".terminal"
     });
 
+    this.bringToFront();
+
     sock.onerror = function (e) {
       var callback = this.props.onError;
       if (typeof(callback) != "undefined") {
@@ -303,6 +305,16 @@ var TerminalWindow = React.createClass({
     }.bind(this);
   },
   onWindowMouseDown: function (e) {
+    this.bringToFront();
+  },
+  onCloseMouseUp: function (e) {
+    var callback = this.props.onCloseClicked;
+    if (typeof(callback) != "undefined") {
+      (callback.bind(this))(e);
+    }
+    this.sock.close();
+  },
+  bringToFront: function () {
     if (typeof(window.maxz) == "undefined") {
       window.maxz = 100;
     }

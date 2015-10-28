@@ -163,7 +163,6 @@ var LIGHT_CSS_MAP = {
 var FixtureWindow = React.createClass({
   executeRemoteCmd: function (mid, cmd) {
     if (!this.isMounted()) {
-      sock.close();
       return;
     }
     var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
@@ -173,6 +172,10 @@ var FixtureWindow = React.createClass({
 
     sock.onopen = function () {
       sock.onmessage = function (msg) {
+        if (!this.isMounted()) {
+          sock.close();
+          return;
+        }
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function(text) {
             this.refs.mainlog.appendLog(text);

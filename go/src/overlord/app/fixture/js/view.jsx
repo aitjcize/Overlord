@@ -49,10 +49,13 @@ var App = React.createClass({
     data.properties = this.fetchProperties(data.mid);
     if (typeof(data.properties) == "undefined" ||
         typeof(data.properties.context) == "undefined" ||
-        data.properties.context.indexOf("whale") === -1) {
+        data.properties.context.indexOf("ui") === -1) {
       return;
     }
     this.state.fixtures.push(data);
+    this.state.fixtures.sort(function (a, b) {
+      return a.mid.localeCompare(b.mid);
+    });
     this.forceUpdate();
   },
   removeClient: function (data) {
@@ -103,6 +106,18 @@ var App = React.createClass({
     });
     this.socket = socket;
   },
+  computePageSize: function () {
+    // compute how many fixtures we can put in the screen
+    var screen = {
+        width: window.innerWidth,
+    };
+
+    var nFixturePerRow = Math.floor(
+       screen.width / (FIXTURE_WINDOW_WIDTH + FIXTURE_WINDOW_MARGIN * 2));
+    nFixturePerRow = Math.max(1, nFixturePerRow);
+    var nTotalFixture = Math.min(2 * nFixturePerRow, 8);
+    return nTotalFixture;
+  },
   render: function () {
     var onControl = function (control) {
       if (control.type == "sid") {
@@ -116,7 +131,7 @@ var App = React.createClass({
     };
     return (
       <div id="main">
-        <NavBar name="Whale Fixture Dashboard" url="/api/apps/list" />
+        <NavBar name="Fixture Dashboard" url="/api/apps/list" />
         <div className="terminals">
           {
             Object.keys(this.state.terminals).map(function (id) {
@@ -138,9 +153,7 @@ var App = React.createClass({
         <div className="upload-progress">
           <UploadProgress ref="uploadProgress" />
         </div>
-        <div className="app-box panel panel-info">
-          <div className="panel-heading">Clients</div>
-          <div className="panel-body">
+        <Paginator header="Clients" pageSize={this.computePageSize()}>
             {
               this.state.fixtures.map(function (data) {
                 return (
@@ -148,7 +161,74 @@ var App = React.createClass({
                 );
               }.bind(this))
             }
+        </Paginator>
+      </div>
+    );
+  }
+});
+
+Paginator = React.createClass({
+  changePage: function (i) {
+    this.setState({pageNumber: i});
+  },
+  getInitialState: function () {
+    return {pageNumber: 0};
+  },
+  render: function () {
+    var nPage = Math.ceil(this.props.children.length / this.props.pageSize);
+    var pageNumber = Math.max(Math.min(this.state.pageNumber, nPage - 1), 0);
+    var start = pageNumber * this.props.pageSize;
+    var end = start + this.props.pageSize;
+    var children = this.props.children.slice(start, end);
+
+    var pages = Array.apply(null, {length: nPage}).map(Number.call, Number);
+
+    return (
+      <div className="app-box panel panel-info">
+        <div className="panel-heading">
+          <div className="container-fluid panel-container">
+            <div className="col-xs-3 text-left">
+              <h2 className="panel-title">{this.props.header}</h2>
+            </div>
+            <div className="col-xs-6 text-center">
+              <ul className="pagination panel-pagination">
+                <li>
+                  <a href="#" aria-label="Previous"
+                      onClick={this.changePage.bind(this, pageNumber - 1)}>
+                    <span aria-hidden="true">&laquo;</span>
+                  </a>
+                </li>
+                {
+                  pages.map(function (i) {
+                    var extra = {};
+                    if (i == pageNumber) {
+                        extra.className = "active";
+                    }
+                    return (
+                      <li {...extra}>
+                        <a onClick={this.changePage.bind(this, i)} href="#">
+                          {i + 1}
+                        </a>
+                      </li>
+                    )
+                  }.bind(this))
+                }
+                <li>
+                  <a href="#" aria-label="Next"
+                      onClick={this.changePage.bind(this, pageNumber + 1)}>
+                    <span aria-hidden="true">&raquo;</span>
+                  </a>
+                </li>
+              </ul>
+            </div>
           </div>
+        </div>
+        <div className="panel-body">
+        {
+          children.map(function (child) {
+            return child;
+          }.bind(this))
+        }
         </div>
       </div>
     );
@@ -156,6 +236,6 @@ var App = React.createClass({
 });
 
 React.render(
-  <App url="/api/agents/list" pollInterval={60000} />,
+  <App url="/api/agents/list"/>,
   document.body
 );
