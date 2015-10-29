@@ -79,6 +79,27 @@ var App = React.createClass({
     }
     this.forceUpdate();
   },
+  setFilterPattern: function (pattern) {
+    if (typeof(pattern) != "undefined") {
+      this.lastPattern = new RegExp(pattern, "i");
+    } else if (typeof(this.lastPattern) == "undefined") {
+      this.lastPattern = new RegExp("", "i");
+    }
+    this.forceUpdate();
+  },
+  getFilteredClientList: function () {
+    if (typeof(this.lastPattern) != "undefined") {
+      var filteredList = [];
+      for (var i = 0; i < this.state.fixtures.length; i++) {
+        if (this.lastPattern.test(this.state.fixtures[i].mid)) {
+          filteredList.push(this.state.fixtures[i]);
+        }
+      }
+      return filteredList;
+    } else {
+      return this.state.fixtures.slice();
+    }
+  },
   getInitialState: function () {
     return {fixtures: [], terminals: {}};
   },
@@ -153,14 +174,15 @@ var App = React.createClass({
         <div className="upload-progress">
           <UploadProgress ref="uploadProgress" />
         </div>
-        <Paginator header="Clients" pageSize={this.computePageSize()}>
-            {
-              this.state.fixtures.map(function (data) {
-                return (
-                  <FixtureWindow key={data.mid} client={data} app={this}/>
-                );
-              }.bind(this))
-            }
+        <Paginator header="Clients" app={this}
+            pageSize={this.computePageSize()}>
+          {
+            this.getFilteredClientList().map(function (data) {
+              return (
+                <FixtureWindow key={data.mid} client={data} app={this}/>
+              );
+            }.bind(this))
+          }
         </Paginator>
       </div>
     );
@@ -168,6 +190,9 @@ var App = React.createClass({
 });
 
 Paginator = React.createClass({
+  onKeyUp: function (e) {
+    this.props.app.setFilterPattern(this.refs.filter.getDOMNode().value);
+  },
   changePage: function (i) {
     this.setState({pageNumber: i});
   },
@@ -220,6 +245,13 @@ Paginator = React.createClass({
                   </a>
                 </li>
               </ul>
+            </div>
+            <div className="col-xs-3">
+              <div className="col-xs-6 pull-right">
+              <input type="text" ref="filter" placeholder="keyword"
+                  className="filter-input form-control"
+                  onKeyUp={this.onKeyUp} />
+              </div>
             </div>
           </div>
         </div>
