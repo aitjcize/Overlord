@@ -14,98 +14,29 @@
 //  - FixtureWindow
 
 var App = React.createClass({
-  loadClientsFromServer: function () {
-    $.ajax({
-      url: this.props.url,
-      dataType: "json",
-      success: function (data) {
-        for (var i = 0; i < data.length; i++) {
-          this.addClient(data[i]);
-        }
-      }.bind(this),
-      error: function (xhr, status, err) {
-        console.error(this.props.url, status, err.toString());
-      }.bind(this)
-    });
-  },
-  fetchProperties: function (mid) {
-    var result = undefined;
-    var url = '/api/agent/properties/' + mid;
-    $.ajax({
-      url: url,
-      async: false,
-      dataType: "json",
-      success: function (data) {
-        result = data;
-      }.bind(this),
-      error: function (xhr, status, err) {
-        console.error(url, status, err.toString());
-      }.bind(this)
-    });
-    return result;
-  },
-  addClient: function (data) {
-    // Data should have the format {mid: "mid", sid: "sid"}
-    data.properties = this.fetchProperties(data.mid);
-    if (typeof(data.properties) == "undefined" ||
-        typeof(data.properties.context) == "undefined" ||
-        data.properties.context.indexOf("ui") === -1) {
-      return;
-    }
-    this.state.fixtures.push(data);
-    this.state.fixtures.sort(function (a, b) {
-      return a.mid.localeCompare(b.mid);
-    });
-    this.forceUpdate();
-  },
-  removeClient: function (data) {
-    var fixtures = this.state.fixtures;
-    for (var i = 0; i < fixtures.length; i++) {
-      if (fixtures[i].mid == data.mid) {
-        fixtures.splice(i, 1);
-        this.forceUpdate();
-        return;
-      }
-    }
-    return;
+  mixins: [BaseApp],
+  onNewClient: function (client) {
+    return !(typeof(client.properties) == "undefined" ||
+        typeof(client.properties.context) == "undefined" ||
+        client.properties.context.indexOf("ui") === -1);
   },
   addTerminal: function (id, term) {
     this.state.terminals[id] = term;
-    this.forceUpdate();
+    this.setState({terminals: this.state.terminals});
   },
   removeTerminal: function (id) {
     if (typeof(this.state.terminals[id]) != "undefined") {
       delete this.state.terminals[id];
     }
-    this.forceUpdate();
-  },
-  setFilterPattern: function (pattern) {
-    if (typeof(pattern) != "undefined") {
-      this.lastPattern = new RegExp(pattern, "i");
-    } else if (typeof(this.lastPattern) == "undefined") {
-      this.lastPattern = new RegExp("", "i");
-    }
-    this.forceUpdate();
-  },
-  getFilteredClientList: function () {
-    if (typeof(this.lastPattern) != "undefined") {
-      var filteredList = [];
-      for (var i = 0; i < this.state.fixtures.length; i++) {
-        if (this.lastPattern.test(this.state.fixtures[i].mid)) {
-          filteredList.push(this.state.fixtures[i]);
-        }
-      }
-      return filteredList;
-    } else {
-      return this.state.fixtures.slice();
-    }
+    this.setState({terminals: this.state.terminals});
   },
   getInitialState: function () {
-    return {fixtures: [], terminals: {}};
+    return {terminals: {}};
+  },
+  componentWillMount: function () {
+    this.addOnNewClientHandler(this.onNewClient.bind(this));
   },
   componentDidMount: function () {
-    this.loadClientsFromServer();
-
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
     socket.on("agent joined", function (msg) {
@@ -128,7 +59,7 @@ var App = React.createClass({
     this.socket = socket;
   },
   computePageSize: function () {
-    // compute how many fixtures we can put in the screen
+    // compute how many clients we can put in the screen
     var screen = {
         width: window.innerWidth,
     };
@@ -191,7 +122,7 @@ var App = React.createClass({
 
 Paginator = React.createClass({
   onKeyUp: function (e) {
-    this.props.app.setFilterPattern(this.refs.filter.getDOMNode().value);
+    this.props.app.setMidFilterPattern(this.refs.filter.getDOMNode().value);
   },
   changePage: function (i) {
     this.setState({pageNumber: i});

@@ -25,84 +25,10 @@
 //    - UploadProgress
 
 var App = React.createClass({
-  loadClientsFromServer: function () {
-    $.ajax({
-      url: this.props.url,
-      dataType: "json",
-      success: function (data) {
-        for (var i = 0; i < data.length; i++) {
-          this.addClient(data[i], false);
-        }
-        this.filterClientList();
-        this.forceUpdate();
-      }.bind(this),
-      error: function (xhr, status, err) {
-        console.error(this.props.url, status, err.toString());
-      }.bind(this)
-    });
-  },
-  removeClientFromList: function (target_list, obj) {
-    for (var i = 0; i < target_list.length; ++i) {
-      if (target_list[i].mid == obj.mid) {
-        target_list.splice(i, 1);
-        break;
-      }
-    }
-    return target_list;
-  },
-  isClientInList: function (target_list, client) {
-    return target_list.filter(function (el, index, arr) {
-      return el.mid == client.mid;
-    }).length > 0;
-  },
-  fetchProperties: function (mid, callback) {
-    var url = '/api/agent/properties/' + mid;
-    $.ajax({
-      url: url,
-      dataType: "json",
-      success: callback,
-      error: function (xhr, status, err) {
-        console.error(url, status, err.toString());
-      }.bind(this)
-    });
-  },
-  addClient: function(client, add_to_recent) {
-    if (this.isClientInList(this.state.clients, client)) {
-      return;
-    }
-
-    this.fetchProperties(client.mid, function(data) {
-      client.properties = data;
-
-      // Set status to hidden if the machine ID does not match search pattern
-      if (typeof(this.lastPattern) != "undefined" &&
-          !this.lastPattern.test(client.mid)) {
-        client.status = "hidden";
-      }
-
-      if (this.isClientInList(this.state.clients, client)) {
-        return;
-      }
-      this.state.clients.push(client);
-      this.state.clients.sort(function(a, b) {
-        return a.mid.localeCompare(b.mid);
-      });
-
-      if (add_to_recent) {
-        // Add to recent client list
-        // We are making a copy of client since we don't want to hide the
-        // client in recentclient list (and Javascript is passed-by reference).
-        client = JSON.parse(JSON.stringify(client))
-        this.state.recentclients.splice(0, 0, client);
-        this.state.recentclients = this.state.recentclients.slice(0, 5);
-      }
-
-      this.forceUpdate();
-    }.bind(this));
-  },
+  mixins: [BaseApp],
   addTerminal: function (id, term) {
     this.state.terminals[id] = term;
-    this.forceUpdate();
+    this.setState({terminals: this.state.terminals});
   },
   addFixture: function (client) {
     if (this.isClientInList(this.state.fixtures, client)) {
@@ -126,7 +52,7 @@ var App = React.createClass({
 
     // only keep recently opened @nTotalFixture fixtures.
     this.state.fixtures = this.state.fixtures.slice(-nTotalFixture);
-    this.forceUpdate();
+    this.setState({fixtures: this.state.fixtures});
   },
   toggleFixtureState: function (client) {
     if (this.isClientInList(this.state.fixtures, client)) {
@@ -139,49 +65,34 @@ var App = React.createClass({
     if (typeof(this.state.terminals[id]) != "undefined") {
       delete this.state.terminals[id];
     }
-    this.forceUpdate();
+    this.setState({terminals: this.state.terminals});
   },
   removeFixture: function (id) {
     this.removeClientFromList(this.state.fixtures, {mid: id});
-    this.forceUpdate();
-  },
-  filterClientList: function (val) {
-    if (typeof(val) != "undefined") {
-      this.lastPattern = new RegExp(val, "i");
-    } else if (typeof(this.lastPattern) == "undefined") {
-      this.lastPattern = new RegExp("", "i");
-    }
-    for (var i = 0; i < this.state.clients.length; i++) {
-      if (!this.lastPattern.test(this.state.clients[i].mid)) {
-        this.state.clients[i].status = "hidden";
-      } else {
-        this.state.clients[i].status = "";
-      }
-    }
-    this.forceUpdate();
+    this.setState({fixtures: this.state.fixtures});
   },
   getInitialState: function () {
-    return {clients: [], fixtures: [], recentclients: [], terminals: {}};
+    return {fixtures: [], recentclients: [], terminals: {}};
   },
   componentDidMount: function () {
-    this.loadClientsFromServer();
-
     var socket = io(window.location.protocol + "//" + window.location.host,
                     {path: "/api/socket.io/"});
     this.socket = socket;
 
     socket.on("agent joined", function (msg) {
-      var obj = JSON.parse(msg);
-      this.addClient(obj, true);
+      var client = JSON.parse(msg);
+      this.addClient(client);
+
+      this.state.recentclients.splice(0, 0, client);
+      this.state.recentclients = this.state.recentclients.slice(0, 5);
     }.bind(this));
 
     socket.on("agent left", function (msg) {
-      var obj = JSON.parse(msg);
+      var client = JSON.parse(msg);
 
-      this.removeClientFromList(this.state.clients, obj);
-      this.removeClientFromList(this.state.recentclients, obj);
-      this.removeFixture(obj.mid);
-      this.forceUpdate();
+      this.removeClientFromList(this.state.clients, client);
+      this.removeClientFromList(this.state.recentclients, client);
+      this.removeFixture(client.mid);
     }.bind(this));
 
     // Initiate a file download
@@ -197,7 +108,7 @@ var App = React.createClass({
       <div id="main">
         <NavBar name="Dashboard" url="/api/apps/list" ref="navbar" />
         <div id="container">
-          <SideBar clients={this.state.clients} ref="sidebar"
+          <SideBar clients={this.getFilteredClientList()} ref="sidebar"
               recentclients={this.state.recentclients} app={this} />
           <FixtureGroup data={this.state.fixtures} app={this} />
         </div>
@@ -234,7 +145,7 @@ var ClientBox = React.createClass({
 
 var FilterInput = React.createClass({
   onKeyUp: function (e) {
-    this.props.app.filterClientList(this.refs.filter.getDOMNode().value);
+    this.props.app.setMidFilterPattern(this.refs.filter.getDOMNode().value);
   },
   render: function () {
     return (
@@ -296,7 +207,6 @@ var ClientInfo = React.createClass({
   },
   render: function () {
     var display = "block";
-    var extra_class = "";
     var ui_span = null;
     if (typeof(this.props.data.properties) != "undefined" &&
         typeof(this.props.data.properties.context) != "undefined" &&
@@ -312,12 +222,8 @@ var ClientInfo = React.createClass({
         </span>
       )
     }
-    if (typeof(this.props.data.status) != "undefined"
-        && this.props.data.status == "hidden") {
-      extra_class = "client-info-hidden";
-    }
     return (
-      <div className={"client-info " + extra_class}>
+      <div className="client-info">
         <div className="client-info-mid">
           {this.props.children}
         </div>
