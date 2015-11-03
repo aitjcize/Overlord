@@ -12,7 +12,7 @@
 //   - AuxLogs
 //     - AuxLog
 
-LOG_BUF_SIZE = 8192
+var LOG_BUF_SIZE = 8192;
 
 var FIXTURE_WINDOW_WIDTH = 420;
 var FIXTURE_WINDOW_MARGIN = 10;
@@ -218,7 +218,7 @@ var FixtureWindow = React.createClass({
 
 var Lights = React.createClass({
   updateLightStatus: function (id, status_class) {
-    var node = $(this.refs[id].getDOMNode());
+    var node = $(this.refs[id]);
     node.removeClass(this.refs[id].props.prevLight);
     node.addClass(status_class);
     this.refs[id].props.prevLight = status_class;
@@ -345,7 +345,8 @@ var Terminals = React.createClass({
         terminals.map(function (term) {
           return (
             <button className="btn btn-xs btn-info" data-mid={client.mid}
-                data-term={JSON.stringify(term)} onClick={this.onTerminalClick}>
+                data-term={JSON.stringify(term)} key={term.name}
+                onClick={this.onTerminalClick}>
             {term.name}
             </button>
           );
@@ -432,7 +433,7 @@ var MainLog = React.createClass({
     odiv.scrollTop = odiv.scrollHeight;
   },
   componentDidMount: function () {
-    this.odiv = this.refs["log-" + this.props.id].getDOMNode();
+    this.odiv = this.refs["log-" + this.props.id];
   },
   render: function () {
     return (
@@ -455,7 +456,7 @@ var AuxLogs = React.createClass({
         {
           logs.map(function (filename) {
             return (
-              <AuxLog mid={client.mid} filename={filename}
+              <AuxLog key={filename} mid={client.mid} filename={filename}
                fixture={this.props.fixture}/>
             )
           }.bind(this))
@@ -474,7 +475,7 @@ var AuxLog = React.createClass({
     var sock = new WebSocket(url);
 
     sock.onopen = function () {
-      var odiv = this.refs["log-" + this.props.mid].getDOMNode();
+      var odiv = this.refs["log-" + this.props.mid];
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function (text) {

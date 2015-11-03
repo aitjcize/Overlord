@@ -34,7 +34,7 @@ var App = React.createClass({
     return {terminals: {}};
   },
   componentWillMount: function () {
-    this.addOnNewClientHandler(this.onNewClient.bind(this));
+    this.addOnNewClientHandler(this.onNewClient);
   },
   componentDidMount: function () {
     var socket = io(window.location.protocol + "//" + window.location.host,
@@ -122,7 +122,7 @@ var App = React.createClass({
 
 Paginator = React.createClass({
   onKeyUp: function (e) {
-    this.props.app.setMidFilterPattern(this.refs.filter.getDOMNode().value);
+    this.props.app.setMidFilterPattern(this.refs.filter.value);
   },
   changePage: function (i) {
     this.setState({pageNumber: i});
@@ -161,7 +161,7 @@ Paginator = React.createClass({
                         extra.className = "active";
                     }
                     return (
-                      <li {...extra}>
+                      <li key={i} {...extra}>
                         <a onClick={this.changePage.bind(this, i)} href="#">
                           {i + 1}
                         </a>
@@ -198,7 +198,7 @@ Paginator = React.createClass({
   }
 });
 
-React.render(
+ReactDOM.render(
   <App url="/api/agents/list"/>,
   document.body
 );

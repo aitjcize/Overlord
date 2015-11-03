@@ -322,7 +322,7 @@ var ClientInfo = React.createClass({
   }
 });
 
-React.render(
+ReactDOM.render(
   <App url="/api/logcats/list" pollInterval={60000} />,
   document.body
 );

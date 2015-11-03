@@ -39,7 +39,7 @@ var NavBar = React.createClass({
                 {
                   this.state.apps.map(function (app) {
                     return (
-                      <li><a href={"/" + app}>{app}</a></li>
+                      <li key={app}><a href={"/" + app}>{app}</a></li>
                     );
                   })
                 }

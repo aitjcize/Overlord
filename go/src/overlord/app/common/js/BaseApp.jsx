@@ -37,7 +37,7 @@ var BaseApp = {
   //
   // for example:
   //   var onKeyUp = function (e) {
-  //     this.setMidFilterPattern(this.refs.filter.getDOMNode().value);
+  //     this.setMidFilterPattern(this.refs.filter.value);
   //   };
   //   <input type="text" ref="filter" onKeyUp={onKeyUp} />
   _clientMidFilter: function (client) {

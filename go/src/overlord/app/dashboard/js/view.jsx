@@ -41,7 +41,7 @@ var App = React.createClass({
         width: window.innerWidth,
     };
 
-    var sidebar = this.refs.sidebar.getDOMNode().getBoundingClientRect();
+    var sidebar = ReactDOM.findDOMNode(this.refs.sidebar).getBoundingClientRect();
 
     screen.width -= sidebar.right;
 
@@ -145,7 +145,7 @@ var ClientBox = React.createClass({
 
 var FilterInput = React.createClass({
   onKeyUp: function (e) {
-    this.props.app.setMidFilterPattern(this.refs.filter.getDOMNode().value);
+    this.props.app.setMidFilterPattern(this.refs.filter.value);
   },
   render: function () {
     return (
@@ -294,7 +294,7 @@ var FixtureGroup = React.createClass({
   }
 });
 
-React.render(
+ReactDOM.render(
   <App url="/api/agents/list" />,
   document.body
 );
