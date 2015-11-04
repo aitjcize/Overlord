@@ -380,18 +380,19 @@ var UploadProgress = React.createClass({
     return {records: []};
   },
   addRecord: function (record) {
-    this.state.records.push(record);
-    this.forceUpdate();
+    this.setState(function (state, props) {
+      state.records.push(record);
+    });
   },
   removeRecord: function (id) {
-    var records = this.state.records;
-    for (var i = 0; i < records.length; ++i) {
-      if (records[i].id == id) {
-        records.splice(i, 1);
-        break;
+    this.setState(function (state, props) {
+      var index = state.records.findIndex(function (e, index, array) {
+        return e.id == id;
+      });
+      if (index !== -1) {
+        state.records.splice(index, 1);
       }
-    }
-    this.forceUpdate();
+    });
   },
   render: function () {
     var display = "";

@@ -21,14 +21,16 @@ var App = React.createClass({
         client.properties.context.indexOf("ui") === -1);
   },
   addTerminal: function (id, term) {
-    this.state.terminals[id] = term;
-    this.setState({terminals: this.state.terminals});
+    this.setState(function (state, props) {
+      state.terminals[id] = term;
+    });
   },
   removeTerminal: function (id) {
-    if (typeof(this.state.terminals[id]) != "undefined") {
-      delete this.state.terminals[id];
-    }
-    this.setState({terminals: this.state.terminals});
+    this.setState(function (state, props) {
+      if (typeof(state.terminals[id]) != "undefined") {
+        delete state.terminals[id];
+      }
+    });
   },
   getInitialState: function () {
     return {terminals: {}};

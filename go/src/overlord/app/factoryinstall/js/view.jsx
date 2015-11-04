@@ -31,8 +31,7 @@ var App = React.createClass({
       dataType: "json",
       success: function (data) {
         if (!this.state.locked) {
-          this.state.clients = data;
-          this.forceUpdate();
+          this.setState({clients: data});
         }
       }.bind(this),
       error: function (xhr, status, err) {
@@ -57,8 +56,9 @@ var App = React.createClass({
     }
   },
   onLockClicked: function (e) {
-    this.state.locked = !this.state.locked;
-    this.forceUpdate();
+    this.setState(function (state, props) {
+      return {locked: !state.locked};
+    });
     this.saveCookies("locked", this.state.locked);
     if (this.state.locked) {
       var locked_mids = this.state.clients.map(function (e) {return e["mid"];});
@@ -72,8 +72,8 @@ var App = React.createClass({
     return this.state.boot_timeout_secs;
   },
   onTimeoutDialogSaveClicked: function (e) {
-    this.state.boot_timeout_secs = Math.max(1, $("#boot_timeout_secs").val());
-    this.forceUpdate();
+    var new_timeout = Math.max(1, $("#boot_timeout_secs").val());
+    this.setState({boot_timeout_secs: new_timeout});
     this.saveCookies("boot_timeout_secs", this.state.boot_timeout_secs);
   },
   onLayoutClicked: function (e) {
@@ -114,27 +114,25 @@ var App = React.createClass({
                     {path: "/api/socket.io/"});
     socket.on("logcat joined", function (msg) {
       var obj = JSON.parse(msg);
-      var clients = this.state.clients;
 
       if (typeof(this.refs["client-" + obj.mid]) != "undefined") {
         this.refs["client-" + obj.mid].updateStatus("in-progress");
       }
 
-      for (var i = 0; i < clients.length; i++) {
-        if (clients[i].mid != obj.mid) {
-          continue;
+      this.setState(function (state, props) {
+        var client = state.clients.find(function (e, index, arr) {
+          return e.mid == obj.mid;
+        });
+        if (typeof(client) == "undefined") {
+          if (!state.locked) {
+            state.clients.push({mid: obj.mid, sids: [obj.sid]});
+          }
+        } else {
+          if (client.sids.indexOf(obj.sid) === -1) {
+            client.sids.push(obj.sid);
+          }
         }
-        if (clients[i].sids.indexOf(obj.sid) == -1) {
-          clients[i].sids.push(obj.sid);
-        }
-        this.forceUpdate();
-        return
-      }
-
-      if (!this.state.locked) {
-        this.state.clients.push({mid: obj.mid, sids: [obj.sid]});
-      }
-      this.forceUpdate();
+      });
     }.bind(this));
     socket.on("logcat left", function (msg) {
       var obj = JSON.parse(msg);
@@ -142,8 +140,9 @@ var App = React.createClass({
       if (this.state.locked) {
         this.refs["client-" + obj.mid].updateStatus("disconnected");
       }
-      this.removeClientFromList(this.state.clients, obj);
-      this.forceUpdate();
+      this.setState(function (state, props) {
+        this.removeClientFromList(state.clients, obj);
+      });
     }.bind(this));
   },
   render: function() {

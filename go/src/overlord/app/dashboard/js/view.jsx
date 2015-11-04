@@ -27,14 +27,14 @@
 var App = React.createClass({
   mixins: [BaseApp],
   addTerminal: function (id, term) {
-    this.state.terminals[id] = term;
-    this.setState({terminals: this.state.terminals});
+    this.setState(function (state, props) {
+      state.terminals[id] = term;
+    });
   },
   addFixture: function (client) {
     if (this.isClientInList(this.state.fixtures, client)) {
       return;
     }
-    this.state.fixtures.push(client);
 
     // compute how many fixtures we can put in the screen
     var screen = {
@@ -51,8 +51,10 @@ var App = React.createClass({
     var nTotalFixture = Math.min(2 * nFixturePerRow, 8);
 
     // only keep recently opened @nTotalFixture fixtures.
-    this.state.fixtures = this.state.fixtures.slice(-nTotalFixture);
-    this.setState({fixtures: this.state.fixtures});
+    this.setState(function (state, props) {
+      state.fixtures.push(client);
+      return {fixtures: state.fixtures.slice(-nTotalFixture)};
+    });
   },
   toggleFixtureState: function (client) {
     if (this.isClientInList(this.state.fixtures, client)) {
@@ -62,14 +64,16 @@ var App = React.createClass({
     }
   },
   removeTerminal: function (id) {
-    if (typeof(this.state.terminals[id]) != "undefined") {
-      delete this.state.terminals[id];
-    }
-    this.setState({terminals: this.state.terminals});
+    this.setState(function (state, props) {
+      if (typeof(state.terminals[id]) != "undefined") {
+        delete state.terminals[id];
+      }
+    });
   },
   removeFixture: function (id) {
-    this.removeClientFromList(this.state.fixtures, {mid: id});
-    this.setState({fixtures: this.state.fixtures});
+    this.setState(function (state, props) {
+      this.removeClientFromList(state.fixtures, {mid: id});
+    });
   },
   getInitialState: function () {
     return {fixtures: [], recentclients: [], terminals: {}};

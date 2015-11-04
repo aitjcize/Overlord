@@ -99,8 +99,8 @@ var BaseApp = {
       return;
     }
 
-    this.fetchProperties(client.mid, function (props) {
-      client.properties = props;
+    this.fetchProperties(client.mid, function (properties) {
+      client.properties = properties;
 
       if (this.isClientInList(this.state.clients, client)) {
         return;
@@ -112,16 +112,18 @@ var BaseApp = {
         }
       }
 
-      this.state.clients.push(client);
-      this.state.clients.sort(function (a, b) {
-        return a.mid.localeCompare(b.mid);
+      this.setState(function (state, props) {
+        state.clients.push(client);
+        state.clients.sort(function (a, b) {
+          return a.mid.localeCompare(b.mid);
+        });
       });
-      this.setState({clients: this.state.clients});
     }.bind(this));
   },
   removeClient: function (data) {
-    var clients = this.state.clients;
-    this.setState({clients: this.removeClientFromList(clients, data)});
+    this.setState(function (state, props) {
+      this.removeClientFromList(state.clients, data);
+    });
   },
   // Add a hook to @this.addClient, when a client is going to be added to
   // @this.state.clients, handlers will be invoke to determine whether we
@@ -146,10 +148,11 @@ var BaseApp = {
   // function @this.getFilteredClientList will pass each client to each
   // filter, if any filter returns false, that client will be filtered out.
   addClientFilter: function (filter) {
-    if (this.state.clientFilters.indexOf(filter) === -1) {
-      this.state.clientFilters.push(filter);
-    }
-    this.setState({clientFilters: this.state.clientFilters});
+    this.setState(function (state, props) {
+      if (state.clientFilters.indexOf(filter) === -1) {
+        state.clientFilters.push(filter);
+      }
+    });
   },
   // If a filter previously added by @this.addClientFilter is not an
   // anonymous function, you can use this function to remove it from the
