@@ -25,7 +25,7 @@ import threading
 import time
 import traceback
 import tty
-import urllib
+import urllib2
 import uuid
 
 import jsonrpclib
@@ -51,6 +51,7 @@ _CONTROL_START = 128
 _CONTROL_END = 129
 
 _BLOCK_SIZE = 4096
+_CONNECT_TIMEOUT = 3
 
 SUCCESS = 'success'
 FAILED = 'failed'
@@ -156,6 +157,7 @@ class Ghost(object):
     """Determine if SSL is enabled on the Overlord server."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+      sock.settimeout(_CONNECT_TIMEOUT)
       sock.connect((self._connected_addr[0], _OVERLORD_HTTP_PORT))
       sock.send('GET\r\n')
 
@@ -174,7 +176,8 @@ class Ghost(object):
 
     # Download sha1sum for ghost.py for verification
     try:
-      with contextlib.closing(urllib.urlopen(url + '.sha1')) as f:
+      with contextlib.closing(
+          urllib2.urlopen(url + '.sha1', timeout=_CONNECT_TIMEOUT)) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
         sha1sum = f.read().strip()
@@ -188,7 +191,8 @@ class Ghost(object):
 
     # Download upgrade version of ghost.py
     try:
-      with contextlib.closing(urllib.urlopen(url)) as f:
+      with contextlib.closing(
+          urllib2.urlopen(url, timeout=_CONNECT_TIMEOUT)) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
         data = f.read()
@@ -606,6 +610,7 @@ class Ghost(object):
     src_sock = None
     try:
       src_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      src_sock.settimeout(_CONNECT_TIMEOUT)
       src_sock.connect(('localhost', self._port))
       src_sock.setblocking(False)
 
@@ -838,7 +843,7 @@ class Ghost(object):
         logging.info('Trying %s:%d ...', *addr)
         self.Reset()
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._sock.settimeout(_PING_TIMEOUT)
+        self._sock.settimeout(_CONNECT_TIMEOUT)
         self._sock.connect(addr)
 
         logging.info('Connection established, registering...')

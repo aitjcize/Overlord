@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,16 +33,16 @@ import (
 )
 
 const (
-	GHOST_RPC_PORT = 4499
-	DEFAULT_SHELL  = "/bin/bash"
-	DIAL_TIMEOUT   = 3
-	LOCALHOST      = "localhost"
-	PING_INTERVAL  = 10
-	PING_TIMEOUT   = 10
-	RETRY_INTERVAL = 2
-	READ_TIMEOUT   = 3
-	RANDOM_MID     = "##random_mid##"
-	BLOCK_SIZE     = 4096
+	GHOST_RPC_PORT  = 4499
+	DEFAULT_SHELL   = "/bin/bash"
+	LOCALHOST       = "localhost"
+	PING_INTERVAL   = 10
+	PING_TIMEOUT    = 10
+	RETRY_INTERVAL  = 2
+	READ_TIMEOUT    = 3
+	RANDOM_MID      = "##random_mid##"
+	BLOCK_SIZE      = 4096
+	CONNECT_TIMEOUT = 3
 )
 
 // An structure that we be place into download queue.
@@ -185,7 +186,23 @@ func (self *Ghost) LoadProperties() {
 	}
 }
 
-func (self *Ghost) closeSockets() {
+func (self *Ghost) UseSSL() bool {
+	parts := strings.Split(self.connectedAddr, ":")
+	conn, err := net.DialTimeout("tcp",
+		fmt.Sprintf("%s:%d", parts[0], OVERLORD_HTTP_PORT),
+		CONNECT_TIMEOUT*time.Second)
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+
+	conn.Write([]byte("GET\r\n"))
+	buf := make([]byte, 16)
+	_, err = conn.Read(buf)
+	if err != nil {
+		return false
+	}
+	return strings.Index(string(buf), "HTTP") == -1
 }
 
 func (self *Ghost) Upgrade() error {
@@ -197,12 +214,29 @@ func (self *Ghost) Upgrade() error {
 	}
 
 	var buffer bytes.Buffer
+	var client http.Client
+
+	useSSL := self.UseSSL()
+
+	proto := "http"
+	if useSSL {
+		proto = "https"
+	}
 	parts := strings.Split(self.connectedAddr, ":")
-	url := fmt.Sprintf("http://%s:%d/upgrade/ghost.%s", parts[0],
+	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
 		OVERLORD_HTTP_PORT, GetArchString())
 
+	if useSSL {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client = http.Client{Transport: tr, Timeout: CONNECT_TIMEOUT * time.Second}
+	} else {
+		client = http.Client{Timeout: CONNECT_TIMEOUT * time.Second}
+	}
+
 	// Download the sha1sum for ghost for verification
-	resp, err := http.Get(url + ".sha1")
+	resp, err := client.Get(url + ".sha1")
 	if err != nil || resp.StatusCode != 200 {
 		return errors.New("Upgrade: failed to download sha1sum file, abort")
 	}
@@ -220,7 +254,7 @@ func (self *Ghost) Upgrade() error {
 	}
 
 	// Download upgrade version of ghost
-	resp2, err := http.Get(url)
+	resp2, err := client.Get(url)
 	if err != nil || resp2.StatusCode != 200 {
 		return errors.New("Upgrade: failed to download upgrade, abort")
 	}
@@ -861,7 +895,8 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 
 	var err error
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", self.port))
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", self.port),
+		CONNECT_TIMEOUT)
 	if err != nil {
 		return err
 	}
@@ -913,7 +948,7 @@ func (self *Ghost) Register() error {
 	for _, addr := range self.addrs {
 		log.Printf("Trying %s ...\n", addr)
 		self.Reset()
-		conn, err := net.DialTimeout("tcp", addr, DIAL_TIMEOUT*time.Second)
+		conn, err := net.DialTimeout("tcp", addr, CONNECT_TIMEOUT*time.Second)
 		if err == nil {
 			log.Println("Connection established, registering...")
 			self.Conn = conn
