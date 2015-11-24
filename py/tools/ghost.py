@@ -794,7 +794,14 @@ class Ghost(object):
         rds, _, _ = select.select([self._sock], [], [], _PING_INTERVAL / 2)
 
         if self._sock in rds:
-          self._buf += self._sock.recv(_BUFSIZE)
+          data = self._sock.recv(_BUFSIZE)
+
+          # Socket is closed
+          if len(data) == 0:
+            self.Reset()
+            break
+
+          self._buf += data
           self.ParseMessage(self._register_status != SUCCESS)
 
         if (self._mode == self.AGENT and
