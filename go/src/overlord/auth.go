@@ -135,6 +135,9 @@ func NewBasicAuth(realm, htpasswd string, disable bool) *BasicAuth {
 	b := bufio.NewReader(f)
 	for {
 		line, _, err := b.ReadLine()
+		if err == io.EOF {
+			break
+		}
 		if line[0] == '#' {
 			continue
 		}
@@ -143,9 +146,6 @@ func NewBasicAuth(realm, htpasswd string, disable bool) *BasicAuth {
 			continue
 		}
 		secrets[parts[0]] = parts[1]
-		if err != io.EOF {
-			break
-		}
 	}
 
 	return &BasicAuth{realm, secrets, disable}
