@@ -53,8 +53,10 @@ _OVERLORD_HTTP_PORT = 9000
 _OVERLORD_CLIENT_DAEMON_PORT = 4488
 _OVERLORD_CLIENT_DAEMON_RPC_ADDR = ('127.0.0.1', _OVERLORD_CLIENT_DAEMON_PORT)
 
+_DEFAULT_HTTP_TIMEOUT = 30
 _LIST_CACHE_TIMEOUT = 2
 _DEFAULT_TERMINAL_WIDTH = 80
+_RETRY_TIMES = 3
 
 # echo -n overlord | md5sum
 _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
@@ -84,6 +86,23 @@ def KillGraceful(pid, wait_secs=1):
     os.kill(pid, signal.SIGKILL)
   except OSError:
     pass
+
+
+def AutoRetry(action_name, retries):
+  """Decorator for retry function call."""
+  def Wrap(func):
+    def Loop(*args, **kwargs):
+      for i in range(retries):
+        try:
+          func(*args, **kwargs)
+        except Exception as e:
+          print('error: %s: %s: retrying ...' % (src, e))
+        else:
+          break
+      else:
+        print('error: failed to %s %s' % (action_name, src))
+    return Loop
+  return Wrap
 
 
 def BasicAuthHeader(user, password):
@@ -273,7 +292,7 @@ class OverlordClientDaemon(object):
     if self._state.username is not None and self._state.password is not None:
       request.add_header(*BasicAuthHeader(self._state.username,
                                           self._state.password))
-    return urllib2.urlopen(request)
+    return urllib2.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT)
 
   def _GetJSON(self, path):
     url = '%s:%d%s' % (self._state.host, self._state.port, path)
@@ -590,7 +609,7 @@ class OverlordCLIClient(object):
     if self._state.username is not None and self._state.password is not None:
       request.add_header(*BasicAuthHeader(self._state.username,
                                           self._state.password))
-    return urllib2.urlopen(request)
+    return urllib2.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT)
 
   def _HTTPPostFile(self, url, filename, progress=None, user=None, passwd=None):
     """Perform HTTP POST and upload file to Overlord.
@@ -813,6 +832,8 @@ class OverlordCLIClient(object):
     if self._server is None:
       return
 
+    self._state = self._server.State()
+
     # Kill SSH Tunnel
     self.KillSSHTunnel()
 
@@ -897,8 +918,24 @@ class OverlordCLIClient(object):
     if not os.access(args.src, os.R_OK):
       raise RuntimeError('push: can not open "%s" for reading' % args.src)
 
+    @AutoRetry('push', _RETRY_TIMES)
     def _push(src, dst):
       src_base = os.path.basename(src)
+
+      # Local file is a link
+      if os.path.islink(src):
+        pbar = ProgressBar(src_base)
+        link_path = os.readlink(src)
+        self.CheckOutput('mkdir -p %(dirname)s; '
+                         'if [ -d "%(dst)s" ]; then '
+                         'ln -sf "%(link_path)s" "%(dst)s/%(link_name)s"; '
+                         'else ln -sf "%(link_path)s" "%(dst)s"; fi' %
+                         dict(dirname=os.path.dirname(dst),
+                              link_path=link_path, dst=dst,
+                              link_name=src_base))
+        pbar.End()
+        return
+
       mode = '0%o' % (0x1FF & os.stat(src).st_mode)
       url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
              (self._state.host, self._state.port, self._selected_mid, dst,
@@ -941,7 +978,24 @@ class OverlordCLIClient(object):
   def Pull(self, args):
     self.CheckClient()
 
-    def _pull(src, dst, perm=0644):
+    @AutoRetry('pull', _RETRY_TIMES)
+    def _pull(src, dst, ftype, perm=0644, link=None):
+      try:
+        os.makedirs(os.path.dirname(dst))
+      except Exception:
+        pass
+
+      src_base = os.path.basename(src)
+
+      # Remote file is a link
+      if ftype == 'l':
+        pbar = ProgressBar(src_base)
+        if os.path.exists(dst):
+          os.remove(dst)
+        os.symlink(link, dst)
+        pbar.End()
+        return
+
       url = ('%s:%d/api/agent/download/%s?filename=%s' %
              (self._state.host, self._state.port, self._selected_mid,
               urllib2.quote(src)))
@@ -953,23 +1007,19 @@ class OverlordCLIClient(object):
       except KeyboardInterrupt:
         return
 
-      try:
-        os.makedirs(os.path.dirname(dst))
-      except Exception:
-        pass
-
-      pbar = ProgressBar(os.path.basename(src))
+      pbar = ProgressBar(src_base)
       with open(dst, 'w') as f:
         os.fchmod(f.fileno(), perm)
         total_size = int(h.headers.get('Content-Length'))
         downloaded_size = 0
+
         while True:
           data = h.read(_BUFSIZ)
+          if len(data) == 0:
+            break
           downloaded_size += len(data)
           pbar.SetProgress(float(downloaded_size) * 100 / total_size,
                            downloaded_size)
-          if len(data) == 0:
-            break
           f.write(data)
       pbar.End()
 
@@ -978,7 +1028,8 @@ class OverlordCLIClient(object):
     output = self.CheckOutput(
         'cd $HOME; '
         'stat "%(src)s" >/dev/null && '
-        'find "%(src)s" \'(\' -type f -o -type l \')\' -printf \'%%m\t%%p\n\''
+        'find "%(src)s" \'(\' -type f -o -type l \')\' '
+        '-printf \'%%m\t%%p\t%%y\t%%l\n\''
         % {'src': args.src})
 
     # We got error from the stat command
@@ -986,25 +1037,26 @@ class OverlordCLIClient(object):
       sys.stderr.write(output)
       return
 
-    entries = output.strip().split('\n')
+    entries = output.strip('\n').split('\n')
     common_prefix = os.path.dirname(args.src)
 
     if len(entries) == 1:
       entry = entries[0]
-      perm, src_path = entry.split('\t')
+      perm, src_path, ftype, link = entry.split('\t', -1)
       if os.path.isdir(args.dst):
         dst = os.path.join(args.dst, os.path.basename(src_path))
       else:
         dst = args.dst
-      _pull(src_path, dst, int(perm, base=8))
+      _pull(src_path, dst, ftype, int(perm, base=8), link)
     else:
       if not os.path.exists(args.dst):
         common_prefix = args.src
 
       for entry in entries:
-        perm, src_path = entry.split('\t')
+        perm, src_path, ftype, link = entry.split('\t', -1)
         rel_dst = src_path[len(common_prefix):].lstrip('/')
-        _pull(src_path, os.path.join(args.dst, rel_dst), int(perm, base=8))
+        _pull(src_path, os.path.join(args.dst, rel_dst), ftype,
+              int(perm, base=8), link)
 
   @Command('forward', 'forward remote port to local port', [
       Arg('--list', dest='list_all', action='store_true', default=False,
