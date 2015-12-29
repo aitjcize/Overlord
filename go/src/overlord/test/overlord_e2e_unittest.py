@@ -16,6 +16,7 @@ from ws4py.client import WebSocketBaseClient
 
 import factory_common  # pylint: disable=W0611
 from cros.factory.utils import sync_utils
+from cros.factory.utils import type_utils
 
 
 _HOST = '127.0.0.1:9000'
@@ -61,7 +62,11 @@ class TestOverlord(unittest.TestCase):
       return len(clients) == 2
 
     # Wait for clients to connect
-    sync_utils.WaitFor(CheckClicent, 10)
+    try:
+      sync_utils.WaitFor(CheckClicent, 30)
+    except type_utils.TimeoutError:
+      self.tearDown()
+      raise
 
   def tearDown(self):
     self.ovl.kill()
