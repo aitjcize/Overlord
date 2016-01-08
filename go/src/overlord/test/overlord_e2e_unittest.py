@@ -8,7 +8,6 @@
 import json
 import os
 import subprocess
-import time
 import unittest
 import urllib
 
@@ -16,7 +15,6 @@ from ws4py.client import WebSocketBaseClient
 
 import factory_common  # pylint: disable=W0611
 from cros.factory.utils import sync_utils
-from cros.factory.utils import type_utils
 
 
 _HOST = '127.0.0.1:9000'
@@ -64,7 +62,7 @@ class TestOverlord(unittest.TestCase):
     # Wait for clients to connect
     try:
       sync_utils.WaitFor(CheckClicent, 30)
-    except type_utils.TimeoutError:
+    except:
       self.tearDown()
       raise
 
