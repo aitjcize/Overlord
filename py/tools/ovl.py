@@ -92,15 +92,15 @@ def AutoRetry(action_name, retries):
   """Decorator for retry function call."""
   def Wrap(func):
     def Loop(*args, **kwargs):
-      for i in range(retries):
+      for unused_i in range(retries):
         try:
           func(*args, **kwargs)
         except Exception as e:
-          print('error: %s: %s: retrying ...' % (src, e))
+          print('error: %s: %s: retrying ...' % (args[0], e))
         else:
           break
       else:
-        print('error: failed to %s %s' % (action_name, src))
+        print('error: failed to %s %s' % (action_name, args[0]))
     return Loop
   return Wrap
 
@@ -571,11 +571,14 @@ class OverlordCLIClient(object):
     command = args.which
     self._selected_mid = args.selected_mid
 
-    if command == 'kill-server':
+    if command == 'start-server':
+      self.StartServer()
+      return
+    elif command == 'kill-server':
       self.KillServer()
       return
 
-    self.StartDaemon()
+    self.CheckDaemon()
     if command == 'status':
       self.Status()
       return
@@ -669,16 +672,12 @@ class OverlordCLIClient(object):
     errcode, unused_x, unused_y = h.getreply()
     return errcode == 200
 
-  def StartDaemon(self):
+  def CheckDaemon(self):
     self._server = OverlordClientDaemon.GetRPCServer()
     if self._server is None:
       print('* daemon not running, starting it now on port %d ... *' %
             _OVERLORD_CLIENT_DAEMON_PORT)
-      OverlordClientDaemon().Start()
-      time.sleep(1)
-      self._server = OverlordClientDaemon.GetRPCServer()
-      if self._server is not None:
-        print('* daemon started successfully *')
+      self.StartServer()
 
     self._state = self._server.State()
     sha1sum = GetVersionDigest()
@@ -686,7 +685,7 @@ class OverlordCLIClient(object):
     if sha1sum != self._state.version_sha1sum:
       print('ovl server is out of date.  killing...')
       KillGraceful(self._server.GetPid())
-      self.StartDaemon()
+      self.StartServer()
 
   def GetSSHControlFile(self, host):
     return _SSH_CONTROL_SOCKET_PREFIX + host
@@ -825,6 +824,16 @@ class OverlordCLIClient(object):
       else:
         msg = status
       print('can not connect to %s: %s' % (host, msg))
+
+  @Command('start-server', 'start overlord CLI client server')
+  def StartServer(self):
+    self._server = OverlordClientDaemon.GetRPCServer()
+    if self._server is None:
+      OverlordClientDaemon().Start()
+      time.sleep(1)
+      self._server = OverlordClientDaemon.GetRPCServer()
+      if self._server is not None:
+        print('* daemon started successfully *')
 
   @Command('kill-server', 'kill overlord CLI client server')
   def KillServer(self):
