@@ -127,16 +127,18 @@ var TerminalWindow = React.createClass({
         e.preventDefault();
         e.stopPropagation();
 
+        var $this = this;
         var files = e.originalEvent.dataTransfer.files;
-        for (var i = 0; i < files.length; i++) {
-          var id = this.randomID();
-          this.props.progressBars.addRecord({filename: files[i].name, id: id});
-          var formData = new FormData();
-          formData.append("file", files[i]);
 
-          $.ajax({
-            xhr: function (file, id) {
-              return function () {
+        for (var i = 0; i < files.length; i++) {
+          function postFile(file) {
+            var id = $this.randomID();
+            var formData = new FormData();
+            formData.append("file", file);
+
+            $this.props.progressBars.addRecord({filename: file.name, id: id});
+            $.ajax({
+              xhr: function () {
                 var xhr = new window.XMLHttpRequest();
                 xhr.upload.addEventListener("progress", function (e) {
                   if (e.lengthComputable) {
@@ -146,23 +148,50 @@ var TerminalWindow = React.createClass({
                   }
                 }, false);
                 return xhr;
-              }
-            }(files[i], id),
-            url: this.props.uploadPath + "?terminal_sid=" + this.state.sid,
-            data: formData,
-            cache: false,
-            contentType: false,
-            processData: false,
-            type: "POST",
-            success: function (id) {
-              return function (data) {
+              },
+              url: $this.props.uploadPath + "?terminal_sid=" + $this.state.sid,
+              data: formData,
+              cache: false,
+              contentType: false,
+              processData: false,
+              type: "POST",
+              success: function (data) {
                 $("#" + id).css("width", "100%");
                 // Display the progressbar for 1 more seconds after complete.
                 setTimeout(function () {
-                  this.props.progressBars.removeRecord(id);
-                }.bind(this), 1000);
-              }.bind(this);
-            }.bind(this)(id)
+                  $this.props.progressBars.removeRecord(id);
+                }, 1000);
+              },
+              error: function (data) {
+                var response = JSON.parse(data.responseText);
+                $this.props.progressBars.addRecord(
+                    {error: true, filename: file.name, id: id,
+                      message: response.error});
+                setTimeout(function () {
+                  $this.props.progressBars.removeRecord(id);
+                }, 1000);
+              }
+            });
+          };
+
+          $.ajax({
+            url: this.props.uploadPath + "?terminal_sid=" + this.state.sid +
+                 "&filename=" + files[i].name,
+            success: function (file) {
+              return function (data) {
+                postFile(file);
+              };
+            }(files[i]),
+            error: function (file) {
+              return function (data) {
+                var id = $this.randomID();
+                var response = JSON.parse(data.responseText);
+                $this.props.progressBars.addRecord(
+                    {error: true, filename: file.name, id: id,
+                     message: response.error});
+              }
+            }(files[i]),
+            type: "GET"
           });
         }
         $el.find(".terminal-drop-overlay").css("display", "none");
@@ -405,11 +434,12 @@ var UploadProgress = React.createClass({
           <div className="panel-body upload-progress-panel-body">
           {
             this.state.records.map(function (record) {
-              return (
-                  <ProgressBar record={record}>
-                  </ProgressBar>
-              );
-            })
+              if (record.error) {
+                return <ErrorBar progress={this} record={record} />;
+              } else {
+                return <ProgressBar record={record} />;
+              }
+            }.bind(this))
           }
           </div>
         </div>
@@ -426,6 +456,27 @@ var ProgressBar = React.createClass({
             id={this.props.record.id} role="progressbar"
             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
             <span className="percent">0%</span> - {this.props.record.filename}
+          </div>
+        </div>
+    );
+  }
+});
+
+
+var ErrorBar = React.createClass({
+  onCloseClicked: function () {
+    this.props.progress.removeRecord(this.props.record.id);
+  },
+  render: function () {
+    return (
+        <div className="progress-error">
+          <div className="alert alert-danger upload-alert">
+            <button type="button" className="close" aria-label="Close"
+              onClick={this.onCloseClicked}>
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <b>{this.props.record.filename}</b><br />
+              {this.props.record.message}
           </div>
         </div>
     );

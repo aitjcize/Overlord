@@ -795,7 +795,7 @@ func (self *Overlord) ServHTTP(port int) {
 		c.StopListen()
 
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err.Error())))
+			errMsg = err.Error()
 			return
 		}
 		w.Write([]byte(`{"status": "success"}`))

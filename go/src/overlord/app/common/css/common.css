@@ -105,7 +105,7 @@
 }
 
 .upload-progress-bars {
-  width: 400px;
+  width: 500px;
 }
 
 .upload-progress-bars-hidden {
@@ -118,6 +118,11 @@
 
 .upload-progress-bars > .panel-body {
   padding: 2px;
+}
+
+.upload-alert {
+  margin: 3px;
+  padding: 5px;
 }
 
 /** styles for fixture */
