@@ -380,9 +380,6 @@ class TerminalWebSocketClient(WebSocketBaseClient):
           pass
 
     def _FeedInput():
-      flags = fcntl.fcntl(sys.stdin, fcntl.F_GETFL)
-      fcntl.fcntl(sys.stdin, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
       self._old_termios = termios.tcgetattr(self._stdin_fd)
       tty.setraw(self._stdin_fd)
 
@@ -391,30 +388,24 @@ class TerminalWebSocketClient(WebSocketBaseClient):
       try:
         state = READY
         while True:
-          rd, unused_w, unused_x = select.select([sys.stdin], [], [], 0.5)
-
-          # We can't install a signal handler in the main thread since it'll
-          # interrupt the read/write system call (ws4py performing send/recv).
-          # Use polling instead (select's timeout is 0.5 seconds)
+          # Check if terminal is resized
           _ResizeWindow()
 
-          if sys.stdin in rd:
-            data = sys.stdin.read()
+          ch = sys.stdin.read(1)
 
-            # Scan for escape sequence
-            for x in data:
-              if state == READY:
-                state = ENTER_PRESSED if x == chr(0x0d) else READY
-              elif state == ENTER_PRESSED:
-                state = ESCAPE_PRESSED if x == _ESCAPE else READY
-              elif state == ESCAPE_PRESSED:
-                if x == '.':
-                  self.close()
-                  raise RuntimeError('quit')
-              else:
-                state = READY
+          # Scan for escape sequence
+          if state == READY:
+            state = ENTER_PRESSED if ch == chr(0x0d) else READY
+          elif state == ENTER_PRESSED:
+            state = ESCAPE_PRESSED if ch == _ESCAPE else READY
+          elif state == ESCAPE_PRESSED:
+            if ch == '.':
+              self.close()
+              raise RuntimeError('quit')
+          else:
+            state = READY
 
-            self.send(data)
+          self.send(ch)
       except (KeyboardInterrupt, RuntimeError):
         pass
 
