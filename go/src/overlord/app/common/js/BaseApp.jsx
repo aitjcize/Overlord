@@ -1,7 +1,7 @@
 // Copyright 2015 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
+//
 // Defines common functions of Apps.
 //
 // Automatically load clients from server in "compononetDidMount" event. The
@@ -36,7 +36,7 @@ var BaseApp = {
   // filter clients.
   //
   // for example:
-  //   var onKeyUp = function (e) {
+  //   var onKeyUp = function (event) {
   //     this.setMidFilterPattern(this.refs.filter.value);
   //   };
   //   <input type="text" ref="filter" onKeyUp={onKeyUp} />
@@ -78,7 +78,7 @@ var BaseApp = {
   },
   // Get "properties" of a client (defined by machine id) from server.  For
   // details about "properties" attribute of a client, please see
-  // FixtureWindow.
+  // FixtureWidget.
   fetchProperties: function (mid, callback) {
     var url = "/api/agent/properties/" + mid;
     $.ajax({

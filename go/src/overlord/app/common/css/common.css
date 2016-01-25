@@ -9,8 +9,8 @@
   float: none;
 }
 
-/** styles for terminal */
-.terminal-window {
+/** styles for app window */
+.app-window {
   float: left;
   border: 5px solid #eee;
   box-shadow: 0px 0px 20px 5px rgba(0,0,0,0.8);
@@ -18,9 +18,10 @@
   resize: both;
   overflow: hidden;
   background-color: black;
+  position: relative;
 }
 
-.terminal-title {
+.app-window-title {
   float: left;
   text-align: center;
   display: inline-block;
@@ -31,7 +32,7 @@
   padding-bottom: 4px;
 }
 
-.terminal-control {
+.app-window-control {
   position: absolute;
   right: 0px;
   top: 0px;
@@ -40,29 +41,29 @@
   background-color: #eee;
 }
 
-.terminal-control * {
+.app-window-control * {
   display: inline-block;
 }
 
-.terminal-icon {
+.app-window-icon {
   width: 20px;
   height: 20px;
   opacity: 0.5;
 }
 
-.terminal-icon:hover {
+.app-window-icon:hover {
   opacity: 0.7;
 }
 
-.terminal-close {
+.app-window-close {
   background-image: url(/common/img/close.png);
 }
 
-.terminal-minimize {
+.app-window-minimize {
   background-image: url(/common/img/minimize.png);
 }
 
-.terminal-copy {
+.app-window-copy {
   background-image: url(/common/img/copy.png);
 }
 
@@ -128,7 +129,7 @@
 /** styles for fixture */
 .fixture-block {
   display: inline-block;
-  /** width and margin are defined in FixtureWindow.jsx */
+  /** width and margin are defined in FixtureWidget.jsx */
   vertical-align: text-top;
 }
 

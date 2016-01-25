@@ -38,7 +38,7 @@ html, body, #main {
   cursor: pointer;
 }
 
-.terminal-window {
+.app-window {
   display: none;
   position: fixed !important;
 }

@@ -2,20 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// View for Dashboard App
-//
 // Requires:
 //   NavBar.jsx :: NavBar
-//   FixtureWindow.jsx :: FixtureWindow
+//   FixtureWidget.jsx :: FixtureWidget
 //   TerminalWindow.jsx :: TerminalWindow, UploadProgress
 //
+// View for Dashboard App:
 // - App
 //  - NavBar
 //  - SideBar
 //    - ClientBox
 //      - FilterInput
 //      - ClientList
-//        - ClientInfo
+//        - [ClientInfo ...]
 //    - RecentList
 //      - ClientInfo
 //  - FixtureGroup
@@ -148,7 +147,7 @@ var ClientBox = React.createClass({
 })
 
 var FilterInput = React.createClass({
-  onKeyUp: function (e) {
+  onKeyUp: function (event) {
     this.props.app.setMidFilterPattern(this.refs.filter.value);
   },
   render: function () {
@@ -203,10 +202,10 @@ var RecentList = React.createClass({
 });
 
 var ClientInfo = React.createClass({
-  openTerminal: function (e) {
+  openTerminal: function (event) {
     this.props.app.addTerminal(this.props.data.mid, this.props.data);
   },
-  onUIButtonClick: function (e) {
+  onUIButtonClick: function (event) {
     this.props.app.toggleFixtureState(this.props.data);
   },
   render: function () {
@@ -249,7 +248,7 @@ var TerminalGroup = React.createClass({
         this.props.app.socket.emit("subscribe", control.data);
       }
     };
-    var onCloseClicked = function (e) {
+    var onCloseClicked = function (event) {
       this.props.app.removeTerminal(this.props.id);
       this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
@@ -288,7 +287,7 @@ var FixtureGroup = React.createClass({
         {
           this.props.data.map(function (item) {
             return (
-              <FixtureWindow key={item.mid} client={item}
+              <FixtureWidget key={item.mid} client={item}
                app={this.props.app} />
             );
           }.bind(this))
@@ -300,5 +299,5 @@ var FixtureGroup = React.createClass({
 
 ReactDOM.render(
   <App url="/api/agents/list" />,
-  document.body
+  document.getElementById("body")
 );

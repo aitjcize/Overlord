@@ -6,12 +6,12 @@
 //
 // Requires:
 //   NavBar.jsx :: NavBar
-//   FixtureWindow.jsx :: FixtureWindow
+//   FixtureWidget.jsx :: FixtureWidget
 //   TerminalWindow.jsx :: TerminalWindow
 //
 // - App
 //  - NavBar
-//  - FixtureWindow
+//  - FixtureWidget
 
 var App = React.createClass({
   mixins: [BaseApp],
@@ -79,7 +79,7 @@ var App = React.createClass({
         this.props.app.socket.emit("subscribe", control.data);
       }
     };
-    var onCloseClicked = function (e) {
+    var onCloseClicked = function (event) {
       this.props.app.removeTerminal(this.props.id);
       this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
@@ -112,7 +112,7 @@ var App = React.createClass({
           {
             this.getFilteredClientList().map(function (data) {
               return (
-                <FixtureWindow key={data.mid} client={data} app={this}/>
+                <FixtureWidget key={data.mid} client={data} app={this}/>
               );
             }.bind(this))
           }
@@ -123,7 +123,7 @@ var App = React.createClass({
 });
 
 Paginator = React.createClass({
-  onKeyUp: function (e) {
+  onKeyUp: function (event) {
     this.props.app.setMidFilterPattern(this.refs.filter.value);
   },
   changePage: function (i) {
@@ -202,5 +202,5 @@ Paginator = React.createClass({
 
 ReactDOM.render(
   <App url="/api/agents/list"/>,
-  document.body
+  document.getElementById("body")
 );

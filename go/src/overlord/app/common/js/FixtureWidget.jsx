@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// View for Fixture Window
-//
-// - FixtureWindow
+// View for FixtureWidget:
+// - FixtureWidget
 //   - Lights
 //   - Terminals
 //   - Controls
@@ -22,14 +21,14 @@ var LIGHT_CSS_MAP = {
   'light-toggle-on': 'label-success'
 };
 
-// FixtureWindow defines the layout and behavior of a fixture window,
+// FixtureWidget defines the layout and behavior of a fixture window,
 // which has lights, terminals, controls and logs.
 //
 // Usage:
-//   <FixtureWindow client={client} app={app}
+//   <FixtureWidget client={client} app={app}
 //       [other attributes...] />
 // where
-//  @app: FixtureWindow will invoke app.addTerminal(id, term) to open an
+//  @app: FixtureWidget will invoke app.addTerminal(id, term) to open an
 //        terminal, where @id is a string used to distinguish different
 //        terminals, @term is a terminal description object.
 //  @client: an agent object, should have "properties" attribute,
@@ -75,7 +74,7 @@ var LIGHT_CSS_MAP = {
 //             "light": "light-toggle-off",
 //             // Command to execute when clicked
 //             "command": "case_close_debug",
-//             // Will be called when the FixtureWindow is opened.
+//             // Will be called when the FixtureWidget is opened.
 //             "init_cmd": "case_close_debug status"
 //           },
 //           {
@@ -146,7 +145,7 @@ var LIGHT_CSS_MAP = {
 //           ],
 //         }
 //       ],
-//       // Path to the log files, FixtureWindow will keep polling the latest
+//       // Path to the log files, FixtureWidget will keep polling the latest
 //       // content of these file.
 //       "logs": [
 //         "/var/log/factory.log", ...
@@ -160,7 +159,7 @@ var LIGHT_CSS_MAP = {
 //     ]
 //   },
 // }
-var FixtureWindow = React.createClass({
+var FixtureWidget = React.createClass({
   executeRemoteCmd: function (mid, cmd) {
     if (!this.isMounted()) {
       return;
@@ -282,14 +281,14 @@ var Terminals = React.createClass({
     var sock = new WebSocket(url);
     var deferred = $.Deferred();
 
-    sock.onopen = function (e) {
+    sock.onopen = function (event) {
       var blobs = [];
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           blobs.push(msg.data);
         }
       }
-      sock.onclose = function (e) {
+      sock.onclose = function (event) {
         var value = "";
         if (blobs.length == 0) {
           deferred.resolve("");
@@ -308,8 +307,8 @@ var Terminals = React.createClass({
     }
     return deferred.promise();
   },
-  onTerminalClick: function (e) {
-    var target = $(e.target);
+  onTerminalClick: function (event) {
+    var target = $(event.target);
     var mid = target.data("mid");
     var term = target.data("term");
     var id = mid + "::" + term.name;
@@ -358,8 +357,8 @@ var Terminals = React.createClass({
 });
 
 var Controls = React.createClass({
-  onCommandClicked: function (e) {
-    var target = $(e.target);
+  onCommandClicked: function (event) {
+    var target = $(event.target);
     var ctrl = target.data("ctrl");
     if (ctrl.type == "toggle") {
       if (target.hasClass("active")) {

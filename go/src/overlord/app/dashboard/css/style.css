@@ -41,6 +41,7 @@ html, body, #main {
 .client-info {
   margin: 2px 0px;
   padding: 2px;
+  position: relative;
 }
 
 .client-info-hidden {

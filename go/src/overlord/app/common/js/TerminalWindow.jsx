@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// Terminal Window widget
+// External dependencies:
+// - term.js: https://github.com/chjj/term.js
 //
+// View for TerminalWindow:
 // - TerminalWindow
 //   props:
 //     id: DOM id
@@ -22,7 +24,7 @@
 //     onMinimizeClicked: callback for mininize button clicked
 //
 // - UploadProgress
-//   - ProgressBar
+//   - [(ProgressBar|ProgressBar) ...]
 
 Terminal.prototype.CopyAll = function () {
   var term = this;
@@ -43,6 +45,7 @@ Terminal.prototype.CopyAll = function () {
 };
 
 var TerminalWindow = React.createClass({
+  mixins: [BaseWindow],
   randomID: function () {
     return Math.random().toString(36).replace(/[^a-z]+/g, "").substr(0, 6);
   },
@@ -50,7 +53,7 @@ var TerminalWindow = React.createClass({
     return {sid: ""};
   },
   componentDidMount: function () {
-    var el = document.getElementById(this.props.id);
+    var el = this.refs.window;
     var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
               "://" + window.location.host + this.props.path;
     var sock = new WebSocket(url);
@@ -58,27 +61,14 @@ var TerminalWindow = React.createClass({
     var $el = $(el);
 
     this.sock = sock;
-    this.el = el;
 
-    $el.draggable({
-      // Once the window is dragged, make it position fixed.
-      stop: function () {
-        offsets = el.getBoundingClientRect();
-        $el.css({
-          position: "fixed",
-          top: offsets.top+"px",
-          left: offsets.left+"px"
-        });
-      },
-      cancel: ".terminal"
-    });
-
+    this.makeDraggable(".terminal");
     this.bringToFront();
 
-    sock.onerror = function (e) {
+    sock.onerror = function (event) {
       var callback = this.props.onError;
       if (typeof(callback) != "undefined") {
-        (callback.bind(this))(e);
+        (callback.bind(this))(event);
       }
     }.bind(this);
 
@@ -92,7 +82,7 @@ var TerminalWindow = React.createClass({
 
     var bindDisconnectEvent = function () {
       var overlay = $el.find(".terminal-disconnected-overlay");
-      overlay.on("click", function (e) {
+      overlay.on("click", function (event) {
         overlay.css("display", "none");
       })
     }
@@ -101,34 +91,34 @@ var TerminalWindow = React.createClass({
       var termDom = $el.find(".terminal");
       var overlay = $el.find(".terminal-drop-overlay");
 
-      termDom.on("dragenter", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
+      termDom.on("dragenter", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
         overlay.css("display", "block");
       }.bind(this));
 
-      overlay.on("dragenter", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
+      overlay.on("dragenter", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
       });
 
-      overlay.on("dragover", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
+      overlay.on("dragover", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
       });
 
-      overlay.on("dragleave", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
+      overlay.on("dragleave", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
         overlay.css("display", "none");
       });
 
-      overlay.on("drop", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
+      overlay.on("drop", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
 
         var $this = this;
-        var files = e.originalEvent.dataTransfer.files;
+        var files = event.originalEvent.dataTransfer.files;
 
         for (var i = 0; i < files.length; i++) {
           function postFile(file) {
@@ -140,9 +130,10 @@ var TerminalWindow = React.createClass({
             $.ajax({
               xhr: function () {
                 var xhr = new window.XMLHttpRequest();
-                xhr.upload.addEventListener("progress", function (e) {
-                  if (e.lengthComputable) {
-                    var percentComplete = Math.round(e.loaded * 100 / e.total);
+                xhr.upload.addEventListener("progress", function (event) {
+                  if (event.lengthComputable) {
+                    var percentComplete = Math.round(event.loaded * 100 /
+                                                     event.total);
                     $("#" + id).css("width", percentComplete + "%");
                     $("#" + id + " > .percent").text(percentComplete + "%");
                   }
@@ -199,9 +190,9 @@ var TerminalWindow = React.createClass({
     }.bind(this);
 
     var bindResizeEvent = function () {
-      // Calculate terminal and terminal-window width/height relation.  Used for
+      // Calculate terminal and app-window width/height relation.  Used for
       // resize procedure we will hide right and bottom border of teriminal.
-      // and add the same size to terminal-window for good looking and resize
+      // and add the same size to app-window for good looking and resize
       // indicator
       var $terminal = $el.find(".terminal");
       var termBorderRightWidth = $terminal.css("border-right-width");
@@ -215,7 +206,7 @@ var TerminalWindow = React.createClass({
       $terminal.css("border-right-width", "0px");
       $terminal.css("border-bottom-width", "0px");
 
-      // initial terminal-window size
+      // initial app-window size
       el.style.width = term.element.clientWidth + totalWidthOffset;
       el.style.height = term.element.clientHeight + totalHeightOffset;
 
@@ -251,8 +242,8 @@ var TerminalWindow = React.createClass({
           term.resize(newCols, newRows);
           term.refresh(0, term.rows - 1);
 
-          // Fine tune terminal-window size to match terminal.
-          // Prevent white space between terminal-window and terminal.
+          // Fine tune app-window size to match terminal.
+          // Prevent white space between app-window and terminal.
           el.style.width = term.element.clientWidth + totalWidthOffset;
           el.style.height = term.element.clientHeight + totalHeightOffset;
 
@@ -264,10 +255,10 @@ var TerminalWindow = React.createClass({
       });
     }
 
-    sock.onopen = function (e) {
+    sock.onopen = function (event) {
       term.open(el);
       term.on("title", function (title) {
-        $el.find(".terminal-title").text(title);
+        $el.find(".app-window-title").text(title);
       });
 
       term.on("data", function (data) {
@@ -299,14 +290,14 @@ var TerminalWindow = React.createClass({
         }
       }.bind(this);
 
-      sock.onclose = function (e) {
+      sock.onclose = function (event) {
         // If the current focus element is same as this terminal, we assume that
         // this connection close is initiated by the user (i.e. by typing 'exit'
         // in the shell). If the current focus element is not this terminal, it
         // means the connection dropped unexpectedly. We show a 'connection
         // lost' overlay to indicate this situation in this case.
         if (document.activeElement == $el.find(".terminal")[0]) {
-          this.onCloseMouseUp();
+          this.onCloseMouseUp2();
         } else {
           term.write("\r\nConnection lost.");
           $el.find(".terminal-disconnected-overlay").css("display", "block");
@@ -314,7 +305,7 @@ var TerminalWindow = React.createClass({
 
         var callback = this.props.onClose;
         if (typeof(callback) != "undefined") {
-          (callback.bind(this))(e);
+          (callback.bind(this))(event);
         }
       }.bind(this);
 
@@ -329,69 +320,40 @@ var TerminalWindow = React.createClass({
 
       var callback = this.props.onOpen;
       if (typeof(callback) != "undefined") {
-        (callback.bind(this))(e);
+        (callback.bind(this))(event);
       }
     }.bind(this);
   },
-  onWindowMouseDown: function (e) {
-    this.bringToFront();
-  },
-  onCloseMouseUp: function (e) {
-    var callback = this.props.onCloseClicked;
-    if (typeof(callback) != "undefined") {
-      (callback.bind(this))(e);
-    }
+  onCloseMouseUp2: function (event) {
+    this.onCloseMouseUp();
     this.sock.close();
   },
-  bringToFront: function () {
-    if (typeof(window.maxz) == "undefined") {
-      window.maxz = 100;
-    }
-    var $el = $(this.el);
-    if ($el.css("z-index") != window.maxz) {
-      window.maxz += 1;
-      $el.css("z-index", window.maxz);
-    }
-  },
-  onCloseMouseUp: function (e) {
-    var callback = this.props.onCloseClicked;
-    if (typeof(callback) != "undefined") {
-      (callback.bind(this))(e);
-    }
-    this.sock.close();
-  },
-  onMinimizeMouseUp: function (e) {
-    var callback = this.props.onMinimizeClicked;
-    if (typeof(callback) != "undefined") {
-      (callback.bind(this))(e);
-    }
-  },
-  onCopyMouseUp: function (e) {
+  onCopyMouseUp: function (event) {
     this.term.CopyAll();
   },
   render: function () {
     var minimize_icon_node = "", copy_icon_node = "";
     if (this.props.enableMinimize) {
       copy_icon_node = (
-          <div className="terminal-icon terminal-minimize"
+          <div className="app-window-icon app-window-minimize"
            onMouseUp={this.onMinimizeMouseUp}></div>
       );
     }
     if (this.props.enableCopy) {
       copy_icon_node = (
-          <div className="terminal-icon terminal-copy"
+          <div className="app-window-icon app-window-copy"
            onMouseUp={this.onCopyMouseUp}></div>
       );
     }
     return (
-      <div className="terminal-window" id={this.props.id}
+      <div className="app-window" ref="window"
           onMouseDown={this.onWindowMouseDown}>
-        <div className="terminal-title">{this.props.title}</div>
-        <div className="terminal-control">
+        <div className="app-window-title">{this.props.title}</div>
+        <div className="app-window-control">
           {copy_icon_node}
           {minimize_icon_node}
-          <div className="terminal-icon terminal-close"
-           onMouseUp={this.onCloseMouseUp}></div>
+          <div className="app-window-icon app-window-close"
+           onMouseUp={this.onCloseMouseUp2}></div>
         </div>
         <div className="terminal-overlay terminal-drop-overlay">
           Drop files here to upload
@@ -415,8 +377,8 @@ var UploadProgress = React.createClass({
   },
   removeRecord: function (id) {
     this.setState(function (state, props) {
-      var index = state.records.findIndex(function (e, index, array) {
-        return e.id == id;
+      var index = state.records.findIndex(function (el, index, array) {
+        return el.id == id;
       });
       if (index !== -1) {
         state.records.splice(index, 1);

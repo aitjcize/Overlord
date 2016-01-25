@@ -55,31 +55,31 @@ var App = React.createClass({
       }
     }
   },
-  onLockClicked: function (e) {
+  onLockClicked: function (event) {
     this.setState(function (state, props) {
       return {locked: !state.locked};
     });
     this.saveCookies("locked", this.state.locked);
     if (this.state.locked) {
-      var locked_mids = this.state.clients.map(function (e) {return e["mid"];});
+      var locked_mids = this.state.clients.map(function (event) {return event["mid"];});
       this.saveCookies("locked_mids", locked_mids);
     }
   },
-  onTimeoutClicked: function (e) {
+  onTimeoutClicked: function (event) {
     $("#timeout-dialog").modal();
   },
-  getTimeout: function (e) {
+  getTimeout: function (event) {
     return this.state.boot_timeout_secs;
   },
-  onTimeoutDialogSaveClicked: function (e) {
+  onTimeoutDialogSaveClicked: function (event) {
     var new_timeout = Math.max(1, $("#boot_timeout_secs").val());
     this.setState({boot_timeout_secs: new_timeout});
     this.saveCookies("boot_timeout_secs", this.state.boot_timeout_secs);
   },
-  onLayoutClicked: function (e) {
+  onLayoutClicked: function (event) {
     $("#layout-dialog").modal();
   },
-  onLayoutDialogSaveClicked: function (e) {
+  onLayoutDialogSaveClicked: function (event) {
     var nrow = $("#nrow").val();
     if (nrow < 1) {
       nrow = 1;
@@ -120,8 +120,8 @@ var App = React.createClass({
       }
 
       this.setState(function (state, props) {
-        var client = state.clients.find(function (e, index, arr) {
-          return e.mid == obj.mid;
+        var client = state.clients.find(function (event, index, arr) {
+          return event.mid == obj.mid;
         });
         if (typeof(client) == "undefined") {
           if (!state.locked) {
@@ -222,7 +222,7 @@ var App = React.createClass({
 });
 
 var ClientInfo = React.createClass({
-  getInitialState: function (e) {
+  getInitialState: function (event) {
     if (typeof(this.props.data.status) != "undefined") {
       return {status: this.props.data.status};
     }
@@ -231,11 +231,11 @@ var ClientInfo = React.createClass({
   updateStatus: function (status) {
     this.setState({status: status});
   },
-  onTagClick: function (e) {
-    var sid = $(e.target).data("sid");
+  onTagClick: function (event) {
+    var sid = $(event.target).data("sid");
     $(this.refs["term-" + sid].getDOMNode()).css("display", "block");
   },
-  onPanelClick: function (e) {
+  onPanelClick: function (event) {
     // Workaround: crosbug.com/p/39839#11
     // It take too long from DUT power up to enter kernel. The operator clicks the panel after
     // power up the DUT, and shows error if the overlord doesn't connect the DUT in {boot_timeout_secs}.
@@ -271,7 +271,7 @@ var ClientInfo = React.createClass({
       message = "Failed. Power-cycle DUT and click again.";
     }
 
-    var onError = function (e) {
+    var onError = function (event) {
       this.props.client.updateStatus("error");
     };
 
@@ -283,7 +283,7 @@ var ClientInfo = React.createClass({
       }
     };
 
-    var onCloseClicked = function (e) {
+    var onCloseClicked = function (event) {
       var el = document.getElementById(this.props.id);
       $(el).css("display", "none");
     };
@@ -323,5 +323,5 @@ var ClientInfo = React.createClass({
 
 ReactDOM.render(
   <App url="/api/logcats/list" pollInterval={60000} />,
-  document.body
+  document.getElementById("body")
 );
