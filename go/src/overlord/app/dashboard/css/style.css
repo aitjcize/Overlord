@@ -50,16 +50,28 @@ html, body, #main {
 
 .client-info-mid {
   display: inline-block;
-  width: 37ch;
+  width: 50ch;
   font-family: monospace;
 }
 
-.client-info-terminal {
-  opacity: 0.5;
-  cursor: pointer;
+.client-info-buttons {
+  position: absolute;
+  right: 0px;
+  top: 0px;
+  background-color: white;
+  height: 20px;
 }
 
-.client-info-terminal:hover {
+.client-info-button {
+  display: inline-block;
+  opacity: 0.5;
+  cursor: pointer;
+  height: 16px;
+  line-height: 12px;
+  vertical-align: middle;
+}
+
+.client-info-button:hover {
   opacity: 1.0;
 }
 

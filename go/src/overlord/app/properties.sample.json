@@ -1,5 +1,5 @@
 {
-  "context": ["ui", "whale"],
+  "context": ["ui", "cam", "whale"],
   "ui": {
     "lights": {
       "update_command": "update_light_status",
@@ -35,5 +35,10 @@
       ]}
     ],
     "logs": ["/var/log/factory.log"]
+  },
+  "camera": {
+    "command": "/usr/local/factory/py/tools/stream_camera.py --size 640x480",
+    "width": 640,
+    "height": 480
   }
 }

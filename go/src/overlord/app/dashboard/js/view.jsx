@@ -6,6 +6,7 @@
 //   NavBar.jsx :: NavBar
 //   FixtureWidget.jsx :: FixtureWidget
 //   TerminalWindow.jsx :: TerminalWindow, UploadProgress
+//   CameraWindow.jsx :: CameraWindow
 //
 // View for Dashboard App:
 // - App
@@ -17,11 +18,12 @@
 //        - [ClientInfo ...]
 //    - RecentList
 //      - ClientInfo
-//  - FixtureGroup
-//    - FixtureWindow
-//  - TerminalGroup
-//    - TerminalWindow
+//  - Windows
+//    - [TerminalWindow ...]
+//    - [CameraWindow ...]
 //    - UploadProgress
+//  - FixtureGroup
+//    - [FixtureWidget ...]
 
 var App = React.createClass({
   mixins: [BaseApp],
@@ -55,6 +57,11 @@ var App = React.createClass({
       return {fixtures: state.fixtures.slice(-nTotalFixture)};
     });
   },
+  addCamera: function (id, cam) {
+    this.setState(function (state, props) {
+      state.cameras[id] = cam;
+    });
+  },
   toggleFixtureState: function (client) {
     if (this.isClientInList(this.state.fixtures, client)) {
       this.removeFixture(client.mid);
@@ -74,8 +81,15 @@ var App = React.createClass({
       this.removeClientFromList(state.fixtures, {mid: id});
     });
   },
+  removeCamera: function (id) {
+    this.setState(function (state, props) {
+      if (typeof(state.cameras[id]) != "undefined") {
+        delete state.cameras[id];
+      }
+    });
+  },
   getInitialState: function () {
-    return {fixtures: [], recentclients: [], terminals: {}};
+    return {cameras: [], fixtures: [], recentclients: [], terminals: {}};
   },
   componentDidMount: function () {
     var socket = io(window.location.protocol + "//" + window.location.host,
@@ -115,7 +129,10 @@ var App = React.createClass({
               recentclients={this.state.recentclients} app={this} />
           <FixtureGroup data={this.state.fixtures} app={this} />
         </div>
-        <TerminalGroup data={this.state.terminals} app={this} />
+        <div className="windows">
+          <Windows app={this} terminals={this.state.terminals}
+           cameras={this.state.cameras} />
+        </div>
       </div>
     );
   }
@@ -205,12 +222,26 @@ var ClientInfo = React.createClass({
   openTerminal: function (event) {
     this.props.app.addTerminal(this.props.data.mid, this.props.data);
   },
+  openCamera: function (event) {
+    this.props.app.addCamera(this.props.data.mid, this.props.data);
+  },
   onUIButtonClick: function (event) {
     this.props.app.toggleFixtureState(this.props.data);
+  },
+  componentDidMount: function (event) {
+    // Since the button covers the machine ID text, abbrieviate to match the
+    // current visible width.
+    var chPerLine = 50;
+    var pxPerCh = this.refs.mid.clientWidth / chPerLine;
+    this.refs.mid.innerText =
+      abbr(this.refs.mid.innerText,
+           chPerLine - (this.refs["info-buttons"].clientWidth)/ pxPerCh);
   },
   render: function () {
     var display = "block";
     var ui_span = null;
+    var cam_span = null;
+
     if (typeof(this.props.data.properties) != "undefined" &&
         typeof(this.props.data.properties.context) != "undefined" &&
         this.props.data.properties.context.indexOf("ui") !== -1) {
@@ -219,45 +250,63 @@ var ClientInfo = React.createClass({
       var ui_light_css = LIGHT_CSS_MAP[ui_state ? "light-toggle-on"
                                                 : "light-toggle-off"];
       ui_span = (
-        <span className={"label client-info-terminal " + ui_light_css}
+        <div className={"label " + ui_light_css + " client-info-button"}
             data-mid={this.props.data.key} onClick={this.onUIButtonClick}>
           UI
-        </span>
-      )
+        </div>
+      );
+    }
+    if (typeof(this.props.data.properties) != "undefined" &&
+        typeof(this.props.data.properties.context) != "undefined" &&
+        this.props.data.properties.context.indexOf("cam") !== -1) {
+      cam_span = (
+        <div className="label label-success client-info-button"
+            data-mid={this.props.data.key} onClick={this.openCamera}>
+          CAM
+        </div>
+      );
     }
     return (
       <div className="client-info">
-        <div className="client-info-mid">
+        <div className="client-info-mid" ref="mid">
           {this.props.children}
         </div>
-        <span className="label label-warning client-info-terminal"
-            data-mid={this.props.data.key} onClick={this.openTerminal}>
-          Terminal
-        </span>
-        {ui_span}
+        <div className="client-info-buttons" ref="info-buttons">
+          {cam_span}
+          {ui_span}
+          <div className="label label-warning client-info-button"
+              data-mid={this.props.data.key} onClick={this.openTerminal}>
+            Terminal
+          </div>
+        </div>
       </div>
     );
   }
 });
 
-var TerminalGroup = React.createClass({
+var Windows = React.createClass({
   render: function () {
-    var onControl = function (control) {
+    var onTerminalControl = function (control) {
       if (control.type == "sid") {
         this.terminal_sid = control.data;
         this.props.app.socket.emit("subscribe", control.data);
       }
     };
-    var onCloseClicked = function (event) {
+    var onTerminalCloseClicked = function (event) {
       this.props.app.removeTerminal(this.props.id);
       this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
+    var onCameraCloseClicked = function (event) {
+      this.props.app.removeCamera(this.props.id);
+    }
+    // We need to make TerminalWindow and CameraWindow have the same parent
+    // div so z-index stacking works.
     return (
       <div>
-        <div className="terminal-group">
+        <div className="windows">
           {
-            Object.keys(this.props.data).map(function (id) {
-              var term = this.props.data[id];
+            Object.keys(this.props.terminals).map(function (id) {
+              var term = this.props.terminals[id];
               var extra = "";
               if (typeof(term.path) != "undefined") {
                 extra = "?tty_device=" + term.path;
@@ -267,8 +316,27 @@ var TerminalGroup = React.createClass({
                  path={"/api/agent/tty/" + term.mid + extra}
                  uploadPath={"/api/agent/upload/" + term.mid}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
-                 onControl={onControl} onCloseClicked={onCloseClicked} />
+                 onControl={onTerminalControl}
+                 onCloseClicked={onTerminalCloseClicked} />
               );
+            }.bind(this))
+          }
+          {
+            Object.keys(this.props.cameras).map(function (id) {
+              var cam = this.props.cameras[id];
+              var cam_prop = cam.properties.camera;
+              if (typeof(cam_prop) != "undefined") {
+                var command = cam_prop.command;
+                var width = cam_prop.width || 640;
+                var height = cam_prop.height || 640;
+                return (
+                    <CameraWindow key={id} mid={cam.mid} id={id} title={id}
+                     path={"/api/agent/shell/" + cam.mid + "?command=" +
+                           encodeURIComponent(command)}
+                     width={width} height={height} app={this.props.app}
+                     onCloseClicked={onCameraCloseClicked} />
+                );
+              }
             }.bind(this))
           }
         </div>
