@@ -626,6 +626,7 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 		if tty != nil {
 			tty.Close()
 		}
+		self.Conn.Close()
 		log.Println("SpawnTTYServer: terminated")
 	}()
 
@@ -644,8 +645,8 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 		// Add ghost executable to PATH
 		exePath, err := GetExecutablePath()
 		if err == nil {
-			os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
-				filepath.Dir(exePath)))
+			os.Setenv("PATH", fmt.Sprintf("%s:%s", filepath.Dir(exePath),
+				os.Getenv("PATH")))
 		}
 
 		os.Chdir(home)
@@ -778,10 +779,10 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 	var err error
 
 	defer func() {
+		self.quit = true
 		if err != nil {
 			self.Conn.Write([]byte(err.Error() + "\n"))
 		}
-		self.quit = true
 		self.Conn.Close()
 		log.Println("SpawnShellServer: terminated")
 	}()
@@ -827,23 +828,39 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 	}
 
 	defer func() {
-		// Send SIGTERM to process, then wait for 1 second. Send another SIGKILL
-		// to make sure the process is terminated.
-		cmd.Process.Signal(syscall.SIGTERM)
-		time.Sleep(time.Second)
-		cmd.Process.Kill()
-		cmd.Wait()
+		time.Sleep(100 * time.Millisecond) // Wait for process to terminate
+
+		process := (*PollableProcess)(cmd.Process)
+		_, err = process.Poll()
+		// Check if the process is terminated. If not, send SIGTERM to the process,
+		// then wait for 1 second.  Send another SIGKILL to make sure the process is
+		// terminated.
+		if err != nil {
+			cmd.Process.Signal(syscall.SIGTERM)
+			time.Sleep(time.Second)
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
 	}()
 
 	for {
 		select {
 		case buf := <-self.readChan:
-			stdin.Write([]byte(buf))
+			if len(buf) >= len(STDIN_CLOSED)*2 {
+				idx := bytes.Index(buf, []byte(STDIN_CLOSED+STDIN_CLOSED))
+				if idx != -1 {
+					stdin.Write(buf[:idx])
+					stdin.Close()
+					continue
+				}
+			}
+			stdin.Write(buf)
 		case err := <-self.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnShellServer: connection terminated")
 				return nil
 			} else {
+				log.Printf("SpawnShellServer: %s\n", err)
 				return err
 			}
 		case s := <-stopConn:
@@ -895,21 +912,21 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 
 	var err error
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", self.port),
-		CONNECT_TIMEOUT)
-	if err != nil {
-		return err
-	}
-
 	defer func() {
+		self.quit = true
 		if err != nil {
 			self.Conn.Write([]byte(err.Error() + "\n"))
 		}
-		self.quit = true
 		self.Conn.Close()
-		conn.Close()
 		log.Println("SpawnPortForwardServer: terminated")
 	}()
+
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", self.port),
+		CONNECT_TIMEOUT*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
 
 	stopConn := make(chan bool, 1)
 
@@ -925,7 +942,7 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 	for {
 		select {
 		case buf := <-self.readChan:
-			conn.Write([]byte(buf))
+			conn.Write(buf)
 		case err := <-self.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnPortForwardServer: connection terminated")

@@ -164,3 +164,14 @@ func CfMakeRaw(termios *syscall.Termios) {
 	termios.Cflag &^= (syscall.CSIZE | syscall.PARENB)
 	termios.Cflag |= syscall.CS8
 }
+
+type PollableProcess os.Process
+
+func (p *PollableProcess) Poll() (uint32, error) {
+	var wstatus syscall.WaitStatus
+	pid, err := syscall.Wait4(p.Pid, &wstatus, syscall.WNOHANG, nil)
+	if err == nil && p.Pid == pid {
+		return uint32(wstatus), nil
+	}
+	return 0, errors.New("Wait4 failed")
+}

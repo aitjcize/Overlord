@@ -44,6 +44,11 @@ const (
 	CONTROL_END   = 129 // Control End Code
 )
 
+// Stream control
+const (
+	STDIN_CLOSED = "##STDIN_CLOSED##"
+)
+
 func ModeStr(mode int) string {
 	return map[int]string{
 		NONE:     "None",

@@ -113,7 +113,7 @@ func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 }
 
 // Forwards the input from Websocket to TCP socket.
-func (self *ConnServer) forwardWSInput(allowBinary bool) {
+func (self *ConnServer) forwardWSInput() {
 	defer func() {
 		self.stopListen <- true
 	}()
@@ -124,19 +124,13 @@ func (self *ConnServer) forwardWSInput(allowBinary bool) {
 			if err == io.EOF {
 				log.Println("WebSocket connection terminated")
 			} else {
-				log.Println("Unknown error while reading from WebSocket")
+				log.Println("Unknown error while reading from WebSocket:", err)
 			}
 			return
 		}
 
 		switch mt {
-		case websocket.BinaryMessage:
-			if allowBinary {
-				self.Conn.Write(payload)
-			} else {
-				log.Printf("Ignoring binary message: %q\n", payload)
-			}
-		case websocket.TextMessage:
+		case websocket.BinaryMessage, websocket.TextMessage:
 			self.Conn.Write(payload)
 		default:
 			log.Printf("Invalid message type %d\n", mt)
@@ -146,20 +140,12 @@ func (self *ConnServer) forwardWSInput(allowBinary bool) {
 	return
 }
 
-// Forward the PTY output to WebSocket.
+// Forward the stream output to WebSocket.
 func (self *ConnServer) forwardWSOutput(buffer string) {
 	if self.wsConn == nil {
 		self.stopListen <- true
 	}
 	self.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
-}
-
-// Forward the logcat output to WebSocket.
-func (self *ConnServer) forwardShellOutput(buffer string) {
-	if self.wsConn == nil {
-		self.stopListen <- true
-	}
-	self.writeLogToWS(self.wsConn, buffer)
 }
 
 // Forward the logcat output to WebSocket.
@@ -227,11 +213,8 @@ func (self *ConnServer) Listen() {
 			buffer := string(buf)
 			// Some modes completely ignore the RPC call, process them.
 			switch self.Mode {
-			case TERMINAL, FORWARD:
+			case TERMINAL, SHELL, FORWARD:
 				self.forwardWSOutput(buffer)
-				continue
-			case SHELL:
-				self.forwardShellOutput(buffer)
 				continue
 			case LOGCAT:
 				self.forwardLogcatOutput(buffer)
@@ -259,11 +242,9 @@ func (self *ConnServer) Listen() {
 			// If self.mode changed, means we just got a registration message and
 			// are in a different mode.
 			switch self.Mode {
-			case TERMINAL, FORWARD:
+			case TERMINAL, SHELL, FORWARD:
 				// Start a goroutine to forward the WebSocket Input
-				go self.forwardWSInput(true)
-			case SHELL:
-				go self.forwardWSInput(false)
+				go self.forwardWSInput()
 			case LOGCAT:
 				// A logcat client does not wait for ACK before sending
 				// stream, so we need to forward the remaining content of the buffer

@@ -53,6 +53,9 @@ _CONTROL_END = 129
 _BLOCK_SIZE = 4096
 _CONNECT_TIMEOUT = 3
 
+# Stream control
+_STDIN_CLOSED = '##STDIN_CLOSED##'
+
 SUCCESS = 'success'
 FAILED = 'failed'
 DISCONNECTED = 'disconnected'
@@ -320,7 +323,7 @@ class Ghost(object):
       p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
                            'cut -d " " -f 2', stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, shell=True)
-      stdout, _ = p.communicate()
+      stdout, unused_stderr = p.communicate()
       if stdout == '':
         raise RuntimeError('empty mlb number')
       return stdout.strip()
@@ -392,7 +395,7 @@ class Ghost(object):
     else:
       logging.warn('Invalid request command "%s"', command)
 
-  def SpawnTTYServer(self, _):
+  def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
     logging.info('SpawnTTYServer: started')
 
@@ -435,7 +438,7 @@ class Ghost(object):
       control_string = ''
       write_buffer = ''
       while True:
-        rd, _, _ = select.select([self._sock, fd], [], [])
+        rd, unused_wd, unused_xd = select.select([self._sock, fd], [], [])
 
         if fd in rd:
           self._sock.send(os.read(fd, _BUFSIZE))
@@ -476,14 +479,14 @@ class Ghost(object):
     logging.info('SpawnTTYServer: terminated')
     sys.exit(0)
 
-  def SpawnShellServer(self, _):
+  def SpawnShellServer(self, unused_var):
     """Spawn a shell server and forward input/output from/to the TCP socket."""
     logging.info('SpawnShellServer: started')
 
     # Add ghost executable to PATH
     script_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     env = os.environ.copy()
-    env['PATH'] = os.getenv('PATH') + ':%s' % script_dir
+    env['PATH'] = '%s:%s' % (script_dir, os.getenv('PATH'))
 
     # Execute shell command from HOME directory
     os.chdir(os.getenv('HOME', '/tmp'))
@@ -500,8 +503,10 @@ class Ghost(object):
     make_non_block(p.stderr)
 
     try:
+
       while True:
-        rd, _, _ = select.select([p.stdout, p.stderr, self._sock], [], [])
+        rd, unused_wd, unused_xd = select.select(
+            [p.stdout, p.stderr, self._sock], [], [self._sock])
         if p.stdout in rd:
           self._sock.send(p.stdout.read(_BUFSIZE))
 
@@ -512,21 +517,30 @@ class Ghost(object):
           ret = self._sock.recv(_BUFSIZE)
           if len(ret) == 0:
             raise RuntimeError('connection terminated')
-          p.stdin.write(ret)
+
+          try:
+            idx = ret.index(_STDIN_CLOSED * 2)
+            p.stdin.write(ret[:idx])
+            p.stdin.close()
+          except ValueError:
+            p.stdin.write(ret)
         p.poll()
         if p.returncode != None:
           break
     except Exception as e:
       logging.error('SpawnShellServer: %s', e)
     finally:
-      # Send SIGTERM to process, then wait for 1 second. Send another SIGKILL
-      # to make sure the process is terminated.
-      try:
-        p.terminate()
-        time.sleep(1)
-        p.kill()
-      except Exception:
-        pass
+      # Check if the process is terminated. If not, Send SIGTERM to process,
+      # then wait for 1 second. Send another SIGKILL to make sure the process is
+      # terminated.
+      p.poll()
+      if p.returncode is None:
+        try:
+          p.terminate()
+          time.sleep(1)
+          p.kill()
+        except Exception:
+          pass
 
       p.wait()
       self._sock.close()
@@ -534,7 +548,7 @@ class Ghost(object):
     logging.info('SpawnShellServer: terminated')
     sys.exit(0)
 
-  def InitiateFileOperation(self, _):
+  def InitiateFileOperation(self, unused_var):
     if self._file_op[0] == 'download':
       try:
         size = os.stat(self._file_op[1]).st_size
@@ -587,7 +601,7 @@ class Ghost(object):
           os.fchmod(f.fileno(), self._file_op[2])
 
         while True:
-          rd, _, _ = select.select([self._sock], [], [])
+          rd, unused_wd, unused_xd = select.select([self._sock], [], [])
           if self._sock in rd:
             buf = self._sock.recv(_BLOCK_SIZE)
             if len(buf) == 0:
@@ -603,7 +617,7 @@ class Ghost(object):
     logging.info('StartUploadServer: terminated')
     sys.exit(0)
 
-  def SpawnPortForwardServer(self, _):
+  def SpawnPortForwardServer(self, unused_var):
     """Spawn a port forwarding server and forward I/O to the TCP socket."""
     logging.info('SpawnPortForwardServer: started')
 
@@ -620,7 +634,7 @@ class Ghost(object):
         self._buf = ''
 
       while True:
-        rd, _, _ = select.select([self._sock, src_sock], [], [])
+        rd, unused_wd, unused_xd = select.select([self._sock, src_sock], [], [])
 
         if self._sock in rd:
           data = self._sock.recv(_BUFSIZE)
@@ -791,7 +805,8 @@ class Ghost(object):
   def Listen(self):
     try:
       while True:
-        rds, _, _ = select.select([self._sock], [], [], _PING_INTERVAL / 2)
+        rds, unused_wd, unused_xd = select.select([self._sock], [], [],
+                                                  _PING_INTERVAL / 2)
 
         if self._sock in rds:
           data = self._sock.recv(_BUFSIZE)
@@ -909,7 +924,7 @@ class Ghost(object):
 
       logging.info('LAN Discovery: started')
       while True:
-        rd, _, _ = select.select([s], [], [], 1)
+        rd, unused_wd, unused_xd = select.select([s], [], [], 1)
 
         if s in rd:
           data, source_addr = s.recvfrom(_BUFSIZE)
@@ -991,7 +1006,7 @@ class Ghost(object):
           logging.info('%s, retrying in %ds', e.message, _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
         except Exception as e:
-          _, _, exc_traceback = sys.exc_info()
+          unused_x, unused_y, exc_traceback = sys.exc_info()
           traceback.print_tb(exc_traceback)
           logging.info('%s: %s, retrying in %ds',
                        e.__class__.__name__, e.message, _RETRY_INTERVAL)

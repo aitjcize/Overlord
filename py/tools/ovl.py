@@ -61,8 +61,13 @@ _RETRY_TIMES = 3
 # echo -n overlord | md5sum
 _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
 
+# Terminal resize control
 _CONTROL_START = 128
 _CONTROL_END = 129
+
+# Stream control
+_STDIN_CLOSED = '##STDIN_CLOSED##'
+
 _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
                                           'ovl-ssh-control-')
 
@@ -401,7 +406,7 @@ class TerminalWebSocketClient(WebSocketBaseClient):
           elif state == ESCAPE_PRESSED:
             if ch == '.':
               self.close()
-              raise RuntimeError('quit')
+              break
           else:
             state = READY
 
@@ -437,7 +442,21 @@ class ShellWebSocketClient(WebSocketBaseClient):
     pass
 
   def opened(self):
-    pass
+    def _FeedInput():
+      try:
+        while True:
+          data = sys.stdin.read(1)
+
+          if len(data) == 0:
+            self.send(_STDIN_CLOSED * 2)
+            break
+          self.send(data, binary=True)
+      except (KeyboardInterrupt, RuntimeError):
+        pass
+
+    t = threading.Thread(target=_FeedInput)
+    t.daemon = True
+    t.start()
 
   def closed(self, code, reason=None):
     pass
@@ -468,13 +487,13 @@ class ForwarderWebSocketClient(WebSocketBaseClient):
           if self._sock in rd:
             data = self._sock.recv(_BUFSIZ)
             if len(data) == 0:
+              self.close()
               break
             self.send(data, binary=True)
       except Exception:
         pass
       finally:
         self._sock.close()
-        self.close()
 
     t = threading.Thread(target=_FeedInput)
     t.daemon = True
@@ -902,8 +921,14 @@ class OverlordCLIClient(object):
                                 (self._state.host, self._state.port,
                                  self._selected_mid, urllib2.quote(cmd)),
                                 headers=headers)
-    ws.connect()
-    ws.run()
+    try:
+      ws.connect()
+      ws.run()
+    except socket.error as e:
+      if e.errno == 32:  # Broken pipe
+        pass
+      else:
+        raise
 
   @Command('push', 'push a file or directory to remote', [
       Arg('src', metavar='SOURCE'),
@@ -1089,6 +1114,9 @@ class OverlordCLIClient(object):
       return
 
     self.CheckClient()
+
+    if args.remote is None:
+      raise RuntimeError('remote port not specified')
 
     if args.local is None:
       args.local = args.remote
