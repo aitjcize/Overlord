@@ -62,7 +62,7 @@ type ConnServer struct {
 	lastPing    int64                  // Last time the client pinged
 }
 
-func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
+func NewConnServer(ovl *Overlord, conn *net.TCPConn) *ConnServer {
 	return &ConnServer{
 		RPCCore:    NewRPCCore(conn),
 		Mode:       NONE,
@@ -245,13 +245,6 @@ func (self *ConnServer) Listen() {
 			case TERMINAL, SHELL, FORWARD:
 				// Start a goroutine to forward the WebSocket Input
 				go self.forwardWSInput()
-			case LOGCAT:
-				// A logcat client does not wait for ACK before sending
-				// stream, so we need to forward the remaining content of the buffer
-				if self.ReadBuffer != "" {
-					self.forwardLogcatOutput(self.ReadBuffer)
-					self.ReadBuffer = ""
-				}
 			}
 		case err := <-readErrChan:
 			if err == io.EOF {

@@ -935,10 +935,6 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 		stopConn <- true
 	}()
 
-	if self.ReadBuffer != "" {
-		conn.Write([]byte(self.ReadBuffer))
-	}
-
 	for {
 		select {
 		case buf := <-self.readChan:
@@ -968,7 +964,7 @@ func (self *Ghost) Register() error {
 		conn, err := net.DialTimeout("tcp", addr, CONNECT_TIMEOUT*time.Second)
 		if err == nil {
 			log.Println("Connection established, registering...")
-			self.Conn = conn
+			self.Conn = NewBufferedTCPConn(conn.(*net.TCPConn))
 			req := NewRequest("register", map[string]interface{}{
 				"mid":        self.mid,
 				"sid":        self.sid,
@@ -1049,11 +1045,6 @@ func (self *Ghost) Listen() error {
 		select {
 		case buffer := <-readChan:
 			if self.upload.Ready {
-				if self.ReadBuffer != "" {
-					// Write the leftover from previous ReadBuffer
-					self.upload.Data <- []byte(self.ReadBuffer)
-					self.ReadBuffer = ""
-				}
 				self.upload.Data <- buffer
 				continue
 			}

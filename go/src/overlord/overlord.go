@@ -257,7 +257,7 @@ func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
 
 // Handle TCP Connection.
 func (self *Overlord) handleConnection(conn net.Conn) {
-	handler := NewConnServer(self, conn)
+	handler := NewConnServer(self, conn.(*net.TCPConn))
 	go handler.Listen()
 }
 

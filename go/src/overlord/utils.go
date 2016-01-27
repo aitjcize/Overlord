@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"runtime"
 	"strconv"
@@ -174,4 +175,39 @@ func (p *PollableProcess) Poll() (uint32, error) {
 		return uint32(wstatus), nil
 	}
 	return 0, errors.New("Wait4 failed")
+}
+
+// A buffered net.TCPConn that supports UnRead.
+//Allow putting back data back to the socket for the next Read() call.
+type BufferedTCPConn struct {
+	*net.TCPConn
+	buf []byte
+}
+
+func NewBufferedTCPConn(self *net.TCPConn) *BufferedTCPConn {
+	return &BufferedTCPConn{TCPConn: self}
+}
+
+func (self *BufferedTCPConn) UnRead(b []byte) {
+	self.buf = append(b, self.buf...)
+}
+
+func (self *BufferedTCPConn) Read(b []byte) (n int, err error) {
+	bufsize := len(b)
+
+	if self.buf != nil {
+		if len(self.buf) >= bufsize {
+			copy(b, self.buf[:bufsize])
+			self.buf = self.buf[bufsize:]
+			return bufsize, nil
+		} else {
+			copy(b, self.buf)
+			copied_size := len(self.buf)
+			n, err := self.TCPConn.Read(b[copied_size:])
+			self.buf = nil
+			return n + copied_size, err
+		}
+	} else {
+		return self.TCPConn.Read(b)
+	}
 }
