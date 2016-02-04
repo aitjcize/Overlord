@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -64,11 +65,43 @@ type FileUploadContext struct {
 	Data  chan []byte
 }
 
+type TLSSettings struct {
+	tlsCertFile string      // TLS certificate in PEM format
+	Config      *tls.Config // TLS configuration
+}
+
+func NewTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *TLSSettings {
+	var tlsConfig *tls.Config
+
+	if enableTLSWithoutVerify {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	} else if tlsCertFile != "" {
+		// Load certificate
+		cert, err := ioutil.ReadFile(tlsCertFile)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(cert)
+		tlsConfig = &tls.Config{
+			RootCAs: caCertPool,
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	return &TLSSettings{tlsCertFile, tlsConfig}
+}
+
+func (self *TLSSettings) Enabled() bool {
+	return self.Config != nil
+}
+
 type Ghost struct {
 	*RPCCore
 	addrs           []string               // List of possible Overlord addresses
 	server          *rpc.Server            // RPC server handle
 	connectedAddr   string                 // Current connected Overlord address
+	tlsSettings     *TLSSettings           // TLS settings
 	mode            int                    // mode, see constants.go
 	mid             string                 // Machine ID
 	sid             string                 // Session ID
@@ -91,9 +124,12 @@ type Ghost struct {
 	port            int                    // Port number to forward
 }
 
-func NewGhost(addrs []string, mode int, mid string) *Ghost {
-	var finalMid string
-	var err error
+func NewGhost(addrs []string, tlsSettings *TLSSettings, mode int, mid string) *Ghost {
+
+	var (
+		finalMid string
+		err      error
+	)
 
 	if mid == RANDOM_MID {
 		finalMid = uuid.NewV4().String()
@@ -102,12 +138,13 @@ func NewGhost(addrs []string, mode int, mid string) *Ghost {
 	} else {
 		finalMid, err = GetMachineID()
 		if err != nil {
-			panic(err)
+			log.Fatalln("Unable to get machine ID:", err)
 		}
 	}
 	return &Ghost{
 		RPCCore:         NewRPCCore(nil),
 		addrs:           addrs,
+		tlsSettings:     tlsSettings,
 		mode:            mode,
 		mid:             finalMid,
 		sid:             uuid.NewV4().String(),
@@ -186,7 +223,7 @@ func (self *Ghost) LoadProperties() {
 	}
 }
 
-func (self *Ghost) UseSSL() bool {
+func (self *Ghost) OverlordHTTPSEnabled() bool {
 	parts := strings.Split(self.connectedAddr, ":")
 	conn, err := net.DialTimeout("tcp",
 		fmt.Sprintf("%s:%d", parts[0], OVERLORD_HTTP_PORT),
@@ -216,20 +253,24 @@ func (self *Ghost) Upgrade() error {
 	var buffer bytes.Buffer
 	var client http.Client
 
-	useSSL := self.UseSSL()
+	serverTLSEnabled := self.OverlordHTTPSEnabled()
+
+	if self.tlsSettings.Enabled() && !serverTLSEnabled {
+		return errors.New("Upgrade: TLS enforced but found Overlord HTTP server " +
+			"without TLS enabled! Possible mis-configuration or DNS/IP spoofing " +
+			"detected, abort")
+	}
 
 	proto := "http"
-	if useSSL {
+	if serverTLSEnabled {
 		proto = "https"
 	}
 	parts := strings.Split(self.connectedAddr, ":")
 	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
 		OVERLORD_HTTP_PORT, GetArchString())
 
-	if useSSL {
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+	if serverTLSEnabled {
+		tr := &http.Transport{TLSClientConfig: self.tlsSettings.Config}
 		client = http.Client{Transport: tr, Timeout: CONNECT_TIMEOUT * time.Second}
 	} else {
 		client = http.Client{Timeout: CONNECT_TIMEOUT * time.Second}
@@ -307,8 +348,8 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, TERMINAL, RANDOM_MID).SetSid(params.Sid).SetTtyDevice(
-			params.TtyDevice)
+		g := NewGhost(addrs, self.tlsSettings, TERMINAL, RANDOM_MID).SetSid(
+			params.Sid).SetTtyDevice(params.TtyDevice)
 		g.Start(false, false)
 	}()
 
@@ -332,7 +373,8 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 		addrs := []string{self.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, SHELL, RANDOM_MID).SetSid(params.Sid).SetCommand(params.Cmd)
+		g := NewGhost(addrs, self.tlsSettings, SHELL, RANDOM_MID).SetSid(
+			params.Sid).SetCommand(params.Cmd)
 		g.Start(false, false)
 	}()
 
@@ -370,8 +412,8 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 	go func() {
 		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-			"download", filename, 0)
+		g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetSid(
+			params.Sid).SetFileOp("download", filename, 0)
 		g.Start(false, false)
 	}()
 
@@ -436,8 +478,8 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 			log.Printf("Received file_upload command, File agent %s spawned\n",
 				params.Sid)
 			addrs := []string{self.connectedAddr}
-			g := NewGhost(addrs, FILE, RANDOM_MID).SetSid(params.Sid).SetFileOp(
-				"upload", destPath, params.Perm)
+			g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetSid(
+				params.Sid).SetFileOp("upload", destPath, params.Perm)
 			g.Start(false, false)
 		}()
 	}
@@ -460,8 +502,8 @@ func (self *Ghost) handleForwardRequest(req *Request) error {
 	go func() {
 		log.Printf("Received forward command, Forward agent %s spawned\n", params.Sid)
 		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, FORWARD, RANDOM_MID).SetSid(params.Sid).SetPort(
-			params.Port)
+		g := NewGhost(addrs, self.tlsSettings, FORWARD, RANDOM_MID).SetSid(
+			params.Sid).SetPort(params.Port)
 		g.Start(false, false)
 	}()
 
@@ -959,12 +1001,25 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 // Register existent to Overlord.
 func (self *Ghost) Register() error {
 	for _, addr := range self.addrs {
+		var (
+			conn net.Conn
+			err  error
+		)
+
 		log.Printf("Trying %s ...\n", addr)
 		self.Reset()
-		conn, err := net.DialTimeout("tcp", addr, CONNECT_TIMEOUT*time.Second)
+
+		conn, err = net.DialTimeout("tcp", addr, CONNECT_TIMEOUT*time.Second)
 		if err == nil {
 			log.Println("Connection established, registering...")
-			self.Conn = NewBufferedTCPConn(conn.(*net.TCPConn))
+			if self.tlsSettings.Enabled() {
+				colonPos := strings.LastIndex(addr, ":")
+				config := self.tlsSettings.Config
+				config.ServerName = addr[:colonPos]
+				conn = tls.Client(conn, config)
+			}
+
+			self.Conn = NewBufferedConn(conn)
 			req := NewRequest("register", map[string]interface{}{
 				"mid":        self.mid,
 				"sid":        self.sid,
@@ -1013,10 +1068,12 @@ func (self *Ghost) Register() error {
 
 // Initiate a client-side download request
 func (self *Ghost) InitiateDownload(info DownloadInfo) {
-	addrs := []string{self.connectedAddr}
-	g := NewGhost(addrs, FILE, RANDOM_MID).SetTerminalSid(
-		self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
-	g.Start(false, false)
+	go func() {
+		addrs := []string{self.connectedAddr}
+		g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetTerminalSid(
+			self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
+		g.Start(false, false)
+	}()
 }
 
 // Reset all states for a new connection.
@@ -1185,7 +1242,7 @@ func (self *Ghost) StartRPCServer() {
 	http.Handle("/", self)
 	err := http.ListenAndServe(fmt.Sprintf("localhost:%d", GHOST_RPC_PORT), nil)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Unable to listen at prt %d: %s\n", GHOST_RPC_PORT, err)
 	}
 }
 
@@ -1239,7 +1296,6 @@ func GhostRPCServer() (*rpc.Client, error) {
 	}
 
 	io.WriteString(conn, "GET / HTTP/1.1\n\n")
-
 	_, err = http.ReadResponse(bufio.NewReader(conn), nil)
 	if err == nil {
 		return jsonrpc.NewClient(conn), nil
@@ -1293,7 +1349,8 @@ fail:
 }
 
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
-	propFile string, download string, reset bool) {
+	tlsCertFile string, enableTLSWithoutVerify bool, propFile string, download string,
+	reset bool) {
 	var addrs []string
 
 	if reset {
@@ -1320,7 +1377,18 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 	addrs = append(addrs, fmt.Sprintf("%s:%d", LOCALHOST, OVERLORD_PORT))
 
-	g := NewGhost(addrs, AGENT, mid)
+	tlsSettings := NewTLSSettings(tlsCertFile, enableTLSWithoutVerify)
+
+	if propFile != "" {
+		var err error
+		propFile, err = filepath.Abs(propFile)
+		if err != nil {
+			log.Println("propFile:", err)
+			os.Exit(1)
+		}
+	}
+
+	g := NewGhost(addrs, tlsSettings, AGENT, mid)
 	g.SetPropFile(propFile)
 	go g.Start(!noLanDisc, !noRPCServer)
 

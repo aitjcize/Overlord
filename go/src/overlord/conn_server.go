@@ -62,7 +62,7 @@ type ConnServer struct {
 	lastPing    int64                  // Last time the client pinged
 }
 
-func NewConnServer(ovl *Overlord, conn *net.TCPConn) *ConnServer {
+func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 	return &ConnServer{
 		RPCCore:    NewRPCCore(conn),
 		Mode:       NONE,

@@ -5,6 +5,7 @@
 package overlord
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,10 +82,17 @@ func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
 	}
 }
 
+// TLSCerts stores the TLS certificate filenames.
+type TLSCerts struct {
+	Cert string // cert.pem filename
+	Key  string // key.pem filename
+}
+
 type Overlord struct {
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
 	noAuth           bool                              // Disable HTTP basic authentication
-	TLSSettings      string                            // TLS settings in the form of "cert.pem,key.pem". Empty to disable TLS
+	certs            *TLSCerts                         // TLS certificate
+	disableLinkTLS   bool                              // Disable TLS between ghost and overlord
 	agents           map[string]*ConnServer            // Normal ghost agents
 	logcats          map[string]map[string]*ConnServer // logcat clients
 	wsctxs           map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
@@ -99,11 +107,22 @@ type Overlord struct {
 	ioserverMu       sync.Mutex                        // Mutex for ioserver
 }
 
-func NewOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) *Overlord {
+func NewOverlord(lanDiscInterface string, noAuth bool, certsString string,
+	disableLinkTLS bool) *Overlord {
+	var certs *TLSCerts
+	if certsString != "" {
+		parts := strings.Split(certsString, ",")
+		if len(parts) != 2 {
+			log.Fatalf("TLSCerts: invalid TLS certs argument")
+		} else {
+			certs = &TLSCerts{parts[0], parts[1]}
+		}
+	}
 	return &Overlord{
 		lanDiscInterface: lanDiscInterface,
 		noAuth:           noAuth,
-		TLSSettings:      TLSSettings,
+		certs:            certs,
+		disableLinkTLS:   disableLinkTLS,
 		agents:           make(map[string]*ConnServer),
 		logcats:          make(map[string]map[string]*ConnServer),
 		wsctxs:           make(map[string]*WebSocketContext),
@@ -257,30 +276,54 @@ func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
 
 // Handle TCP Connection.
 func (self *Overlord) handleConnection(conn net.Conn) {
-	handler := NewConnServer(self, conn.(*net.TCPConn))
+	handler := NewConnServer(self, conn)
 	go handler.Listen()
 }
 
 // Socket server main routine.
 func (self *Overlord) ServSocket(port int) {
-	addrStr := fmt.Sprintf("0.0.0.0:%d", port)
-	addr, err := net.ResolveTCPAddr("tcp", addrStr)
-	if err != nil {
-		panic(err)
+	var (
+		err       error
+		ln        net.Listener
+		tlsConfig *tls.Config
+	)
+
+	addr := fmt.Sprintf("0.0.0.0:%d", port)
+
+	if !self.disableLinkTLS && self.certs != nil { // TLS enabled
+		cert, err := tls.LoadX509KeyPair(self.certs.Cert, self.certs.Key)
+		if err != nil {
+			log.Fatalf("Unable to load TLS cert files: %s\n", err)
+		}
+
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion: tls.VersionTLS12,
+		}
 	}
-	ln, err := net.ListenTCP("tcp", addr)
+
+	ln, err = net.Listen("tcp", addr)
 	if err != nil {
-		panic(err)
+		log.Fatalf("Unable to listen at %s: %s\n", addr, err)
 	}
+	defer ln.Close()
+
 	log.Printf("Overlord started, listening at %s", addr)
 	for {
-		conn, err := ln.AcceptTCP()
+		conn, err := ln.Accept()
 		if err != nil {
-			panic(err)
+			log.Fatalln("Unable to accept client:", err)
 		}
 		log.Printf("Incoming connection from %s\n", conn.RemoteAddr())
-		conn.SetKeepAlive(true)
-		conn.SetKeepAlivePeriod(KEEP_ALIVE_PERIOD * time.Second)
+
+		// Set TCP Keep Alive
+		tcpConn := conn.(*net.TCPConn)
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(KEEP_ALIVE_PERIOD * time.Second)
+
+		if tlsConfig != nil {
+			conn = tls.Server(conn, tlsConfig)
+		}
 		self.handleConnection(conn)
 	}
 }
@@ -289,7 +332,7 @@ func (self *Overlord) ServSocket(port int) {
 func (self *Overlord) InitSocketIOServer() {
 	server, err := socketio.NewServer(nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 
 	server.On("connection", func(so socketio.Socket) {
@@ -316,23 +359,23 @@ func (self *Overlord) InitSocketIOServer() {
 func (self *Overlord) GetAppDir() string {
 	execPath, err := GetExecutablePath()
 	if err != nil {
-		log.Fatalf(err.Error())
+		log.Fatalln(err)
 	}
 	execDir := filepath.Dir(execPath)
 
 	appDir, err := filepath.Abs(filepath.Join(execDir, "app"))
 	if err != nil {
-		log.Fatalf(err.Error())
+		log.Fatalln(err)
 	}
 
 	if _, err := os.Stat(appDir); err != nil {
 		// Try system install directory
 		appDir, err = filepath.Abs(filepath.Join(execDir, SYSTEM_APP_DIR, "app"))
 		if err != nil {
-			log.Fatalf(err.Error())
+			log.Fatalln(err)
 		}
 		if _, err := os.Stat(appDir); err != nil {
-			log.Fatalf("Can not find app directory\n")
+			log.Fatalln("Can not find app directory")
 		}
 	}
 	return appDir
@@ -881,7 +924,7 @@ func (self *Overlord) ServHTTP(port int) {
 	// Serve all apps
 	appNames, err := self.GetAppNames(false)
 	if err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 
 	for _, app := range appNames {
@@ -897,13 +940,9 @@ func (self *Overlord) ServHTTP(port int) {
 	}
 
 	webServerAddr := fmt.Sprintf("%s:%d", WEBSERVER_HOST, port)
-
-	if self.TLSSettings != "" {
-		parts := strings.Split(self.TLSSettings, ",")
-		if len(parts) != 2 {
-			log.Fatalf("TLSSettings: invalid key assignment")
-		}
-		err = http.ListenAndServeTLS(webServerAddr, parts[0], parts[1], nil)
+	if self.certs != nil {
+		err = http.ListenAndServeTLS(webServerAddr, self.certs.Cert,
+			self.certs.Key, nil)
 	} else {
 		err = http.ListenAndServe(webServerAddr, nil)
 	}
@@ -962,7 +1001,7 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 
 	conn, err := net.Dial("udp", fmt.Sprintf("%s:%d", bcastIP, port))
 	if err != nil {
-		panic(err)
+		log.Fatalln("Unable to start UDP broadcast:", err)
 	}
 
 	ticker := time.NewTicker(time.Duration(LD_INTERVAL * time.Second))
@@ -991,7 +1030,8 @@ func (self *Overlord) Serv() {
 	}
 }
 
-func StartOverlord(lanDiscInterface string, noAuth bool, TLSSettings string) {
-	ovl := NewOverlord(lanDiscInterface, noAuth, TLSSettings)
+func StartOverlord(lanDiscInterface string, noAuth bool, certsString string,
+	disableLinkTLS bool) {
+	ovl := NewOverlord(lanDiscInterface, noAuth, certsString, disableLinkTLS)
 	ovl.Serv()
 }

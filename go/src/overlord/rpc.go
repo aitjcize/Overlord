@@ -106,12 +106,12 @@ type Responder struct {
 
 // RPCCore is the core implementation of the TCP-based 2-way RPC protocol.
 type RPCCore struct {
-	Conn       *BufferedTCPConn     // handle to the TCP connection
+	Conn       *BufferedConn        // handle to the TCP connection
 	responders map[string]Responder // response handlers
 }
 
-func NewRPCCore(conn *net.TCPConn) *RPCCore {
-	return &RPCCore{Conn: NewBufferedTCPConn(conn),
+func NewRPCCore(conn net.Conn) *RPCCore {
+	return &RPCCore{Conn: NewBufferedConn(conn),
 		responders: make(map[string]Responder)}
 }
 
@@ -171,6 +171,7 @@ func (self *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 		for {
 			buf := make([]byte, BUFSIZ)
 			n, err := self.Conn.Read(buf)
+			readChan <- buf[:n]
 			if err != nil {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
 					continue
@@ -178,7 +179,6 @@ func (self *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 				readErrChan <- err
 				return
 			}
-			readChan <- buf[:n]
 		}
 	}()
 
@@ -216,18 +216,15 @@ func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 	if single {
 		idx := strings.Index(buffer, SEP)
 		if idx == -1 {
+			self.Conn.UnRead([]byte(buffer))
 			return nil
 		}
 		msgsJson = []string{buffer[:idx]}
 		self.Conn.UnRead([]byte(buffer[idx+2:]))
 	} else {
 		msgs := strings.Split(buffer, SEP)
-		if len(msgs) > 0 {
-			self.Conn.UnRead([]byte(msgs[len(msgs)-1]))
-			msgsJson = msgs[:len(msgs)-1]
-		} else {
-			return nil
-		}
+		self.Conn.UnRead([]byte(msgs[len(msgs)-1]))
+		msgsJson = msgs[:len(msgs)-1]
 	}
 
 	for _, msgJson := range msgsJson {
