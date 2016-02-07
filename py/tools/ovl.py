@@ -931,17 +931,10 @@ class OverlordCLIClient(object):
         raise
 
   @Command('push', 'push a file or directory to remote', [
-      Arg('src', metavar='SOURCE'),
+      Arg('srcs', nargs='+', metavar='SOURCE'),
       Arg('dst', metavar='DESTINATION')])
   def Push(self, args):
     self.CheckClient()
-
-    if not os.path.exists(args.src):
-      raise RuntimeError('push: can not stat "%s": no such file or directory'
-                         % args.src)
-
-    if not os.access(args.src, os.R_OK):
-      raise RuntimeError('push: can not open "%s" for reading' % args.src)
 
     @AutoRetry('push', _RETRY_TIMES)
     def _push(src, dst):
@@ -976,26 +969,44 @@ class OverlordCLIClient(object):
                          self._state.username, self._state.password)
       pbar.End()
 
-    if os.path.isdir(args.src):
-      dst_exists = ast.literal_eval(self.CheckOutput(
-          'stat %s >/dev/null 2>&1 && echo True || echo False' % args.dst))
-      for root, unused_x, files in os.walk(args.src):
-        # If destination directory does not exist, we should strip the first
-        # layer of directory. For example: src_dir contains a single file 'A'
-        #
-        # push src_dir dest_dir
-        #
-        # If dest_dir exists, the resulting directory structure should be:
-        #   dest_dir/src_dir/A
-        # If dest_dir does not exist, the resulting directory structure should
-        # be:
-        #   dest_dir/A
-        dst_root = root if dst_exists else root[len(args.src):].lstrip('/')
-        for name in files:
-          _push(os.path.join(root, name),
-                os.path.join(args.dst, dst_root, name))
-    else:
-      _push(args.src, args.dst)
+    def _push_single_target(src, dst):
+      if os.path.isdir(src):
+        dst_exists = ast.literal_eval(self.CheckOutput(
+            'stat %s >/dev/null 2>&1 && echo True || echo False' % dst))
+        for root, unused_x, files in os.walk(src):
+          # If destination directory does not exist, we should strip the first
+          # layer of directory. For example: src_dir contains a single file 'A'
+          #
+          # push src_dir dest_dir
+          #
+          # If dest_dir exists, the resulting directory structure should be:
+          #   dest_dir/src_dir/A
+          # If dest_dir does not exist, the resulting directory structure should
+          # be:
+          #   dest_dir/A
+          dst_root = root if dst_exists else root[len(src):].lstrip('/')
+          for name in files:
+            _push(os.path.join(root, name),
+                  os.path.join(dst, dst_root, name))
+      else:
+        _push(src, dst)
+
+    if len(args.srcs) > 1:
+      dst_type = self.CheckOutput('stat \'%s\' --printf \'%%F\' '
+                                  '2>/dev/null' % args.dst).strip()
+      if not dst_type:
+        raise RuntimeError('push: %s: No such file or directory' % args.dst)
+      if dst_type != 'directory':
+        raise RuntimeError('push: %s: Not a directory' % args.dst)
+
+    for src in args.srcs:
+      if not os.path.exists(src):
+        raise RuntimeError('push: can not stat "%s": no such file or directory'
+                           % src)
+      if not os.access(src, os.R_OK):
+        raise RuntimeError('push: can not open "%s" for reading' % src)
+
+      _push_single_target(src, args.dst)
 
   @Command('pull', 'pull a file or directory from remote', [
       Arg('src', metavar='SOURCE'),
