@@ -11,6 +11,7 @@ import argparse
 import ast
 import base64
 import fcntl
+import getpass
 import hashlib
 import httplib
 import json
@@ -73,7 +74,7 @@ _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
 
 # A string that will always be included in the response of
 # GET http://OVERLORD_SERVER:_OVERLORD_HTTP_PORT
-_OVERLORD_RESPONSE_KEYWORD = '<html>'
+_OVERLORD_RESPONSE_KEYWORD = 'HTTP'
 
 
 def GetVersionDigest():
@@ -321,12 +322,11 @@ class OverlordClientDaemon(object):
         self._state.ssl = True
         self._UrlOpen('%s:%d' % (host, port))
     except urllib2.HTTPError as e:
-      logging.exception(e)
-      return e.getcode()
+      return (e.getcode(), str(e), e.read().strip())
     except Exception as e:
-      logging.exception(e)
       return str(e)
-    return True
+    else:
+      return True
 
   def Clients(self):
     if time.time() - self._state.last_list <= _LIST_CACHE_TIMEOUT:
@@ -823,17 +823,39 @@ class OverlordCLIClient(object):
       ssh_pid = self.SSHTunnel(args.ssh_login, args.host, args.ssh_port)
       host = 'localhost'
 
-    status = self._server.Connect(host, args.port, ssh_pid, args.user,
-                                  args.passwd, orig_host)
-    if status is not True:
-      if isinstance(status, int):
-        if status == 401:
-          msg = '401 Unauthorized'
-        else:
-          msg = 'HTTP %d' % status
+    username_provided = args.user is not None
+    password_provided = args.passwd is not None
+    prompt = False
+
+    for unused_i in range(3):
+      try:
+        if prompt:
+          if not username_provided:
+            args.user = raw_input('Username: ')
+          if not password_provided:
+            args.passwd = getpass.getpass('Password: ')
+
+        ret = self._server.Connect(host, args.port, ssh_pid, args.user,
+                                   args.passwd, orig_host)
+        # HTTPError
+        if isinstance(ret, list):
+          code, except_str, body = ret
+          if code == 401:
+            print('connect: %s' % body)
+            prompt = True
+            if not username_provided or not password_provided:
+              continue
+            else:
+              break
+          else:
+            logging.error('%s; %s', except_str, body)
+
+        if ret is not True:
+          print('can not connect to %s: %s' % (host, ret))
+      except Exception as e:
+        logging.exception(e)
       else:
-        msg = status
-      print('can not connect to %s: %s' % (host, msg))
+        break
 
   @Command('start-server', 'start overlord CLI client server')
   def StartServer(self):
@@ -1171,7 +1193,13 @@ class OverlordCLIClient(object):
 
 
 def main():
-  logging.basicConfig(level=logging.INFO)
+  # Setup logging format
+  logger = logging.getLogger()
+  logger.setLevel(logging.INFO)
+  handler = logging.StreamHandler()
+  formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
+  handler.setFormatter(formatter)
+  logger.addHandler(handler)
 
   # Add DaemonState to JSONRPC lib classes
   Config.instance().classes.add(DaemonState)
