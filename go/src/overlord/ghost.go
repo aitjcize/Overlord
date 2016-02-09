@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pkg/term/termios"
 	"github.com/kr/pty"
 	"github.com/satori/go.uuid"
 	"io"
@@ -703,7 +704,7 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 		}()
 
 		// Register the mapping of sid and ttyName
-		ttyName, err := PtsName(tty)
+		ttyName, err := termios.Ptsname(tty.Fd())
 		if err != nil {
 			return err
 		}
@@ -737,18 +738,19 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 			return err
 		}
 
-		termios, err := TcGetAttr(tty.Fd())
+		var term syscall.Termios
+		err := termios.Tcgetattr(tty.Fd(), &term)
 		if err != nil {
 			return nil
 		}
 
-		CfMakeRaw(termios)
-		termios.Iflag &= (syscall.IXON | syscall.IXOFF)
-		termios.Cflag |= syscall.CLOCAL
-		termios.Ispeed = syscall.B115200
-		termios.Ospeed = syscall.B115200
+		termios.Cfmakeraw(&term)
+		term.Iflag &= (syscall.IXON | syscall.IXOFF)
+		term.Cflag |= syscall.CLOCAL
+		term.Ispeed = syscall.B115200
+		term.Ospeed = syscall.B115200
 
-		if err = TcSetAttr(tty.Fd(), termios); err != nil {
+		if err = termios.Tcsetattr(tty.Fd(), termios.TCSANOW, &term); err != nil {
 			return err
 		}
 

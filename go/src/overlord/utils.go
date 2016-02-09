@@ -15,10 +15,8 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
-	"unsafe"
 )
 
 func GetGateWayIP() ([]string, error) {
@@ -98,17 +96,6 @@ func GetExecutablePath() (string, error) {
 	return path, err
 }
 
-// Return the PtsName for a given tty master file descriptor.
-func PtsName(f *os.File) (string, error) {
-	var n C.uint
-	_, _, err := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), syscall.TIOCGPTN,
-		uintptr(unsafe.Pointer(&n)))
-	if err != 0 {
-		return "", err
-	}
-	return "/dev/pts/" + strconv.Itoa(int(n)), nil
-}
-
 // Return the TTY name of a given file descriptor.
 func TtyName(f *os.File) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), f.Fd()))
@@ -136,33 +123,6 @@ func GetFileSha1(filename string) (string, error) {
 	}
 
 	return fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())), nil
-}
-
-func TcGetAttr(fd uintptr) (*syscall.Termios, error) {
-	var termios syscall.Termios
-	if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TCGETS,
-		uintptr(unsafe.Pointer(&termios))); err != 0 {
-		return nil, err
-	}
-	return &termios, nil
-}
-
-func TcSetAttr(fd uintptr, termios *syscall.Termios) error {
-	if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, fd, syscall.TCSETS,
-		uintptr(unsafe.Pointer(termios))); err != 0 {
-		return err
-	}
-	return nil
-}
-
-func CfMakeRaw(termios *syscall.Termios) {
-	termios.Iflag &^= (syscall.IGNBRK | syscall.BRKINT | syscall.PARMRK |
-		syscall.ISTRIP | syscall.INLCR | syscall.IGNCR | syscall.ICRNL | syscall.IXON)
-	termios.Oflag &^= syscall.OPOST
-	termios.Lflag &^= (syscall.ECHO | syscall.ECHONL | syscall.ICANON |
-		syscall.ISIG | syscall.IEXTEN)
-	termios.Cflag &^= (syscall.CSIZE | syscall.PARENB)
-	termios.Cflag |= syscall.CS8
 }
 
 type PollableProcess os.Process
