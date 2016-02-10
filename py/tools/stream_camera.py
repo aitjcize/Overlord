@@ -10,6 +10,7 @@
 import argparse
 import atexit
 import BaseHTTPServer
+import platform
 import struct
 import subprocess
 import sys
@@ -51,12 +52,23 @@ def StartCaptureProcess(args):
   Returns:
     handler for the subprocess
   """
-  return subprocess.Popen(
-      'sleep 1; '
-      'ffmpeg -an -s %s -f video4linux2 -i %s -f mpeg1video -b %s -r %d '
-      'http://localhost:%s/' % (args.size, args.device, args.bitrate,
-                                args.framerate, _SERVER_PORT),
-      stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+  system = platform.system()
+
+  if system == "Linux":
+    return subprocess.Popen(
+        'sleep 1; '
+        'ffmpeg -an -s %s -f video4linux2 -i %s -f mpeg1video -b:v %s -r %d '
+        'http://localhost:%s/' % (args.size, args.device, args.bitrate,
+                                  args.framerate, _SERVER_PORT),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+  elif system == "Darwin":
+    return subprocess.Popen(
+        'sleep 1; '
+        'ffmpeg -an -f avfoundation -video_size %s -framerate %d -i %s -b:v %s '
+        '-f mpeg1video -r %d http://localhost:%s/' %
+        (args.size, args.framerate, args.device, args.bitrate, args.framerate,
+         _SERVER_PORT),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
 
 
 def StopCaptureProcess(handler):
@@ -80,7 +92,7 @@ def main():
   atexit.register(StopCaptureProcess, handler)
 
   server = BaseHTTPServer.HTTPServer(
-      ('0.0.0.0', _SERVER_PORT), ForwardToStdoutRequestHandler)
+      ('localhost', _SERVER_PORT), ForwardToStdoutRequestHandler)
   server.size = args.size
   server.serve_forever()
 

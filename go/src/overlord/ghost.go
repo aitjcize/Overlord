@@ -268,7 +268,7 @@ func (self *Ghost) Upgrade() error {
 	}
 	parts := strings.Split(self.connectedAddr, ":")
 	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
-		OVERLORD_HTTP_PORT, GetArchString())
+		OVERLORD_HTTP_PORT, GetPlatformString())
 
 	if serverTLSEnabled {
 		tr := &http.Transport{TLSClientConfig: self.tlsSettings.Config}
@@ -455,7 +455,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 	} else {
 		if params.TerminalSid != "" {
 			if pid, ok := self.terminalSid2Pid[params.TerminalSid]; ok {
-				cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+				cwd, err := GetProcessWorkingDirectory(pid)
 				if err == nil {
 					targetDir = cwd
 				}
@@ -1361,7 +1361,7 @@ func DownloadFile(filename string) {
 	}
 	f.Close()
 
-	ttyName, err = TtyName(os.Stdout)
+	ttyName, err = Ttyname(os.Stdout.Fd())
 	if err != nil {
 		goto fail
 	}

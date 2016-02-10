@@ -1,4 +1,4 @@
-#!/usr/bin/python -u
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
@@ -7,11 +7,14 @@
 
 import argparse
 import contextlib
+import ctypes
+import ctypes.util
 import fcntl
 import hashlib
 import json
 import logging
 import os
+import platform
 import Queue
 import re
 import select
@@ -195,6 +198,7 @@ class Ghost(object):
     if mode == Ghost.FILE:
       assert file_op is not None
 
+    self._platform = platform.system()
     self._overlord_addrs = overlord_addrs
     self._connected_addr = None
     self._tls_settings = tls_settings
@@ -322,13 +326,14 @@ class Ghost(object):
 
   def CloseSockets(self):
     # Close sockets opened by parent process, since we don't use it anymore.
-    for fd in os.listdir('/proc/self/fd/'):
-      try:
-        real_fd = os.readlink('/proc/self/fd/%s' % fd)
-        if real_fd.startswith('socket'):
-          os.close(int(fd))
-      except Exception:
-        pass
+    if self._platform == 'Linux':
+      for fd in os.listdir('/proc/self/fd/'):
+        try:
+          real_fd = os.readlink('/proc/self/fd/%s' % fd)
+          if real_fd.startswith('socket'):
+            os.close(int(fd))
+        except Exception:
+          pass
 
   def SpawnGhost(self, mode, sid=None, terminal_sid=None, tty_device=None,
                  command=None, file_op=None, port=None):
@@ -357,22 +362,31 @@ class Ghost(object):
     return int(time.time())
 
   def GetGateWayIP(self):
-    with open('/proc/net/route', 'r') as f:
-      lines = f.readlines()
+    if self._platform == 'Darwin':
+      output = subprocess.check_output(['route', '-n', 'get', 'default'])
+      ret = re.search('gateway: (.*)', output)
+      if ret:
+        return [ret.group(1)]
+    elif self._platform == 'Linux':
+      with open('/proc/net/route', 'r') as f:
+        lines = f.readlines()
 
-    ips = []
-    for line in lines:
-      parts = line.split('\t')
-      if parts[2] == '00000000':
-        continue
+      ips = []
+      for line in lines:
+        parts = line.split('\t')
+        if parts[2] == '00000000':
+          continue
 
-      try:
-        h = parts[2].decode('hex')
-        ips.append('%d.%d.%d.%d' % tuple(ord(x) for x in reversed(h)))
-      except TypeError:
-        pass
+        try:
+          h = parts[2].decode('hex')
+          ips.append('%d.%d.%d.%d' % tuple(ord(x) for x in reversed(h)))
+        except TypeError:
+          pass
 
-    return ips
+      return ips
+    else:
+      logging.warning('GetGateWayIP: unsupported platform')
+      return []
 
   def GetShopfloorIP(self):
     try:
@@ -390,17 +404,29 @@ class Ghost(object):
   def GetMachineID(self):
     """Generates machine-dependent ID string for a machine.
     There are many ways to generate a machine ID:
-    1. factory device_id
-    2. factory device-data
-    3. /sys/class/dmi/id/product_uuid (only available on intel machines)
-    4. MAC address
-    We follow the listed order to generate machine ID, and fallback to the next
-    alternative if the previous doesn't work.
+    Linux:
+      1. factory device_id
+      2. factory device-data
+      3. /sys/class/dmi/id/product_uuid (only available on intel machines)
+      4. MAC address
+      We follow the listed order to generate machine ID, and fallback to the
+      next alternative if the previous doesn't work.
+
+    Darwin:
+      All Darwin system should have the IOPlatformSerialNumber attribute.
     """
     if self._mid == Ghost.RANDOM_MID:
       return str(uuid.uuid4())
     elif self._mid:
       return self._mid
+
+    # Darwin
+    if self._platform == 'Darwin':
+      output = subprocess.check_output(['ioreg', '-rd1', '-c',
+                                        'IOPlatformExpertDevice'])
+      ret = re.search('"IOPlatformSerialNumber" = "(.*)"', output)
+      if ret:
+        return ret.group(1)
 
     # Try factory device id
     try:
@@ -446,6 +472,24 @@ class Ghost(object):
       pass
 
     raise RuntimeError('can\'t generate machine ID')
+
+  def GetProcessWorkingDirectory(self, pid):
+    if self._platform == 'Linux':
+      return os.readlink('/proc/%d/cwd' % pid)
+    elif self._platform == 'Darwin':
+      PROC_PIDVNODEPATHINFO = 9
+      proc_vnodepathinfo_size = 2352
+      vid_path_offset = 152
+
+      proc = ctypes.cdll.LoadLibrary(ctypes.util.find_library('libproc'))
+      buf = ctypes.create_string_buffer('\0' * proc_vnodepathinfo_size)
+      proc.proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0,
+                        ctypes.byref(buf), proc_vnodepathinfo_size)
+      buf = buf.raw[vid_path_offset:]
+      n = buf.index('\0')
+      return buf[:n]
+    else:
+      raise RuntimeError('GetProcessWorkingDirectory: unsupported platform')
 
   def Reset(self):
     """Reset state and clear request handlers."""
@@ -499,7 +543,7 @@ class Ghost(object):
         pid, fd = os.forkpty()
 
         if pid == 0:
-          ttyname = os.readlink('/proc/%d/fd/0' % os.getpid())
+          ttyname = os.ttyname(sys.stdout.fileno())
           try:
             server = GhostRPCServer()
             server.RegisterTTY(self._session_id, ttyname)
@@ -801,7 +845,10 @@ class Ghost(object):
       if params.has_key('terminal_sid'):
         pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
         if pid:
-          target_dir = os.readlink('/proc/%d/cwd' % pid)
+          try:
+            target_dir = self.GetProcessWorkingDirectory(pid)
+          except Exception as e:
+            logging.error(e)
 
       dest_path = os.path.join(target_dir, filename)
 
