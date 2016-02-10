@@ -762,40 +762,53 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 	var write_buffer bytes.Buffer
 	control_state := CONTROL_NONE
 
+	processBuffer := func(buffer []byte) error {
+		write_buffer.Reset()
+		for len(buffer) > 0 {
+			if control_state != CONTROL_NONE {
+				index := bytes.IndexByte(buffer, CONTROL_END)
+				if index != -1 {
+					control_buffer.Write(buffer[:index])
+					err := self.HandleTTYControl(tty, control_buffer.String())
+					control_state = CONTROL_NONE
+					control_buffer.Reset()
+					if err != nil {
+						return err
+					}
+					buffer = buffer[index+1:]
+				} else {
+					control_buffer.Write(buffer)
+					buffer = buffer[0:0]
+				}
+			} else {
+				index := bytes.IndexByte(buffer, CONTROL_START)
+				if index != -1 {
+					control_state = CONTROL_START
+					write_buffer.Write(buffer[:index])
+					buffer = buffer[index+1:]
+				} else {
+					write_buffer.Write(buffer)
+					buffer = buffer[0:0]
+				}
+			}
+		}
+		if write_buffer.Len() != 0 {
+			tty.Write(write_buffer.Bytes())
+		}
+		return nil
+	}
+
+	if self.ReadBuffer != "" {
+		processBuffer([]byte(self.ReadBuffer))
+		self.ReadBuffer = ""
+	}
+
 	for {
 		select {
 		case buffer := <-self.readChan:
-			write_buffer.Reset()
-			for len(buffer) > 0 {
-				if control_state != CONTROL_NONE {
-					index := bytes.IndexByte(buffer, CONTROL_END)
-					if index != -1 {
-						control_buffer.Write(buffer[:index])
-						err := self.HandleTTYControl(tty, control_buffer.String())
-						control_state = CONTROL_NONE
-						control_buffer.Reset()
-						if err != nil {
-							return err
-						}
-						buffer = buffer[index+1:]
-					} else {
-						control_buffer.Write(buffer)
-						buffer = buffer[0:0]
-					}
-				} else {
-					index := bytes.IndexByte(buffer, CONTROL_START)
-					if index != -1 {
-						control_state = CONTROL_START
-						write_buffer.Write(buffer[:index])
-						buffer = buffer[index+1:]
-					} else {
-						write_buffer.Write(buffer)
-						buffer = buffer[0:0]
-					}
-				}
-			}
-			if write_buffer.Len() != 0 {
-				tty.Write(write_buffer.Bytes())
+			err := processBuffer(buffer)
+			if err != nil {
+				log.Println("SpawnTTYServer:", err)
 			}
 		case err := <-self.readErrChan:
 			if err == io.EOF {
@@ -858,6 +871,11 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 	}
 
 	stopConn := make(chan bool, 1)
+
+	if self.ReadBuffer != "" {
+		stdin.Write([]byte(self.ReadBuffer))
+		self.ReadBuffer = ""
+	}
 
 	go io.Copy(self.Conn, stdout)
 	go func() {
@@ -972,6 +990,11 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 
 	stopConn := make(chan bool, 1)
 
+	if self.ReadBuffer != "" {
+		conn.Write([]byte(self.ReadBuffer))
+		self.ReadBuffer = ""
+	}
+
 	go func() {
 		io.Copy(self.Conn, conn)
 		stopConn <- true
@@ -1019,7 +1042,7 @@ func (self *Ghost) Register() error {
 				conn = tls.Client(conn, config)
 			}
 
-			self.Conn = NewBufferedConn(conn)
+			self.Conn = conn
 			req := NewRequest("register", map[string]interface{}{
 				"mid":        self.mid,
 				"sid":        self.sid,
@@ -1102,6 +1125,11 @@ func (self *Ghost) Listen() error {
 		select {
 		case buffer := <-readChan:
 			if self.upload.Ready {
+				if self.ReadBuffer != "" {
+					// Write the leftover from previous ReadBuffer
+					self.upload.Data <- []byte(self.ReadBuffer)
+					self.ReadBuffer = ""
+				}
 				self.upload.Data <- buffer
 				continue
 			}
