@@ -29,22 +29,25 @@ import (
 )
 
 const (
-	SYSTEM_APP_DIR    = "../share/overlord"
-	WEBSERVER_HOST    = "0.0.0.0"
-	LD_INTERVAL       = 5
-	KEEP_ALIVE_PERIOD = 1
+	systemAppDir    = "../share/overlord"
+	webServerHost   = "0.0.0.0"
+	ldInterval      = 5
+	keepAlivePeriod = 1
 )
 
+// SpawnTerminalCmd is an overlord intend to launch a terminal.
 type SpawnTerminalCmd struct {
 	Sid       string // Session ID
 	TtyDevice string // Termainl device to open
 }
 
+// SpawnShellCmd is an overlord intend to launch a shell command.
 type SpawnShellCmd struct {
 	Sid     string // Session ID
 	Command string // Command to execute
 }
 
+// SpawnFileCmd is an overlord intend to perform file transfer.
 type SpawnFileCmd struct {
 	Sid         string // Session ID
 	TerminalSid string // Target terminal's session ID
@@ -55,28 +58,31 @@ type SpawnFileCmd struct {
 	CheckOnly   bool   // Check permission only (writable?)
 }
 
-type SpawnForwarderCmd struct {
+// SpawnModeForwarderCmd is an overlord intend to perform port forwarding.
+type SpawnModeForwarderCmd struct {
 	Sid  string // Session ID
 	Port int    // Port to forward
 }
 
+// ConnectLogcatCmd is an overlord intend to connect to a logcat session.
 type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
 }
 
-// WebSocketContext is used for maintaining the session information of
+// webSocketContext is used for maintaining the session information of
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
 // will request a new terminal connection with the given session ID.
-// This way, the ConnServer can retreive the connresponding WebSocketContext
+// This way, the ConnServer can retreive the connresponding webSocketContext
 // with it's the given session ID and get the WebSocket.
-type WebSocketContext struct {
+type webSocketContext struct {
 	Sid  string          // Session ID
 	Conn *websocket.Conn // WebSocket connection
 }
 
-func NewWebsocketContext(conn *websocket.Conn) *WebSocketContext {
-	return &WebSocketContext{
+// newWebsocketContext create  webSocketContext object.
+func newWebsocketContext(conn *websocket.Conn) *webSocketContext {
+	return &webSocketContext{
 		Sid:  uuid.NewV4().String(),
 		Conn: conn,
 	}
@@ -88,6 +94,7 @@ type TLSCerts struct {
 	Key  string // key.pem filename
 }
 
+// Overlord type is the main context for storing the overlord server state.
 type Overlord struct {
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
 	noAuth           bool                              // Disable HTTP basic authentication
@@ -95,7 +102,7 @@ type Overlord struct {
 	disableLinkTLS   bool                              // Disable TLS between ghost and overlord
 	agents           map[string]*ConnServer            // Normal ghost agents
 	logcats          map[string]map[string]*ConnServer // logcat clients
-	wsctxs           map[string]*WebSocketContext      // (sid, WebSocketContext) mapping
+	wsctxs           map[string]*webSocketContext      // (sid, webSocketContext) mapping
 	downloads        map[string]*ConnServer            // Download file agents
 	uploads          map[string]*ConnServer            // Upload file agents
 	ioserver         *socketio.Server                  // SocketIO server handle
@@ -107,6 +114,7 @@ type Overlord struct {
 	ioserverMu       sync.Mutex                        // Mutex for ioserver
 }
 
+// NewOverlord creates an Overlord object.
 func NewOverlord(lanDiscInterface string, noAuth bool, certsString string,
 	disableLinkTLS bool) *Overlord {
 	var certs *TLSCerts
@@ -125,14 +133,14 @@ func NewOverlord(lanDiscInterface string, noAuth bool, certsString string,
 		disableLinkTLS:   disableLinkTLS,
 		agents:           make(map[string]*ConnServer),
 		logcats:          make(map[string]map[string]*ConnServer),
-		wsctxs:           make(map[string]*WebSocketContext),
+		wsctxs:           make(map[string]*webSocketContext),
 		downloads:        make(map[string]*ConnServer),
 		uploads:          make(map[string]*ConnServer),
 	}
 }
 
 // Register a client.
-func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
+func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	msg, err := json.Marshal(map[string]interface{}{
 		"mid": conn.Mid,
 		"sid": conn.Sid,
@@ -144,37 +152,37 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	var wsconn *websocket.Conn
 
 	switch conn.Mode {
-	case AGENT:
-		self.agentsMu.Lock()
-		if _, ok := self.agents[conn.Mid]; ok {
-			self.agentsMu.Unlock()
+	case ModeControl:
+		ovl.agentsMu.Lock()
+		if _, ok := ovl.agents[conn.Mid]; ok {
+			ovl.agentsMu.Unlock()
 			return nil, errors.New("duplicate machine ID: " + conn.Mid)
 		}
-		self.agents[conn.Mid] = conn
-		self.agentsMu.Unlock()
-		self.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
-	case TERMINAL, SHELL, FORWARD:
-		self.wsctxsMu.Lock()
-		if ctx, ok := self.wsctxs[conn.Sid]; !ok {
-			self.wsctxsMu.Unlock()
+		ovl.agents[conn.Mid] = conn
+		ovl.agentsMu.Unlock()
+		ovl.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
+	case ModeTerminal, ModeShell, ModeForward:
+		ovl.wsctxsMu.Lock()
+		ctx, ok := ovl.wsctxs[conn.Sid]
+		if !ok {
+			ovl.wsctxsMu.Unlock()
 			return nil, errors.New("client " + conn.Sid + " registered without context")
-		} else {
-			wsconn = ctx.Conn
 		}
-		self.wsctxsMu.Unlock()
-	case LOGCAT:
-		self.logcatsMu.Lock()
-		if _, ok := self.logcats[conn.Mid]; !ok {
-			self.logcats[conn.Mid] = make(map[string]*ConnServer)
+		wsconn = ctx.Conn
+		ovl.wsctxsMu.Unlock()
+	case ModeLogcat:
+		ovl.logcatsMu.Lock()
+		if _, ok := ovl.logcats[conn.Mid]; !ok {
+			ovl.logcats[conn.Mid] = make(map[string]*ConnServer)
 		}
-		if _, ok := self.logcats[conn.Mid][conn.Sid]; ok {
-			self.logcatsMu.Unlock()
+		if _, ok := ovl.logcats[conn.Mid][conn.Sid]; ok {
+			ovl.logcatsMu.Unlock()
 			return nil, errors.New("duplicate session ID: " + conn.Sid)
 		}
-		self.logcats[conn.Mid][conn.Sid] = conn
-		self.logcatsMu.Unlock()
-		self.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
-	case FILE:
+		ovl.logcats[conn.Mid][conn.Sid] = conn
+		ovl.logcatsMu.Unlock()
+		ovl.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
+	case ModeFile:
 		// Do nothing, we wait until 'request_to_download' call from client to
 		// send the message to the browser
 	default:
@@ -182,7 +190,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 	}
 
 	var id string
-	if conn.Mode == AGENT {
+	if conn.Mode == ModeControl {
 		id = conn.Mid
 	} else {
 		id = conn.Sid
@@ -194,7 +202,7 @@ func (self *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 }
 
 // Unregister a client.
-func (self *Overlord) Unregister(conn *ConnServer) {
+func (ovl *Overlord) Unregister(conn *ConnServer) {
 	msg, err := json.Marshal(map[string]interface{}{
 		"mid": conn.Mid,
 		"sid": conn.Sid,
@@ -205,42 +213,42 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 	}
 
 	switch conn.Mode {
-	case AGENT:
-		self.ioserver.BroadcastTo("monitor", "agent left", string(msg))
-		self.agentsMu.Lock()
-		delete(self.agents, conn.Mid)
-		self.agentsMu.Unlock()
-	case LOGCAT:
-		self.logcatsMu.Lock()
-		if _, ok := self.logcats[conn.Mid]; ok {
-			self.ioserver.BroadcastTo("monitor", "logcat left", string(msg))
-			delete(self.logcats[conn.Mid], conn.Sid)
-			if len(self.logcats[conn.Mid]) == 0 {
-				delete(self.logcats, conn.Mid)
+	case ModeControl:
+		ovl.ioserver.BroadcastTo("monitor", "agent left", string(msg))
+		ovl.agentsMu.Lock()
+		delete(ovl.agents, conn.Mid)
+		ovl.agentsMu.Unlock()
+	case ModeLogcat:
+		ovl.logcatsMu.Lock()
+		if _, ok := ovl.logcats[conn.Mid]; ok {
+			ovl.ioserver.BroadcastTo("monitor", "logcat left", string(msg))
+			delete(ovl.logcats[conn.Mid], conn.Sid)
+			if len(ovl.logcats[conn.Mid]) == 0 {
+				delete(ovl.logcats, conn.Mid)
 			}
 		}
-		self.logcatsMu.Unlock()
-	case FILE:
-		self.downloadsMu.Lock()
-		if _, ok := self.downloads[conn.Sid]; ok {
-			delete(self.downloads, conn.Sid)
+		ovl.logcatsMu.Unlock()
+	case ModeFile:
+		ovl.downloadsMu.Lock()
+		if _, ok := ovl.downloads[conn.Sid]; ok {
+			delete(ovl.downloads, conn.Sid)
 		}
-		self.downloadsMu.Unlock()
-		self.uploadsMu.Lock()
-		if _, ok := self.uploads[conn.Sid]; ok {
-			delete(self.uploads, conn.Sid)
+		ovl.downloadsMu.Unlock()
+		ovl.uploadsMu.Lock()
+		if _, ok := ovl.uploads[conn.Sid]; ok {
+			delete(ovl.uploads, conn.Sid)
 		}
-		self.uploadsMu.Unlock()
+		ovl.uploadsMu.Unlock()
 	default:
-		self.wsctxsMu.Lock()
-		if _, ok := self.wsctxs[conn.Sid]; ok {
-			delete(self.wsctxs, conn.Sid)
+		ovl.wsctxsMu.Lock()
+		if _, ok := ovl.wsctxs[conn.Sid]; ok {
+			delete(ovl.wsctxs, conn.Sid)
 		}
-		self.wsctxsMu.Unlock()
+		ovl.wsctxsMu.Unlock()
 	}
 
 	var id string
-	if conn.Mode == AGENT {
+	if conn.Mode == ModeControl {
 		id = conn.Mid
 	} else {
 		id = conn.Sid
@@ -248,40 +256,41 @@ func (self *Overlord) Unregister(conn *ConnServer) {
 	log.Printf("%s %s unregistered\n", ModeStr(conn.Mode), id)
 }
 
-func (self *Overlord) AddWebsocketContext(wc *WebSocketContext) {
-	self.wsctxsMu.Lock()
-	self.wsctxs[wc.Sid] = wc
-	self.wsctxsMu.Unlock()
+// AddWebsocketContext adds an websocket context to the overlord state.
+func (ovl *Overlord) AddWebsocketContext(wc *webSocketContext) {
+	ovl.wsctxsMu.Lock()
+	ovl.wsctxs[wc.Sid] = wc
+	ovl.wsctxsMu.Unlock()
 }
 
-// Register a download request clients.
-func (self *Overlord) RegisterDownloadRequest(conn *ConnServer) {
+// RegisterDownloadRequest registers a file download request.
+func (ovl *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	// Use session ID as download session ID instead of machine ID, so a machine
 	// can have multiple download at the same time
-	self.ioserver.BroadcastTo(conn.TerminalSid, "file download", string(conn.Sid))
-	self.downloadsMu.Lock()
-	self.downloads[conn.Sid] = conn
-	self.downloadsMu.Unlock()
+	ovl.ioserver.BroadcastTo(conn.TerminalSid, "file download", string(conn.Sid))
+	ovl.downloadsMu.Lock()
+	ovl.downloads[conn.Sid] = conn
+	ovl.downloadsMu.Unlock()
 }
 
-// Register a upload request clients.
-func (self *Overlord) RegisterUploadRequest(conn *ConnServer) {
+// RegisterUploadRequest registers a file upload request.
+func (ovl *Overlord) RegisterUploadRequest(conn *ConnServer) {
 	// Use session ID as upload session ID instead of machine ID, so a machine
 	// can have multiple upload at the same time
-	self.ioserver.BroadcastTo(conn.TerminalSid, "file upload", string(conn.Sid))
-	self.uploadsMu.Lock()
-	self.uploads[conn.Sid] = conn
-	self.uploadsMu.Unlock()
+	ovl.ioserver.BroadcastTo(conn.TerminalSid, "file upload", string(conn.Sid))
+	ovl.uploadsMu.Lock()
+	ovl.uploads[conn.Sid] = conn
+	ovl.uploadsMu.Unlock()
 }
 
 // Handle TCP Connection.
-func (self *Overlord) handleConnection(conn net.Conn) {
-	handler := NewConnServer(self, conn)
+func (ovl *Overlord) handleConnection(conn net.Conn) {
+	handler := NewConnServer(ovl, conn)
 	go handler.Listen()
 }
 
-// Socket server main routine.
-func (self *Overlord) ServSocket(port int) {
+// ServSocket is the socket server main routine.
+func (ovl *Overlord) ServSocket(port int) {
 	var (
 		err       error
 		ln        net.Listener
@@ -290,8 +299,8 @@ func (self *Overlord) ServSocket(port int) {
 
 	addr := fmt.Sprintf("0.0.0.0:%d", port)
 
-	if !self.disableLinkTLS && self.certs != nil { // TLS enabled
-		cert, err := tls.LoadX509KeyPair(self.certs.Cert, self.certs.Key)
+	if !ovl.disableLinkTLS && ovl.certs != nil { // TLS enabled
+		cert, err := tls.LoadX509KeyPair(ovl.certs.Cert, ovl.certs.Key)
 		if err != nil {
 			log.Fatalf("Unable to load TLS cert files: %s\n", err)
 		}
@@ -319,17 +328,17 @@ func (self *Overlord) ServSocket(port int) {
 		// Set TCP Keep Alive
 		tcpConn := conn.(*net.TCPConn)
 		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(KEEP_ALIVE_PERIOD * time.Second)
+		tcpConn.SetKeepAlivePeriod(keepAlivePeriod * time.Second)
 
 		if tlsConfig != nil {
 			conn = tls.Server(conn, tlsConfig)
 		}
-		self.handleConnection(conn)
+		ovl.handleConnection(conn)
 	}
 }
 
-// Initialize the Socket.io server.
-func (self *Overlord) InitSocketIOServer() {
+// InitSocketIOServer initializes the Socket.io server.
+func (ovl *Overlord) InitSocketIOServer() {
 	server, err := socketio.NewServer(nil)
 	if err != nil {
 		log.Fatalln(err)
@@ -353,10 +362,11 @@ func (self *Overlord) InitSocketIOServer() {
 		so.Leave(name)
 	})
 
-	self.ioserver = server
+	ovl.ioserver = server
 }
 
-func (self *Overlord) GetAppDir() string {
+// GetAppDir returns the overlord application directory.
+func (ovl *Overlord) GetAppDir() string {
 	execPath, err := GetExecutablePath()
 	if err != nil {
 		log.Fatalln(err)
@@ -370,7 +380,7 @@ func (self *Overlord) GetAppDir() string {
 
 	if _, err := os.Stat(appDir); err != nil {
 		// Try system install directory
-		appDir, err = filepath.Abs(filepath.Join(execDir, SYSTEM_APP_DIR, "app"))
+		appDir, err = filepath.Abs(filepath.Join(execDir, systemAppDir, "app"))
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -381,7 +391,8 @@ func (self *Overlord) GetAppDir() string {
 	return appDir
 }
 
-func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
+// GetAppNames return the name of overlord apps.
+func (ovl *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	var appNames []string
 
 	isSpecial := func(target string) bool {
@@ -393,7 +404,7 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 		return false
 	}
 
-	apps, err := ioutil.ReadDir(self.GetAppDir())
+	apps, err := ioutil.ReadDir(ovl.GetAppDir())
 	if err != nil {
 		return nil, nil
 	}
@@ -407,25 +418,25 @@ func (self *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	return appNames, nil
 }
 
-type ByMid []map[string]interface{}
+type byMid []map[string]interface{}
 
-func (a ByMid) Len() int      { return len(a) }
-func (a ByMid) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a ByMid) Less(i, j int) bool {
+func (a byMid) Len() int      { return len(a) }
+func (a byMid) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a byMid) Less(i, j int) bool {
 	return a[i]["mid"].(string) < a[j]["mid"].(string)
 }
 
-// Web server main routine.
-func (self *Overlord) ServHTTP(port int) {
+// ServHTTP is the Web server main routine.
+func (ovl *Overlord) ServHTTP(port int) {
 	var upgrader = websocket.Upgrader{
-		ReadBufferSize:  BUFSIZ,
-		WriteBufferSize: BUFSIZ,
+		ReadBufferSize:  bufferSize,
+		WriteBufferSize: bufferSize,
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
 	}
 
-	appDir := self.GetAppDir()
+	appDir := ovl.GetAppDir()
 
 	// Helper function for writing error message to WebSocket
 	WebSocketSendError := func(ws *websocket.Conn, err string) {
@@ -439,7 +450,7 @@ func (self *Overlord) ServHTTP(port int) {
 	AppsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		apps, err := self.GetAppNames(true)
+		apps, err := ovl.GetAppNames(true)
 		if err != nil {
 			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		}
@@ -455,16 +466,16 @@ func (self *Overlord) ServHTTP(port int) {
 	// List all agents connected to the Overlord.
 	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]interface{}, 0)
-		self.agentsMu.Lock()
-		for _, agent := range self.agents {
+		var data = make([]map[string]interface{}, 0)
+		ovl.agentsMu.Lock()
+		for _, agent := range ovl.agents {
 			data = append(data, map[string]interface{}{
 				"mid": agent.Mid,
 				"sid": agent.Sid,
 			})
 		}
-		self.agentsMu.Unlock()
-		sort.Sort(ByMid(data))
+		ovl.agentsMu.Unlock()
+		sort.Sort(byMid(data))
 
 		result, err := json.Marshal(data)
 		if err != nil {
@@ -476,26 +487,26 @@ func (self *Overlord) ServHTTP(port int) {
 
 	// Agent upgrade request handler.
 	AgentsUpgradeHandler := func(w http.ResponseWriter, r *http.Request) {
-		self.agentsMu.Lock()
-		for _, agent := range self.agents {
+		ovl.agentsMu.Lock()
+		for _, agent := range ovl.agents {
 			err := agent.SendUpgradeRequest()
 			if err != nil {
 				w.Write([]byte(fmt.Sprintf("Failed to send upgrade request for `%s'.\n",
 					agent.Mid)))
 			}
 		}
-		self.agentsMu.Unlock()
+		ovl.agentsMu.Unlock()
 		w.Write([]byte(`{"status": "success"}`))
 	}
 
 	// List all logcat clients connected to the Overlord.
 	LogcatsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		data := make([]map[string]interface{}, 0)
-		self.logcatsMu.Lock()
-		for mid, logcats := range self.logcats {
+		var data = make([]map[string]interface{}, 0)
+		ovl.logcatsMu.Lock()
+		for mid, logcats := range ovl.logcats {
 			var sids []string
-			for sid, _ := range logcats {
+			for sid := range logcats {
 				sids = append(sids, sid)
 			}
 			data = append(data, map[string]interface{}{
@@ -503,7 +514,7 @@ func (self *Overlord) ServHTTP(port int) {
 				"sids": sids,
 			})
 		}
-		self.logcatsMu.Unlock()
+		ovl.logcatsMu.Unlock()
 
 		result, err := json.Marshal(data)
 		if err != nil {
@@ -529,22 +540,22 @@ func (self *Overlord) ServHTTP(port int) {
 		mid := vars["mid"]
 		sid := vars["sid"]
 
-		self.logcatsMu.Lock()
-		if logcats, ok := self.logcats[mid]; ok {
-			self.logcatsMu.Unlock()
+		ovl.logcatsMu.Lock()
+		if logcats, ok := ovl.logcats[mid]; ok {
+			ovl.logcatsMu.Unlock()
 			if logcat, ok := logcats[sid]; ok {
 				logcat.Command <- ConnectLogcatCmd{conn}
 			} else {
 				WebSocketSendError(conn, "No client with sid "+sid)
 			}
 		} else {
-			self.logcatsMu.Unlock()
+			ovl.logcatsMu.Unlock()
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
 	}
 
 	// TTY stream request handler.
-	// We first create a WebSocketContext to store the connection, then send a
+	// We first create a webSocketContext to store the connection, then send a
 	// command to Overlord to client to spawn a terminal connection.
 	AgentTtyHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Terminal request from %s\n", r.RemoteAddr)
@@ -562,25 +573,25 @@ func (self *Overlord) ServHTTP(port int) {
 			ttyDevice = _ttyDevice[0]
 		}
 
-		self.agentsMu.Lock()
-		if agent, ok := self.agents[mid]; ok {
-			self.agentsMu.Unlock()
-			wc := NewWebsocketContext(conn)
-			self.AddWebsocketContext(wc)
+		ovl.agentsMu.Lock()
+		if agent, ok := ovl.agents[mid]; ok {
+			ovl.agentsMu.Unlock()
+			wc := newWebsocketContext(conn)
+			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnTerminalCmd{wc.Sid, ttyDevice}
 			if res := <-agent.Response; res != "" {
 				WebSocketSendError(conn, res)
 			}
 		} else {
-			self.agentsMu.Unlock()
+			ovl.agentsMu.Unlock()
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
 	}
 
 	// Shell command request handler.
-	// We first create a WebSocketContext to store the connection, then send a
+	// We first create a webSocketContext to store the connection, then send a
 	// command to ConnServer to client to spawn a shell connection.
-	AgentShellHandler := func(w http.ResponseWriter, r *http.Request) {
+	ModeShellHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Shell request from %s\n", r.RemoteAddr)
 
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -591,12 +602,12 @@ func (self *Overlord) ServHTTP(port int) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		self.agentsMu.Lock()
-		if agent, ok := self.agents[mid]; ok {
-			self.agentsMu.Unlock()
+		ovl.agentsMu.Lock()
+		if agent, ok := ovl.agents[mid]; ok {
+			ovl.agentsMu.Unlock()
 			if command, ok := r.URL.Query()["command"]; ok {
-				wc := NewWebsocketContext(conn)
-				self.AddWebsocketContext(wc)
+				wc := newWebsocketContext(conn)
+				ovl.AddWebsocketContext(wc)
 				agent.Command <- SpawnShellCmd{wc.Sid, command[0]}
 				if res := <-agent.Response; res != "" {
 					WebSocketSendError(conn, res)
@@ -605,7 +616,7 @@ func (self *Overlord) ServHTTP(port int) {
 				WebSocketSendError(conn, "No command specified for shell request "+mid)
 			}
 		} else {
-			self.agentsMu.Unlock()
+			ovl.agentsMu.Unlock()
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
 	}
@@ -616,9 +627,9 @@ func (self *Overlord) ServHTTP(port int) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		self.agentsMu.Lock()
-		if agent, ok := self.agents[mid]; ok {
-			self.agentsMu.Unlock()
+		ovl.agentsMu.Lock()
+		if agent, ok := ovl.agents[mid]; ok {
+			ovl.agentsMu.Unlock()
 			jsonResult, err := json.Marshal(agent.Properties)
 			if err != nil {
 				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
@@ -626,7 +637,7 @@ func (self *Overlord) ServHTTP(port int) {
 			}
 			w.Write(jsonResult)
 		} else {
-			self.agentsMu.Unlock()
+			ovl.agentsMu.Unlock()
 			w.Write([]byte(fmt.Sprintf(`{"error": "No client with mid %s"}`, mid)))
 		}
 	}
@@ -665,13 +676,13 @@ func (self *Overlord) ServHTTP(port int) {
 		var agent *ConnServer
 		var ok bool
 
-		self.agentsMu.Lock()
-		if agent, ok = self.agents[mid]; !ok {
-			self.agentsMu.Unlock()
+		ovl.agentsMu.Lock()
+		if agent, ok = ovl.agents[mid]; !ok {
+			ovl.agentsMu.Unlock()
 			http.NotFound(w, r)
 			return
 		}
-		self.agentsMu.Unlock()
+		ovl.agentsMu.Unlock()
 
 		var filename []string
 		if filename, ok = r.URL.Query()["filename"]; !ok {
@@ -700,12 +711,12 @@ func (self *Overlord) ServHTTP(port int) {
 				http.NotFound(w, r)
 				return
 			}
-			self.downloadsMu.Lock()
-			if c, ok = self.downloads[sid]; ok {
-				self.downloadsMu.Unlock()
+			ovl.downloadsMu.Lock()
+			if c, ok = ovl.downloads[sid]; ok {
+				ovl.downloadsMu.Unlock()
 				break
 			}
-			self.downloadsMu.Unlock()
+			ovl.downloadsMu.Unlock()
 			time.Sleep(200 * time.Millisecond)
 		}
 		serveFileHTTP(w, c)
@@ -722,13 +733,13 @@ func (self *Overlord) ServHTTP(port int) {
 		var c *ConnServer
 		var ok bool
 
-		self.downloadsMu.Lock()
-		if c, ok = self.downloads[sid]; !ok {
-			self.downloadsMu.Unlock()
+		ovl.downloadsMu.Lock()
+		if c, ok = ovl.downloads[sid]; !ok {
+			ovl.downloadsMu.Unlock()
 			http.NotFound(w, r)
 			return
 		}
-		self.downloadsMu.Unlock()
+		ovl.downloadsMu.Unlock()
 		serveFileHTTP(w, c)
 	}
 
@@ -748,13 +759,13 @@ func (self *Overlord) ServHTTP(port int) {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		self.agentsMu.Lock()
-		if agent, ok = self.agents[mid]; !ok {
-			self.agentsMu.Unlock()
+		ovl.agentsMu.Lock()
+		if agent, ok = ovl.agents[mid]; !ok {
+			ovl.agentsMu.Unlock()
 			errMsg = fmt.Sprintf("No client with mid %s", mid)
 			return
 		}
-		self.agentsMu.Unlock()
+		ovl.agentsMu.Unlock()
 
 		// Target terminal session ID
 		var terminalSids []string
@@ -770,7 +781,7 @@ func (self *Overlord) ServHTTP(port int) {
 		}
 
 		// Upload destination
-		var perm int64 = 0
+		var perm int64
 		if perms, ok := r.URL.Query()["perm"]; ok {
 			if perm, err = strconv.ParseInt(perms[0], 8, 32); err != nil {
 				errMsg = err.Error()
@@ -825,12 +836,12 @@ func (self *Overlord) ServHTTP(port int) {
 				http.Error(w, "no response from client", http.StatusInternalServerError)
 				return
 			}
-			self.uploadsMu.Lock()
-			if c, ok = self.uploads[sid]; ok {
-				self.uploadsMu.Unlock()
+			ovl.uploadsMu.Lock()
+			if c, ok = ovl.uploads[sid]; ok {
+				ovl.uploadsMu.Unlock()
 				break
 			}
-			self.uploadsMu.Unlock()
+			ovl.uploadsMu.Unlock()
 			time.Sleep(200 * time.Millisecond)
 		}
 
@@ -846,8 +857,8 @@ func (self *Overlord) ServHTTP(port int) {
 	}
 
 	// Port forwarding request handler
-	AgentForwardHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("Forward request from %s\n", r.RemoteAddr)
+	AgentModeForwardHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("ModeForward request from %s\n", r.RemoteAddr)
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
@@ -868,27 +879,27 @@ func (self *Overlord) ServHTTP(port int) {
 			return
 		}
 
-		self.agentsMu.Lock()
-		if agent, ok := self.agents[mid]; ok {
-			self.agentsMu.Unlock()
-			wc := NewWebsocketContext(conn)
-			self.AddWebsocketContext(wc)
-			agent.Command <- SpawnForwarderCmd{wc.Sid, port}
+		ovl.agentsMu.Lock()
+		if agent, ok := ovl.agents[mid]; ok {
+			ovl.agentsMu.Unlock()
+			wc := newWebsocketContext(conn)
+			ovl.AddWebsocketContext(wc)
+			agent.Command <- SpawnModeForwarderCmd{wc.Sid, port}
 			if res := <-agent.Response; res != "" {
 				WebSocketSendError(conn, res)
 			}
 		} else {
-			self.agentsMu.Unlock()
+			ovl.agentsMu.Unlock()
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
 	}
 
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
-		self.noAuth)
+		ovl.noAuth)
 
 	// Initialize socket IO server
-	self.InitSocketIOServer()
+	ovl.InitSocketIOServer()
 
 	// Register the request handlers and start the WebServer.
 	r := mux.NewRouter()
@@ -903,17 +914,17 @@ func (self *Overlord) ServHTTP(port int) {
 
 	// Agent methods
 	r.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
-	r.HandleFunc("/api/agent/shell/{mid}", AgentShellHandler)
+	r.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
 	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
 	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 	r.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
-	r.HandleFunc("/api/agent/forward/{mid}", AgentForwardHandler)
+	r.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)
 
 	// File methods
 	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
 
 	http.Handle("/api/", auth.WrapHandler(r))
-	http.Handle("/api/socket.io/", auth.WrapHandler(self.ioserver))
+	http.Handle("/api/socket.io/", auth.WrapHandler(ovl.ioserver))
 	http.Handle("/upgrade/", http.StripPrefix("/upgrade/",
 		http.FileServer(http.Dir(filepath.Join(appDir, "upgrade")))))
 	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
@@ -922,7 +933,7 @@ func (self *Overlord) ServHTTP(port int) {
 		http.Dir(filepath.Join(appDir, "dashboard")))))
 
 	// Serve all apps
-	appNames, err := self.GetAppNames(false)
+	appNames, err := ovl.GetAppNames(false)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -939,10 +950,10 @@ func (self *Overlord) ServHTTP(port int) {
 			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
 
-	webServerAddr := fmt.Sprintf("%s:%d", WEBSERVER_HOST, port)
-	if self.certs != nil {
-		err = http.ListenAndServeTLS(webServerAddr, self.certs.Cert,
-			self.certs.Key, nil)
+	webServerAddr := fmt.Sprintf("%s:%d", webServerHost, port)
+	if ovl.certs != nil {
+		err = http.ListenAndServeTLS(webServerAddr, ovl.certs.Cert,
+			ovl.certs.Key, nil)
 	} else {
 		err = http.ListenAndServe(webServerAddr, nil)
 	}
@@ -952,12 +963,12 @@ func (self *Overlord) ServHTTP(port int) {
 	}
 }
 
-// Broadcast LAN discovery message.
-func (self *Overlord) StartUDPBroadcast(port int) {
+// StartUDPBroadcast is the main routine for broadcasting LAN discovery message.
+func (ovl *Overlord) StartUDPBroadcast(port int) {
 	ifaceIP := ""
 	bcastIP := net.IPv4bcast.String()
 
-	if self.lanDiscInterface != "" {
+	if ovl.lanDiscInterface != "" {
 		interfaces, err := net.Interfaces()
 		if err != nil {
 			panic(err)
@@ -965,7 +976,7 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 
 	outter:
 		for _, iface := range interfaces {
-			if iface.Name == self.lanDiscInterface {
+			if iface.Name == ovl.lanDiscInterface {
 				addrs, err := iface.Addrs()
 				if err != nil {
 					panic(err)
@@ -995,7 +1006,7 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 
 		if ifaceIP == "" {
 			log.Fatalf("can not found any interface with name %s\n",
-				self.lanDiscInterface)
+				ovl.lanDiscInterface)
 		}
 	}
 
@@ -1004,20 +1015,21 @@ func (self *Overlord) StartUDPBroadcast(port int) {
 		log.Fatalln("Unable to start UDP broadcast:", err)
 	}
 
-	ticker := time.NewTicker(time.Duration(LD_INTERVAL * time.Second))
+	ticker := time.NewTicker(time.Duration(ldInterval * time.Second))
 
 	for {
 		select {
 		case <-ticker.C:
-			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, OVERLORD_PORT)))
+			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, OverlordPort)))
 		}
 	}
 }
 
-func (self *Overlord) Serv() {
-	go self.ServSocket(OVERLORD_PORT)
-	go self.ServHTTP(OVERLORD_HTTP_PORT)
-	go self.StartUDPBroadcast(OVERLORD_LD_PORT)
+// Serv is the main routine for starting all the overlord sub-server.
+func (ovl *Overlord) Serv() {
+	go ovl.ServSocket(OverlordPort)
+	go ovl.ServHTTP(OverlordHTTPPort)
+	go ovl.StartUDPBroadcast(OverlordLDPort)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
 
@@ -1025,11 +1037,12 @@ func (self *Overlord) Serv() {
 		select {
 		case <-ticker.C:
 			log.Printf("#Goroutines, #Ghostclient: %d, %d\n",
-				runtime.NumGoroutine(), len(self.agents))
+				runtime.NumGoroutine(), len(ovl.agents))
 		}
 	}
 }
 
+// StartOverlord starts the overlord server.
 func StartOverlord(lanDiscInterface string, noAuth bool, certsString string,
 	disableLinkTLS bool) {
 	ovl := NewOverlord(lanDiscInterface, noAuth, certsString, disableLinkTLS)

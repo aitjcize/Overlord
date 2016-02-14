@@ -15,35 +15,35 @@ import (
 	"time"
 )
 
+// RegistrationFailedError indicats an registration fail error.
 type RegistrationFailedError error
 
 const (
-	LOG_BUFSIZ        = 1024 * 16
-	PING_RECV_TIMEOUT = PING_TIMEOUT * 2
+	logBufferSize   = 1024 * 16
+	pingRecvTimeout = pingTimeout * 2
 )
 
+// TerminalControl is a JSON struct for storing terminal control messages.
 type TerminalControl struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
 }
 
-type LogcatContext struct {
+type logcatContext struct {
 	Format  int               // Log format, see constants.go
 	WsConns []*websocket.Conn // WebSockets for logcat
 	History string            // Log buffer for logcat
 }
 
-type FileDownloadContext struct {
+type fileDownloadContext struct {
 	Name  string      // Download filename
 	Size  int64       // Download filesize
 	Data  chan []byte // Channel for download data
 	Ready bool        // Ready for download
 }
 
-// Since Shell and Logcat are initiated by Overlord, there is only one observer,
-// i.e. the one who requested the connection. On the other hand, logcat
-// could have multiple observers, so we need to broadcast the result to all of
-// them.
+// ConnServer is the main struct for storing connection context between
+// Overlord and Ghost.
 type ConnServer struct {
 	*RPCCore
 	Mode        int                    // Client mode, see constants.go
@@ -56,70 +56,73 @@ type ConnServer struct {
 	ovl         *Overlord              // Overlord handle
 	registered  bool                   // Whether we are registered or not
 	wsConn      *websocket.Conn        // WebSocket for Terminal and Shell
-	logcat      LogcatContext          // Logcat context
-	Download    FileDownloadContext    // File download context
+	logcat      logcatContext          // Logcat context
+	Download    fileDownloadContext    // File download context
 	stopListen  chan bool              // Stop the Listen() loop
 	lastPing    int64                  // Last time the client pinged
 }
 
+// NewConnServer create a ConnServer object.
 func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 	return &ConnServer{
 		RPCCore:    NewRPCCore(conn),
-		Mode:       NONE,
+		Mode:       ModeNone,
 		Command:    make(chan interface{}),
 		Response:   make(chan string),
 		Properties: make(map[string]interface{}),
 		ovl:        ovl,
 		stopListen: make(chan bool, 1),
 		registered: false,
-		Download:   FileDownloadContext{Data: make(chan []byte)},
+		Download:   fileDownloadContext{Data: make(chan []byte)},
 	}
 }
 
-func (self *ConnServer) SetProperties(prop map[string]interface{}) {
+func (c *ConnServer) setProperties(prop map[string]interface{}) {
 	if prop != nil {
-		self.Properties = prop
+		c.Properties = prop
 	}
 
-	addr := self.Conn.RemoteAddr().String()
+	addr := c.Conn.RemoteAddr().String()
 	parts := strings.Split(addr, ":")
-	self.Properties["ip"] = strings.Join(parts[:len(parts)-1], ":")
+	c.Properties["ip"] = strings.Join(parts[:len(parts)-1], ":")
 }
 
-func (self *ConnServer) StopListen() {
-	self.stopListen <- true
+// StopListen stops ConnServer's Listen loop.
+func (c *ConnServer) StopListen() {
+	c.stopListen <- true
 }
 
-func (self *ConnServer) Terminate() {
-	if self.registered {
-		self.ovl.Unregister(self)
+// Terminate terminats the connection and perform cleanup.
+func (c *ConnServer) Terminate() {
+	if c.registered {
+		c.ovl.Unregister(c)
 	}
-	if self.Conn != nil {
-		self.Conn.Close()
+	if c.Conn != nil {
+		c.Conn.Close()
 	}
-	if self.wsConn != nil {
-		self.wsConn.WriteMessage(websocket.CloseMessage, []byte(""))
-		self.wsConn.Close()
+	if c.wsConn != nil {
+		c.wsConn.WriteMessage(websocket.CloseMessage, []byte(""))
+		c.wsConn.Close()
 	}
 }
 
 // writeWebsocket is a helper function for written text to websocket in the
 // correct format.
-func (self *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
-	if self.Mode == LOGCAT && self.logcat.Format == TEXT {
+func (c *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
+	if c.Mode == ModeLogcat && c.logcat.Format == logcatTypeText {
 		buf = ToVTNewLine(buf)
 	}
 	return conn.WriteMessage(websocket.BinaryMessage, []byte(buf))
 }
 
-// Forwards the input from Websocket to TCP socket.
-func (self *ConnServer) forwardWSInput() {
+// ModeForwards the input from Websocket to TCP socket.
+func (c *ConnServer) forwardWSInput() {
 	defer func() {
-		self.stopListen <- true
+		c.stopListen <- true
 	}()
 
 	for {
-		mt, payload, err := self.wsConn.ReadMessage()
+		mt, payload, err := c.wsConn.ReadMessage()
 		if err != nil {
 			if err == io.EOF {
 				log.Println("WebSocket connection terminated")
@@ -131,7 +134,7 @@ func (self *ConnServer) forwardWSInput() {
 
 		switch mt {
 		case websocket.BinaryMessage, websocket.TextMessage:
-			self.Conn.Write(payload)
+			c.Conn.Write(payload)
 		default:
 			log.Printf("Invalid message type %d\n", mt)
 			return
@@ -140,39 +143,39 @@ func (self *ConnServer) forwardWSInput() {
 	return
 }
 
-// Forward the stream output to WebSocket.
-func (self *ConnServer) forwardWSOutput(buffer string) {
-	if self.wsConn == nil {
-		self.stopListen <- true
+// ModeForward the stream output to WebSocket.
+func (c *ConnServer) forwardWSOutput(buffer string) {
+	if c.wsConn == nil {
+		c.stopListen <- true
 	}
-	self.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
+	c.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
 }
 
-// Forward the logcat output to WebSocket.
-func (self *ConnServer) forwardLogcatOutput(buffer string) {
-	self.logcat.History += buffer
-	if l := len(self.logcat.History); l > LOG_BUFSIZ {
-		self.logcat.History = self.logcat.History[l-LOG_BUFSIZ : l]
+// ModeForward the logcat output to WebSocket.
+func (c *ConnServer) forwardLogcatOutput(buffer string) {
+	c.logcat.History += buffer
+	if l := len(c.logcat.History); l > logBufferSize {
+		c.logcat.History = c.logcat.History[l-logBufferSize : l]
 	}
 
 	var aliveWsConns []*websocket.Conn
-	for _, conn := range self.logcat.WsConns[:] {
-		if err := self.writeLogToWS(conn, buffer); err == nil {
+	for _, conn := range c.logcat.WsConns[:] {
+		if err := c.writeLogToWS(conn, buffer); err == nil {
 			aliveWsConns = append(aliveWsConns, conn)
 		} else {
 			conn.Close()
 		}
 	}
-	self.logcat.WsConns = aliveWsConns
+	c.logcat.WsConns = aliveWsConns
 }
 
-func (self *ConnServer) forwardFileDownloadData(buffer []byte) {
-	self.Download.Data <- buffer
+func (c *ConnServer) forwardFileDownloadData(buffer []byte) {
+	c.Download.Data <- buffer
 }
 
-func (self *ConnServer) ProcessRequests(reqs []*Request) error {
+func (c *ConnServer) processRequests(reqs []*Request) error {
 	for _, req := range reqs {
-		if err := self.handleRequest(req); err != nil {
+		if err := c.handleRequest(req); err != nil {
 			return err
 		}
 	}
@@ -180,48 +183,48 @@ func (self *ConnServer) ProcessRequests(reqs []*Request) error {
 }
 
 // Handle the requests from Overlord.
-func (self *ConnServer) handleOverlordRequest(obj interface{}) {
+func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 	log.Printf("Received %T command from overlord\n", obj)
 	switch v := obj.(type) {
 	case SpawnTerminalCmd:
-		self.SpawnTerminal(v.Sid, v.TtyDevice)
+		c.SpawnTerminal(v.Sid, v.TtyDevice)
 	case SpawnShellCmd:
-		self.SpawnShell(v.Sid, v.Command)
+		c.SpawnShell(v.Sid, v.Command)
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
-		self.writeLogToWS(v.Conn, self.logcat.History)
-		self.logcat.WsConns = append(self.logcat.WsConns, v.Conn)
+		c.writeLogToWS(v.Conn, c.logcat.History)
+		c.logcat.WsConns = append(c.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
-		self.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
+		c.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
 			v.Perm, v.CheckOnly)
-	case SpawnForwarderCmd:
-		self.SpawnForwarder(v.Sid, v.Port)
+	case SpawnModeForwarderCmd:
+		c.SpawnModeForwarder(v.Sid, v.Port)
 	}
 }
 
-// Main routine for listen to socket messages.
-func (self *ConnServer) Listen() {
+// Listen is the main routine for listen to socket messages.
+func (c *ConnServer) Listen() {
 	var reqs []*Request
-	readChan, readErrChan := self.SpawnReaderRoutine()
-	ticker := time.NewTicker(time.Duration(TIMEOUT_CHECK_SECS * time.Second))
+	readChan, readErrChan := c.SpawnReaderRoutine()
+	ticker := time.NewTicker(time.Duration(timeoutCheckInterval))
 
-	defer self.Terminate()
+	defer c.Terminate()
 
 	for {
 		select {
 		case buf := <-readChan:
 			buffer := string(buf)
 			// Some modes completely ignore the RPC call, process them.
-			switch self.Mode {
-			case TERMINAL, SHELL, FORWARD:
-				self.forwardWSOutput(buffer)
+			switch c.Mode {
+			case ModeTerminal, ModeShell, ModeForward:
+				c.forwardWSOutput(buffer)
 				continue
-			case LOGCAT:
-				self.forwardLogcatOutput(buffer)
+			case ModeLogcat:
+				c.forwardLogcatOutput(buffer)
 				continue
-			case FILE:
-				if self.Download.Ready {
-					self.forwardFileDownloadData(buf)
+			case ModeFile:
+				if c.Download.Ready {
+					c.forwardFileDownloadData(buf)
 					continue
 				}
 			}
@@ -229,54 +232,53 @@ func (self *ConnServer) Listen() {
 			// Only Parse the first message if we are not registered, since
 			// if we are in logcat mode, we want to preserve the rest of the
 			// data and forward it to the websocket.
-			reqs = self.ParseRequests(buffer, !self.registered)
-			if err := self.ProcessRequests(reqs); err != nil {
+			reqs = c.ParseRequests(buffer, !c.registered)
+			if err := c.processRequests(reqs); err != nil {
 				if _, ok := err.(RegistrationFailedError); ok {
 					log.Printf("%s, abort\n", err)
 					return
-				} else {
-					log.Println(err)
 				}
+				log.Println(err)
 			}
 
-			// If self.mode changed, means we just got a registration message and
+			// If c.mode changed, means we just got a registration message and
 			// are in a different mode.
-			switch self.Mode {
-			case TERMINAL, SHELL, FORWARD:
+			switch c.Mode {
+			case ModeTerminal, ModeShell, ModeForward:
 				// Start a goroutine to forward the WebSocket Input
-				go self.forwardWSInput()
-			case LOGCAT:
+				go c.forwardWSInput()
+			case ModeLogcat:
 				// A logcat client does not wait for ACK before sending
 				// stream, so we need to forward the remaining content of the buffer
-				if self.ReadBuffer != "" {
-					self.forwardLogcatOutput(self.ReadBuffer)
-					self.ReadBuffer = ""
+				if c.ReadBuffer != "" {
+					c.forwardLogcatOutput(c.ReadBuffer)
+					c.ReadBuffer = ""
 				}
 			}
 		case err := <-readErrChan:
 			if err == io.EOF {
-				if self.Download.Ready {
-					self.Download.Data <- nil
+				if c.Download.Ready {
+					c.Download.Data <- nil
 					return
 				}
-				log.Printf("connection dropped: %s\n", self.Sid)
+				log.Printf("connection dropped: %s\n", c.Sid)
 			} else {
-				log.Printf("unknown network error for %s: %s\n", self.Sid, err)
+				log.Printf("unknown network error for %s: %s\n", c.Sid, err)
 			}
 			return
-		case msg := <-self.Command:
-			self.handleOverlordRequest(msg)
+		case msg := <-c.Command:
+			c.handleOverlordRequest(msg)
 		case <-ticker.C:
-			if err := self.ScanForTimeoutRequests(); err != nil {
+			if err := c.ScanForTimeoutRequests(); err != nil {
 				log.Println(err)
 			}
 
-			if self.Mode == AGENT && self.lastPing != 0 &&
-				time.Now().Unix()-self.lastPing > PING_RECV_TIMEOUT {
-				log.Printf("Client %s timeout\n", self.Mid)
+			if c.Mode == ModeControl && c.lastPing != 0 &&
+				time.Now().Unix()-c.lastPing > pingRecvTimeout {
+				log.Printf("Client %s timeout\n", c.Mid)
 				return
 			}
-		case s := <-self.stopListen:
+		case s := <-c.stopListen:
 			if s {
 				return
 			}
@@ -286,13 +288,13 @@ func (self *ConnServer) Listen() {
 
 // Request handlers
 
-func (self *ConnServer) handlePingRequest(req *Request) error {
-	self.lastPing = time.Now().Unix()
+func (c *ConnServer) handlePingRequest(req *Request) error {
+	c.lastPing = time.Now().Unix()
 	res := NewResponse(req.Rid, "pong", nil)
-	return self.SendResponse(res)
+	return c.SendResponse(res)
 }
 
-func (self *ConnServer) handleRegisterRequest(req *Request) error {
+func (c *ConnServer) handleRegisterRequest(req *Request) error {
 	type RequestArgs struct {
 		Sid        string                 `json:"sid"`
 		Mid        string                 `json:"mid"`
@@ -304,46 +306,45 @@ func (self *ConnServer) handleRegisterRequest(req *Request) error {
 	var args RequestArgs
 	if err := json.Unmarshal(req.Params, &args); err != nil {
 		return err
-	} else {
-		if len(args.Mid) == 0 {
-			return errors.New("handleRegisterRequest: empty machine ID received")
-		}
-		if len(args.Sid) == 0 {
-			return errors.New("handleRegisterRequest: empty session ID received")
-		}
+	}
+	if len(args.Mid) == 0 {
+		return errors.New("handleRegisterRequest: empty machine ID received")
+	}
+	if len(args.Sid) == 0 {
+		return errors.New("handleRegisterRequest: empty session ID received")
 	}
 
 	var err error
-	self.Sid = args.Sid
-	self.Mid = args.Mid
-	self.Mode = args.Mode
-	self.logcat.Format = args.Format
-	self.SetProperties(args.Properties)
+	c.Sid = args.Sid
+	c.Mid = args.Mid
+	c.Mode = args.Mode
+	c.logcat.Format = args.Format
+	c.setProperties(args.Properties)
 
-	self.wsConn, err = self.ovl.Register(self)
+	c.wsConn, err = c.ovl.Register(c)
 	if err != nil {
 		res := NewResponse(req.Rid, err.Error(), nil)
-		self.SendResponse(res)
+		c.SendResponse(res)
 		return RegistrationFailedError(errors.New("Register: " + err.Error()))
 	}
 
 	// Notify client of our Terminal ssesion ID
-	if self.Mode == TERMINAL && self.wsConn != nil {
-		msg, err := json.Marshal(TerminalControl{"sid", self.Sid})
+	if c.Mode == ModeTerminal && c.wsConn != nil {
+		msg, err := json.Marshal(TerminalControl{"sid", c.Sid})
 		if err != nil {
 			log.Println("handleRegisterRequest: failed to format message")
 		} else {
-			self.wsConn.WriteMessage(websocket.TextMessage, msg)
+			c.wsConn.WriteMessage(websocket.TextMessage, msg)
 		}
 	}
 
-	self.registered = true
-	self.lastPing = time.Now().Unix()
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	c.registered = true
+	c.lastPing = time.Now().Unix()
+	res := NewResponse(req.Rid, Success, nil)
+	return c.SendResponse(res)
 }
 
-func (self *ConnServer) handleDownloadRequest(req *Request) error {
+func (c *ConnServer) handleDownloadRequest(req *Request) error {
 	type RequestArgs struct {
 		TerminalSid string `json:"terminal_sid"`
 		Filename    string `json:"filename"`
@@ -355,66 +356,66 @@ func (self *ConnServer) handleDownloadRequest(req *Request) error {
 		return err
 	}
 
-	self.Download.Ready = true
-	self.TerminalSid = args.TerminalSid
-	self.Download.Name = args.Filename
-	self.Download.Size = args.Size
+	c.Download.Ready = true
+	c.TerminalSid = args.TerminalSid
+	c.Download.Name = args.Filename
+	c.Download.Size = args.Size
 
-	self.ovl.RegisterDownloadRequest(self)
+	c.ovl.RegisterDownloadRequest(c)
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return c.SendResponse(res)
 }
 
-func (self *ConnServer) handleClearToUploadRequest(req *Request) error {
-	self.ovl.RegisterUploadRequest(self)
+func (c *ConnServer) handleClearToUploadRequest(req *Request) error {
+	c.ovl.RegisterUploadRequest(c)
 	return nil
 }
 
-func (self *ConnServer) handleRequest(req *Request) error {
+func (c *ConnServer) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
 	case "ping":
-		err = self.handlePingRequest(req)
+		err = c.handlePingRequest(req)
 	case "register":
-		err = self.handleRegisterRequest(req)
+		err = c.handleRegisterRequest(req)
 	case "request_to_download":
-		err = self.handleDownloadRequest(req)
+		err = c.handleDownloadRequest(req)
 	case "clear_to_upload":
-		err = self.handleClearToUploadRequest(req)
+		err = c.handleClearToUploadRequest(req)
 	}
 	return err
 }
 
-// Send upgrade request to clients to trigger an upgrade.
-func (self *ConnServer) SendUpgradeRequest() error {
+// SendUpgradeRequest sends upgrade request to clients to trigger an upgrade.
+func (c *ConnServer) SendUpgradeRequest() error {
 	req := NewRequest("upgrade", nil)
 	req.SetTimeout(-1)
-	return self.SendRequest(req, nil)
+	return c.SendRequest(req, nil)
 }
 
 // Generic handler for remote command
-func (self *ConnServer) getHandler(name string) func(res *Response) error {
+func (c *ConnServer) getHandler(name string) func(res *Response) error {
 	return func(res *Response) error {
 		if res == nil {
-			self.Response <- "command timeout"
+			c.Response <- "command timeout"
 			return errors.New(name + ": command timeout")
 		}
 
-		if res.Response != SUCCESS {
-			self.Response <- res.Response
+		if res.Response != Success {
+			c.Response <- res.Response
 			return errors.New(name + " failed: " + res.Response)
 		}
-		self.Response <- ""
+		c.Response <- ""
 		return nil
 	}
 }
 
-// Spawn a remote terminal connection (a ghost with mode TERMINAL).
+// SpawnTerminal spawns a terminal connection (a ghost with mode ModeTerminal).
 // sid is the session ID, which will be used as the session ID of the new ghost.
 // ttyDevice is the target terminal device to open. If it's an empty string, a
 // pseudo terminal will be open instead.
-func (self *ConnServer) SpawnTerminal(sid, ttyDevice string) {
+func (c *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 	params := map[string]interface{}{"sid": sid}
 	if ttyDevice != "" {
 		params["tty_device"] = ttyDevice
@@ -422,51 +423,52 @@ func (self *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 		params["tty_device"] = nil
 	}
 	req := NewRequest("terminal", params)
-	self.SendRequest(req, self.getHandler("SpawnTerminal"))
+	c.SendRequest(req, c.getHandler("SpawnTerminal"))
 }
 
-// Spawn a remote shell command connection (a ghost with mode SHELL).
+// SpawnShell spawns a shell command connection (a ghost with mode ModeShell).
 // sid is the session ID, which will be used as the session ID of the new ghost.
 // command is the command to execute.
-func (self *ConnServer) SpawnShell(sid string, command string) {
+func (c *ConnServer) SpawnShell(sid string, command string) {
 	req := NewRequest("shell", map[string]interface{}{
 		"sid": sid, "command": command})
-	self.SendRequest(req, self.getHandler("SpawnShell"))
+	c.SendRequest(req, c.getHandler("SpawnShell"))
 }
 
-// Spawn a remote file command connection (a ghost with mode FILE).
+// SpawnFileServer Spawn a remote file connection (a ghost with mode ModeFile).
 // action is either 'download' or 'upload'.
 // sid is used for uploading file, indicatiting which client's working
 // directory to upload to.
-func (self *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
+func (c *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
 	dest string, perm int, checkOnly bool) {
 	if action == "download" {
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
-		self.SendRequest(req, self.getHandler("SpawnFileServer: download"))
+		c.SendRequest(req, c.getHandler("SpawnFileServer: download"))
 	} else if action == "upload" {
 		req := NewRequest("file_upload", map[string]interface{}{
 			"sid": sid, "terminal_sid": terminalSid, "filename": filename,
 			"dest": dest, "perm": perm, "check_only": checkOnly})
-		self.SendRequest(req, self.getHandler("SpawnFileServer: upload"))
+		c.SendRequest(req, c.getHandler("SpawnFileServer: upload"))
 	} else {
 		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)
 	}
 }
 
-// Send clear_to_download request to client to start downloading.
-func (self *ConnServer) SendClearToDownload() {
+// SendClearToDownload sends "clear_to_download" request to client to start
+// downloading.
+func (c *ConnServer) SendClearToDownload() {
 	req := NewRequest("clear_to_download", nil)
 	req.SetTimeout(-1)
-	self.SendRequest(req, nil)
+	c.SendRequest(req, nil)
 }
 
-// Spawn a forwarder connection (a ghost with mode FORWARD).
+// SpawnModeForwarder spawns a forwarder connection (a ghost with mode ModeForward).
 // sid is the session ID, which will be used as the session ID of the new ghost.
-func (self *ConnServer) SpawnForwarder(sid string, port int) {
+func (c *ConnServer) SpawnModeForwarder(sid string, port int) {
 	req := NewRequest("forward", map[string]interface{}{
 		"sid":  sid,
 		"port": port,
 	})
-	self.SendRequest(req, self.getHandler("SpawnForwarder"))
+	c.SendRequest(req, c.getHandler("SpawnModeForwarder"))
 }

@@ -15,14 +15,14 @@ import (
 )
 
 const (
-	DEBUG_RPC            = false
-	SEP                  = "\r\n"
-	BUFSIZ               = 8192
-	REQUEST_TIMEOUT_SECS = 60 // Number of seconds before request timeouts
-	TIMEOUT_CHECK_SECS   = 3  // The time between checking for timeout
+	debugRPC              = false
+	messageSeparator      = "\r\n"
+	bufferSize            = 8192
+	requestTimeoutSeconds = 60              // Number of seconds before request timeouts
+	timeoutCheckInterval  = 3 * time.Second // The time between checking for timeout
 )
 
-// The interface which defines a sendable message.
+// Message is the interface which defines a sendable message.
 type Message interface {
 	Marshal() ([]byte, error)
 }
@@ -37,13 +37,13 @@ type Request struct {
 	Params  json.RawMessage `json:"params"`
 }
 
-// Create a new Request object.
+// NewRequest creats a new Request object.
 // name is the name of the request.
 // params is map between string and any other JSON-serializable data structure.
 func NewRequest(name string, params map[string]interface{}) *Request {
 	req := &Request{
 		Rid:     uuid.NewV4().String(),
-		Timeout: REQUEST_TIMEOUT_SECS,
+		Timeout: requestTimeoutSeconds,
 		Name:    name,
 	}
 	if targs, err := json.Marshal(params); err != nil {
@@ -54,14 +54,15 @@ func NewRequest(name string, params map[string]interface{}) *Request {
 	return req
 }
 
-// Set the timeout of request.
-// The default timeout is is defined in REQUEST_TIMEOUT_SECS.
-func (self *Request) SetTimeout(timeout int64) {
-	self.Timeout = timeout
+// SetTimeout sets the timeout of request.
+// The default timeout is is defined in requestTimeoutSeconds.
+func (r *Request) SetTimeout(timeout int64) {
+	r.Timeout = timeout
 }
 
-func (self *Request) Marshal() ([]byte, error) {
-	return json.Marshal(self)
+// Marshal mashels the Request.
+func (r *Request) Marshal() ([]byte, error) {
+	return json.Marshal(r)
 }
 
 // Response Object.
@@ -72,7 +73,7 @@ type Response struct {
 	Params   json.RawMessage `json:"params"`
 }
 
-// Create a new Response object.
+// NewResponse creates a new Response object.
 // rid is the request ID of the request this response is intended for.
 // response is the reponse status text.
 // params is map between string and any other JSON-serializable data structure.
@@ -89,15 +90,16 @@ func NewResponse(rid, response string, params map[string]interface{}) *Response 
 	return res
 }
 
-func (self *Response) Marshal() ([]byte, error) {
-	return json.Marshal(self)
+// Marshal marshals the Response.
+func (r *Response) Marshal() ([]byte, error) {
+	return json.Marshal(r)
 }
 
-// The function type of the response handler.
+// ResponseHandler is the function type of the response handler.
 // if res is nil, means that the response timeout.
 type ResponseHandler func(res *Response) error
 
-// The structure that stores the response handler information.
+// Responder is The structure that stores the response handler information.
 type Responder struct {
 	RequestTime int64           // Time of request
 	Timeout     int64           // Timeout in seconds
@@ -111,43 +113,47 @@ type RPCCore struct {
 	responders map[string]Responder // response handlers
 }
 
+// NewRPCCore creates the RPCCore object.
 func NewRPCCore(conn net.Conn) *RPCCore {
 	return &RPCCore{Conn: conn, responders: make(map[string]Responder)}
 }
 
-func (self *RPCCore) SendMessage(msg Message) error {
-	if self.Conn == nil {
+// SendMessage sends a message.
+func (rpc *RPCCore) SendMessage(msg Message) error {
+	if rpc.Conn == nil {
 		return errors.New("SendMessage failed, connection not established")
 	}
 	var err error
 	var msgBytes []byte
 
 	if msgBytes, err = msg.Marshal(); err == nil {
-		if DEBUG_RPC {
+		if debugRPC {
 			log.Printf("-----> %s\n", string(msgBytes))
 		}
-		_, err = self.Conn.Write(append(msgBytes, []byte(SEP)...))
+		_, err = rpc.Conn.Write(append(msgBytes, []byte(messageSeparator)...))
 	}
 	return err
 }
 
-func (self *RPCCore) SendRequest(req *Request, handler ResponseHandler) error {
-	err := self.SendMessage(req)
+// SendRequest sends a Request.
+func (rpc *RPCCore) SendRequest(req *Request, handler ResponseHandler) error {
+	err := rpc.SendMessage(req)
 	if err == nil && req.Timeout >= 0 {
 		res := Responder{time.Now().Unix(), req.Timeout, handler}
-		self.responders[req.Rid] = res
+		rpc.responders[req.Rid] = res
 	}
 	return err
 }
 
-func (self *RPCCore) SendResponse(res *Response) error {
-	return self.SendMessage(res)
+// SendResponse sends a Response.
+func (rpc *RPCCore) SendResponse(res *Response) error {
+	return rpc.SendMessage(res)
 }
 
-func (self *RPCCore) handleResponse(res *Response) error {
-	defer delete(self.responders, res.Rid)
+func (rpc *RPCCore) handleResponse(res *Response) error {
+	defer delete(rpc.responders, res.Rid)
 
-	if responder, ok := self.responders[res.Rid]; ok {
+	if responder, ok := rpc.responders[res.Rid]; ok {
 		if responder.Handler != nil {
 			if err := responder.Handler(res); err != nil {
 				return err
@@ -159,18 +165,18 @@ func (self *RPCCore) handleResponse(res *Response) error {
 	return nil
 }
 
-// Spawnes a goroutine that actively read from the socket.
+// SpawnReaderRoutine spawnes a goroutine that actively read from the socket.
 // This function returns two channels. The first one is the channel that
 // send the content from the socket, and the second channel send an error
 // object if there is one.
-func (self *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
+func (rpc *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 	readChan := make(chan []byte)
 	readErrChan := make(chan error, 1)
 
 	go func() {
 		for {
-			buf := make([]byte, BUFSIZ)
-			n, err := self.Conn.Read(buf)
+			buf := make([]byte, bufferSize)
+			n, err := rpc.Conn.Read(buf)
 			readChan <- buf[:n]
 			if err != nil {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
@@ -185,14 +191,14 @@ func (self *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 	return readChan, readErrChan
 }
 
-// Parses a single JSON string into a Message object.
-func (self *RPCCore) ParseMessage(msgJson string) (Message, error) {
+// ParseMessage parses a single JSON string into a Message object.
+func (rpc *RPCCore) ParseMessage(msgJSON string) (Message, error) {
 	var req Request
 	var res Response
 
-	err := json.Unmarshal([]byte(msgJson), &req)
+	err := json.Unmarshal([]byte(msgJSON), &req)
 	if err != nil || len(req.Name) == 0 {
-		err := json.Unmarshal([]byte(msgJson), &res)
+		err := json.Unmarshal([]byte(msgJSON), &res)
 		if err != nil {
 			err = errors.New("mal-formed JSON request, ignored")
 		} else {
@@ -205,35 +211,35 @@ func (self *RPCCore) ParseMessage(msgJson string) (Message, error) {
 	return nil, err
 }
 
-// Parses a buffer from SpawnReaderRoutine into Request objects.
-// The response message is automatically handled by the RPCCore itself by
+// ParseRequests parses a buffer from SpawnReaderRoutine into Request objects.
+// The response message is automatically handled by the RPCCore itrpc by
 // invoking the corresponding response handler.
-func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
+func (rpc *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 	var reqs []*Request
-	var msgsJson []string
+	var msgsJSON []string
 
-	self.ReadBuffer += buffer
+	rpc.ReadBuffer += buffer
 	if single {
-		idx := strings.Index(self.ReadBuffer, SEP)
+		idx := strings.Index(rpc.ReadBuffer, messageSeparator)
 		if idx == -1 {
 			return nil
 		}
-		msgsJson = []string{self.ReadBuffer[:idx]}
-		self.ReadBuffer = self.ReadBuffer[idx+2:]
+		msgsJSON = []string{rpc.ReadBuffer[:idx]}
+		rpc.ReadBuffer = rpc.ReadBuffer[idx+2:]
 	} else {
-		msgs := strings.Split(self.ReadBuffer, SEP)
+		msgs := strings.Split(rpc.ReadBuffer, messageSeparator)
 		if len(msgs) == 1 {
 			return nil
 		}
-		self.ReadBuffer = msgs[len(msgs)-1]
-		msgsJson = msgs[:len(msgs)-1]
+		rpc.ReadBuffer = msgs[len(msgs)-1]
+		msgsJSON = msgs[:len(msgs)-1]
 	}
 
-	for _, msgJson := range msgsJson {
-		if DEBUG_RPC {
-			log.Printf("<----- " + msgJson)
+	for _, msgJSON := range msgsJSON {
+		if debugRPC {
+			log.Printf("<----- " + msgJSON)
 		}
-		if msg, err := self.ParseMessage(msgJson); err != nil {
+		if msg, err := rpc.ParseMessage(msgJSON); err != nil {
 			log.Printf("Message parse failed: %s\n", err)
 			continue
 		} else {
@@ -241,7 +247,7 @@ func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 			case *Request:
 				reqs = append(reqs, m)
 			case *Response:
-				err := self.handleResponse(m)
+				err := rpc.handleResponse(m)
 				if err != nil {
 					log.Printf("Response error: %s\n", err)
 				}
@@ -251,24 +257,25 @@ func (self *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 	return reqs
 }
 
-// Scan for timeout requests.
-func (self *RPCCore) ScanForTimeoutRequests() error {
-	for rid, res := range self.responders {
+// ScanForTimeoutRequests scans for timeout requests.
+func (rpc *RPCCore) ScanForTimeoutRequests() error {
+	for rid, res := range rpc.responders {
 		if time.Now().Unix()-res.RequestTime > res.Timeout {
 			if res.Handler != nil {
 				if err := res.Handler(nil); err != nil {
-					delete(self.responders, rid)
+					delete(rpc.responders, rid)
 					return err
 				}
 			} else {
 				log.Printf("Request %s timeout\n", rid)
 			}
-			delete(self.responders, rid)
+			delete(rpc.responders, rid)
 		}
 	}
 	return nil
 }
 
-func (self *RPCCore) ClearRequests() {
-	self.responders = make(map[string]Responder)
+// ClearRequests clear all the requests.
+func (rpc *RPCCore) ClearRequests() {
+	rpc.responders = make(map[string]Responder)
 }

@@ -4,59 +4,54 @@
 
 package overlord
 
+// Overlord server ports.
 const (
-	DEBUG = false
+	OverlordPort     = 4455 // Socket server port
+	OverlordLDPort   = 4456 // LAN discovery port
+	OverlordHTTPPort = 9000 // Overlord HTTP server port
 )
 
 const (
-	OVERLORD_PORT      = 4455 // Socket server port
-	OVERLORD_LD_PORT   = 4456 // LAN discovery port
-	OVERLORD_HTTP_PORT = 9000 // Overlord HTTP server port
+	pingTimeout = 10
 )
 
 // ConnServer Client mode
 const (
-	NONE = iota
-	AGENT
-	TERMINAL
-	SHELL
-	LOGCAT
-	FILE
-	FORWARD
+	ModeNone = iota
+	ModeControl
+	ModeTerminal
+	ModeShell
+	ModeLogcat
+	ModeFile
+	ModeForward
 )
 
 // Logcat format
 const (
-	TEXT = iota
-	TERM
+	logcatTypeText = iota
+	logcatTypeVT100
 )
 
+// RPC states
 const (
-	SUCCESS      = "success"
-	FAILED       = "failed"
-	DISCONNECTED = "disconnected"
-)
-
-// Terminal resize control
-const (
-	CONTROL_NONE  = 255 // Control State None
-	CONTROL_START = 128 // Control Start Code
-	CONTROL_END   = 129 // Control End Code
+	Success = "success"
+	Failed  = "failed"
 )
 
 // Stream control
 const (
-	STDIN_CLOSED = "##STDIN_CLOSED##"
+	StdinClosed = "##STDIN_CLOSED##"
 )
 
+// ModeStr translate client mode to string.
 func ModeStr(mode int) string {
 	return map[int]string{
-		NONE:     "None",
-		AGENT:    "Agent",
-		TERMINAL: "Terminal",
-		SHELL:    "Shell",
-		LOGCAT:   "Logcat",
-		FILE:     "File",
-		FORWARD:  "Forward",
+		ModeNone:     "None",
+		ModeControl:  "Agent",
+		ModeTerminal: "Terminal",
+		ModeShell:    "Shell",
+		ModeLogcat:   "Logcat",
+		ModeFile:     "File",
+		ModeForward:  "ModeForward",
 	}[mode]
 }

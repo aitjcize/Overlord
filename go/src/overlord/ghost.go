@@ -35,43 +35,101 @@ import (
 )
 
 const (
-	GHOST_RPC_PORT  = 4499
-	DEFAULT_SHELL   = "/bin/bash"
-	LOCALHOST       = "localhost"
-	PING_INTERVAL   = 10
-	PING_TIMEOUT    = 10
-	RETRY_INTERVAL  = 2
-	READ_TIMEOUT    = 3
-	RANDOM_MID      = "##random_mid##"
-	BLOCK_SIZE      = 4096
-	CONNECT_TIMEOUT = 3
+	ghostRPCStubPort     = 4499
+	defaultShell         = "/bin/bash"
+	localhost            = "localhost"
+	pingInterval         = 10 * time.Second
+	readTimeout          = 3 * time.Second
+	connectTimeout       = 3 * time.Second
+	retryIntervalSeconds = 2
+	blockSize            = 4096
 )
 
-// An structure that we be place into download queue.
+// Exported
+const (
+	RandomMID = "##random_mid##" // Random Machine ID identifier
+)
+
+// Terminal resize control
+const (
+	controlNone  = 255 // Control State None
+	controlStart = 128 // Control Start Code
+	controlEnd   = 129 // Control End Code
+)
+
+// Stream control
+const (
+	stdinClosed = "##STDIN_CLOSED##"
+)
+
+// Registration status
+const (
+	statusDisconnected = "disconnected"
+)
+
+type ghostRPCStub struct {
+	ghost *Ghost
+}
+
+// EmptyArgs for RPC.
+type EmptyArgs struct {
+}
+
+// EmptyReply for RPC.
+type EmptyReply struct {
+}
+
+func (rpcStub *ghostRPCStub) Reconnect(args *EmptyArgs, reply *EmptyReply) error {
+	rpcStub.ghost.reset = true
+	return nil
+}
+
+func (rpcStub *ghostRPCStub) GetStatus(args *EmptyArgs, reply *string) error {
+	*reply = rpcStub.ghost.RegisterStatus
+	return nil
+}
+
+func (rpcStub *ghostRPCStub) RegisterTTY(args []string, reply *EmptyReply) error {
+	rpcStub.ghost.RegisterTTY(args[0], args[1])
+	return nil
+}
+
+func (rpcStub *ghostRPCStub) RegisterSession(args []string, reply *EmptyReply) error {
+	rpcStub.ghost.RegisterSession(args[0], args[1])
+	return nil
+}
+
+func (rpcStub *ghostRPCStub) AddToDownloadQueue(args []string, reply *EmptyReply) error {
+	rpcStub.ghost.AddToDownloadQueue(args[0], args[1])
+	return nil
+}
+
+// downloadInfo is a structure that we be place into download queue.
 // In our case since we always execute 'ghost --download' in our pseudo
 // terminal so ttyName will always have the form /dev/pts/X
-type DownloadInfo struct {
+type downloadInfo struct {
 	Ttyname  string
 	Filename string
 }
 
-type FileOperation struct {
+// fileOperation is a structure for storing file upload/download intent.
+type fileOperation struct {
 	Action   string
 	Filename string
 	Perm     int
 }
 
-type FileUploadContext struct {
+type fileUploadContext struct {
 	Ready bool
 	Data  chan []byte
 }
 
-type TLSSettings struct {
-	tlsCertFile string      // TLS certificate in PEM format
-	Config      *tls.Config // TLS configuration
+type tlsSettings struct {
+	tlsCertFile      string      // TLS certificate in PEM format
+	Config           *tls.Config // TLS configuration
 }
 
-func NewTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *TLSSettings {
+func newTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *tlsSettings {
 	var tlsConfig *tls.Config
 
 	if enableTLSWithoutVerify {
@@ -90,19 +148,20 @@ func NewTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *TLSSetting
 		}
 	}
 
-	return &TLSSettings{tlsCertFile, tlsConfig}
+	return &tlsSettings{tlsCertFile, tlsConfig}
 }
 
-func (self *TLSSettings) Enabled() bool {
-	return self.Config != nil
+func (t *tlsSettings) Enabled() bool {
+	return t.Config != nil
 }
 
+// Ghost type is the main context for storing the ghost state.
 type Ghost struct {
 	*RPCCore
 	addrs           []string               // List of possible Overlord addresses
 	server          *rpc.Server            // RPC server handle
 	connectedAddr   string                 // Current connected Overlord address
-	tlsSettings     *TLSSettings           // TLS settings
+	tls             *tlsSettings           // TLS settings
 	mode            int                    // mode, see constants.go
 	mid             string                 // Machine ID
 	sid             string                 // Session ID
@@ -119,20 +178,20 @@ type Ghost struct {
 	pauseLanDisc    bool                   // Stop LAN discovery
 	ttyDevice       string                 // Terminal device to open
 	shellCommand    string                 // Shell command to execute
-	fileOperation   FileOperation          // File operation name
-	downloadQueue   chan DownloadInfo      // Download queue
-	upload          FileUploadContext      // File upload context
+	fileOp          fileOperation          // File operation name
+	downloadQueue   chan downloadInfo      // Download queue
+	uploadContext   fileUploadContext      // File upload context
 	port            int                    // Port number to forward
 }
 
-func NewGhost(addrs []string, tlsSettings *TLSSettings, mode int, mid string) *Ghost {
-
+// NewGhost creates a Ghost object.
+func NewGhost(addrs []string, tls *tlsSettings, mode int, mid string) *Ghost {
 	var (
 		finalMid string
 		err      error
 	)
 
-	if mid == RANDOM_MID {
+	if mid == RandomMID {
 		finalMid = uuid.NewV4().String()
 	} else if mid != "" {
 		finalMid = mid
@@ -145,61 +204,68 @@ func NewGhost(addrs []string, tlsSettings *TLSSettings, mode int, mid string) *G
 	return &Ghost{
 		RPCCore:         NewRPCCore(nil),
 		addrs:           addrs,
-		tlsSettings:     tlsSettings,
+		tls:             tls,
 		mode:            mode,
 		mid:             finalMid,
 		sid:             uuid.NewV4().String(),
 		ttyName2Sid:     make(map[string]string),
 		terminalSid2Pid: make(map[string]int),
 		properties:      make(map[string]interface{}),
-		RegisterStatus:  DISCONNECTED,
+		RegisterStatus:  statusDisconnected,
 		reset:           false,
 		quit:            false,
 		pauseLanDisc:    false,
-		downloadQueue:   make(chan DownloadInfo),
-		upload:          FileUploadContext{Data: make(chan []byte)},
+		downloadQueue:   make(chan downloadInfo),
+		uploadContext:   fileUploadContext{Data: make(chan []byte)},
 	}
 }
 
-func (self *Ghost) SetSid(sid string) *Ghost {
-	self.sid = sid
-	return self
+// SetSid sets the Session ID for the Ghost instance.
+func (ghost *Ghost) SetSid(sid string) *Ghost {
+	ghost.sid = sid
+	return ghost
 }
 
-func (self *Ghost) SetTerminalSid(sid string) *Ghost {
-	self.terminalSid = sid
-	return self
+// SetTerminalSid sets the terminal session ID for the Ghost instance.
+func (ghost *Ghost) SetTerminalSid(sid string) *Ghost {
+	ghost.terminalSid = sid
+	return ghost
 }
 
-func (self *Ghost) SetPropFile(propFile string) *Ghost {
-	self.propFile = propFile
-	return self
+// SetPropFile sets the property file filename.
+func (ghost *Ghost) SetPropFile(propFile string) *Ghost {
+	ghost.propFile = propFile
+	return ghost
 }
 
-func (self *Ghost) SetTtyDevice(ttyDevice string) *Ghost {
-	self.ttyDevice = ttyDevice
-	return self
+// SetTtyDevice sets the TTY device name to open.
+func (ghost *Ghost) SetTtyDevice(ttyDevice string) *Ghost {
+	ghost.ttyDevice = ttyDevice
+	return ghost
 }
 
-func (self *Ghost) SetCommand(command string) *Ghost {
-	self.shellCommand = command
-	return self
+// SetShellCommand sets the shell comamnd to execute.
+func (ghost *Ghost) SetShellCommand(command string) *Ghost {
+	ghost.shellCommand = command
+	return ghost
 }
 
-func (self *Ghost) SetFileOp(operation, filename string, perm int) *Ghost {
-	self.fileOperation.Action = operation
-	self.fileOperation.Filename = filename
-	self.fileOperation.Perm = perm
-	return self
+// SetFileOp sets the file operation to perform.
+func (ghost *Ghost) SetFileOp(operation, filename string, perm int) *Ghost {
+	ghost.fileOp.Action = operation
+	ghost.fileOp.Filename = filename
+	ghost.fileOp.Perm = perm
+	return ghost
 }
 
-func (self *Ghost) SetPort(port int) *Ghost {
-	self.port = port
-	return self
+// SetModeForwardPort sets the port to forward.
+func (ghost *Ghost) SetModeForwardPort(port int) *Ghost {
+	ghost.port = port
+	return ghost
 }
 
-func (self *Ghost) ExistsInAddr(target string) bool {
-	for _, x := range self.addrs {
+func (ghost *Ghost) existsInAddr(target string) bool {
+	for _, x := range ghost.addrs {
 		if target == x {
 			return true
 		}
@@ -207,28 +273,28 @@ func (self *Ghost) ExistsInAddr(target string) bool {
 	return false
 }
 
-func (self *Ghost) LoadProperties() {
-	if self.propFile == "" {
+func (ghost *Ghost) loadProperties() {
+	if ghost.propFile == "" {
 		return
 	}
 
-	bytes, err := ioutil.ReadFile(self.propFile)
+	bytes, err := ioutil.ReadFile(ghost.propFile)
 	if err != nil {
-		log.Printf("LoadProperties: %s\n", err)
+		log.Printf("loadProperties: %s\n", err)
 		return
 	}
 
-	if err := json.Unmarshal(bytes, &self.properties); err != nil {
-		log.Printf("LoadProperties: %s\n", err)
+	if err := json.Unmarshal(bytes, &ghost.properties); err != nil {
+		log.Printf("loadProperties: %s\n", err)
 		return
 	}
 }
 
-func (self *Ghost) OverlordHTTPSEnabled() bool {
-	parts := strings.Split(self.connectedAddr, ":")
+func (ghost *Ghost) overlordHTTPSEnabled() bool {
+	parts := strings.Split(ghost.connectedAddr, ":")
 	conn, err := net.DialTimeout("tcp",
-		fmt.Sprintf("%s:%d", parts[0], OVERLORD_HTTP_PORT),
-		CONNECT_TIMEOUT*time.Second)
+		fmt.Sprintf("%s:%d", parts[0], OverlordHTTPPort),
+		connectTimeout)
 	if err != nil {
 		return false
 	}
@@ -243,7 +309,8 @@ func (self *Ghost) OverlordHTTPSEnabled() bool {
 	return strings.Index(string(buf), "HTTP") == -1
 }
 
-func (self *Ghost) Upgrade() error {
+// Upgrade starts the upgrade sequence of the ghost instance.
+func (ghost *Ghost) Upgrade() error {
 	log.Println("Upgrade: initiating upgrade sequence...")
 
 	exePath, err := GetExecutablePath()
@@ -254,9 +321,9 @@ func (self *Ghost) Upgrade() error {
 	var buffer bytes.Buffer
 	var client http.Client
 
-	serverTLSEnabled := self.OverlordHTTPSEnabled()
+	serverTLSEnabled := ghost.overlordHTTPSEnabled()
 
-	if self.tlsSettings.Enabled() && !serverTLSEnabled {
+	if ghost.tls.Enabled() && !serverTLSEnabled {
 		return errors.New("Upgrade: TLS enforced but found Overlord HTTP server " +
 			"without TLS enabled! Possible mis-configuration or DNS/IP spoofing " +
 			"detected, abort")
@@ -266,15 +333,15 @@ func (self *Ghost) Upgrade() error {
 	if serverTLSEnabled {
 		proto = "https"
 	}
-	parts := strings.Split(self.connectedAddr, ":")
+	parts := strings.Split(ghost.connectedAddr, ":")
 	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
-		OVERLORD_HTTP_PORT, GetPlatformString())
+		OverlordHTTPPort, GetPlatformString())
 
 	if serverTLSEnabled {
-		tr := &http.Transport{TLSClientConfig: self.tlsSettings.Config}
-		client = http.Client{Transport: tr, Timeout: CONNECT_TIMEOUT * time.Second}
+		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
+		client = http.Client{Transport: tr, Timeout: connectTimeout}
 	} else {
-		client = http.Client{Timeout: CONNECT_TIMEOUT * time.Second}
+		client = http.Client{Timeout: connectTimeout}
 	}
 
 	// Download the sha1sum for ghost for verification
@@ -319,13 +386,13 @@ func (self *Ghost) Upgrade() error {
 	}
 	_, err = buffer.WriteTo(exeFile)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Upgrade: %s", err))
+		return fmt.Errorf("Upgrade: %s", err)
 	}
 	exeFile.Close()
 
 	err = os.Chmod(exePath, 0755)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Upgrade: %s", err))
+		return fmt.Errorf("Upgrade: %s", err)
 	}
 
 	log.Println("Upgrade: restarting ghost...")
@@ -333,7 +400,7 @@ func (self *Ghost) Upgrade() error {
 	return syscall.Exec(exePath, os.Args, os.Environ())
 }
 
-func (self *Ghost) handleTerminalRequest(req *Request) error {
+func (ghost *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestParams struct {
 		Sid       string `json:"sid"`
 		TtyDevice string `json:"tty_device"`
@@ -346,19 +413,19 @@ func (self *Ghost) handleTerminalRequest(req *Request) error {
 
 	go func() {
 		log.Printf("Received terminal command, Terminal agent %s spawned\n", params.Sid)
-		addrs := []string{self.connectedAddr}
+		addrs := []string{ghost.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, self.tlsSettings, TERMINAL, RANDOM_MID).SetSid(
+		g := NewGhost(addrs, ghost.tls, ModeTerminal, RandomMID).SetSid(
 			params.Sid).SetTtyDevice(params.TtyDevice)
 		g.Start(false, false)
 	}()
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return ghost.SendResponse(res)
 }
 
-func (self *Ghost) handleShellRequest(req *Request) error {
+func (ghost *Ghost) handleShellRequest(req *Request) error {
 	type RequestParams struct {
 		Sid string `json:"sid"`
 		Cmd string `json:"command"`
@@ -371,19 +438,19 @@ func (self *Ghost) handleShellRequest(req *Request) error {
 
 	go func() {
 		log.Printf("Received shell command: %s, Shell agent %s spawned\n", params.Cmd, params.Sid)
-		addrs := []string{self.connectedAddr}
+		addrs := []string{ghost.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, self.tlsSettings, SHELL, RANDOM_MID).SetSid(
-			params.Sid).SetCommand(params.Cmd)
+		g := NewGhost(addrs, ghost.tls, ModeShell, RandomMID).SetSid(
+			params.Sid).SetShellCommand(params.Cmd)
 		g.Start(false, false)
 	}()
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return ghost.SendResponse(res)
 }
 
-func (self *Ghost) handleFileDownloadRequest(req *Request) error {
+func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
 	type RequestParams struct {
 		Sid      string `json:"sid"`
 		Filename string `json:"filename"`
@@ -406,23 +473,23 @@ func (self *Ghost) handleFileDownloadRequest(req *Request) error {
 	f, err := os.Open(filename)
 	if err != nil {
 		res := NewResponse(req.Rid, err.Error(), nil)
-		return self.SendResponse(res)
+		return ghost.SendResponse(res)
 	}
 	f.Close()
 
 	go func() {
 		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
-		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetSid(
+		addrs := []string{ghost.connectedAddr}
+		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetSid(
 			params.Sid).SetFileOp("download", filename, 0)
 		g.Start(false, false)
 	}()
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return ghost.SendResponse(res)
 }
 
-func (self *Ghost) handleFileUploadRequest(req *Request) error {
+func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 	type RequestParams struct {
 		Sid         string `json:"sid"`
 		TerminalSid string `json:"terminal_sid"`
@@ -454,7 +521,7 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 		}
 	} else {
 		if params.TerminalSid != "" {
-			if pid, ok := self.terminalSid2Pid[params.TerminalSid]; ok {
+			if pid, ok := ghost.terminalSid2Pid[params.TerminalSid]; ok {
 				cwd, err := GetProcessWorkingDirectory(pid)
 				if err == nil {
 					targetDir = cwd
@@ -466,30 +533,30 @@ func (self *Ghost) handleFileUploadRequest(req *Request) error {
 
 	os.MkdirAll(filepath.Dir(destPath), 0755)
 
-	if f, err := os.Create(destPath); err != nil {
+	f, err := os.Create(destPath)
+	if err != nil {
 		res := NewResponse(req.Rid, err.Error(), nil)
-		return self.SendResponse(res)
-	} else {
-		f.Close()
+		return ghost.SendResponse(res)
 	}
+	f.Close()
 
-	// If not check_only, spawn FILE mode ghost agent to handle upload
+	// If not check_only, spawn ModeFile mode ghost agent to handle upload
 	if !params.CheckOnly {
 		go func() {
 			log.Printf("Received file_upload command, File agent %s spawned\n",
 				params.Sid)
-			addrs := []string{self.connectedAddr}
-			g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetSid(
+			addrs := []string{ghost.connectedAddr}
+			g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetSid(
 				params.Sid).SetFileOp("upload", destPath, params.Perm)
 			g.Start(false, false)
 		}()
 	}
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return ghost.SendResponse(res)
 }
 
-func (self *Ghost) handleForwardRequest(req *Request) error {
+func (ghost *Ghost) handleModeForwardRequest(req *Request) error {
 	type RequestParams struct {
 		Sid  string `json:"sid"`
 		Port int    `json:"port"`
@@ -501,44 +568,46 @@ func (self *Ghost) handleForwardRequest(req *Request) error {
 	}
 
 	go func() {
-		log.Printf("Received forward command, Forward agent %s spawned\n", params.Sid)
-		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, self.tlsSettings, FORWARD, RANDOM_MID).SetSid(
-			params.Sid).SetPort(params.Port)
+		log.Printf("Received forward command, ModeForward agent %s spawned\n", params.Sid)
+		addrs := []string{ghost.connectedAddr}
+		g := NewGhost(addrs, ghost.tls, ModeForward, RandomMID).SetSid(
+			params.Sid).SetModeForwardPort(params.Port)
 		g.Start(false, false)
 	}()
 
-	res := NewResponse(req.Rid, SUCCESS, nil)
-	return self.SendResponse(res)
+	res := NewResponse(req.Rid, Success, nil)
+	return ghost.SendResponse(res)
 }
 
-func (self *Ghost) StartDownloadServer() error {
+// StartDownloadServer starts the download server.
+func (ghost *Ghost) StartDownloadServer() error {
 	log.Println("StartDownloadServer: started")
 
 	defer func() {
-		self.quit = true
-		self.Conn.Close()
+		ghost.quit = true
+		ghost.Conn.Close()
 		log.Println("StartDownloadServer: terminated")
 	}()
 
-	file, err := os.Open(self.fileOperation.Filename)
+	file, err := os.Open(ghost.fileOp.Filename)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	io.Copy(self.Conn, file)
+	io.Copy(ghost.Conn, file)
 	return nil
 }
 
-func (self *Ghost) StartUploadServer() error {
+// StartUploadServer starts the upload server.
+func (ghost *Ghost) StartUploadServer() error {
 	log.Println("StartUploadServer: started")
 
 	defer func() {
 		log.Println("StartUploadServer: terminated")
 	}()
 
-	filePath := self.fileOperation.Filename
+	filePath := ghost.fileOp.Filename
 	dirPath := filepath.Dir(filePath)
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
 		os.MkdirAll(dirPath, 0755)
@@ -551,66 +620,67 @@ func (self *Ghost) StartUploadServer() error {
 	defer file.Close()
 
 	for {
-		buffer := <-self.upload.Data
+		buffer := <-ghost.uploadContext.Data
 		if buffer == nil {
 			break
 		}
 		file.Write(buffer)
 	}
 
-	if self.fileOperation.Perm > 0 {
-		file.Chmod(os.FileMode(self.fileOperation.Perm))
+	if ghost.fileOp.Perm > 0 {
+		file.Chmod(os.FileMode(ghost.fileOp.Perm))
 	}
 
 	return nil
 }
 
-func (self *Ghost) handleRequest(req *Request) error {
+func (ghost *Ghost) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
 	case "upgrade":
-		err = self.Upgrade()
+		err = ghost.Upgrade()
 	case "terminal":
-		err = self.handleTerminalRequest(req)
+		err = ghost.handleTerminalRequest(req)
 	case "shell":
-		err = self.handleShellRequest(req)
+		err = ghost.handleShellRequest(req)
 	case "file_download":
-		err = self.handleFileDownloadRequest(req)
+		err = ghost.handleFileDownloadRequest(req)
 	case "clear_to_download":
-		err = self.StartDownloadServer()
+		err = ghost.StartDownloadServer()
 	case "file_upload":
-		err = self.handleFileUploadRequest(req)
+		err = ghost.handleFileUploadRequest(req)
 	case "forward":
-		err = self.handleForwardRequest(req)
+		err = ghost.handleModeForwardRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
 	return err
 }
 
-func (self *Ghost) ProcessRequests(reqs []*Request) error {
+func (ghost *Ghost) processRequests(reqs []*Request) error {
 	for _, req := range reqs {
-		if err := self.handleRequest(req); err != nil {
+		if err := ghost.handleRequest(req); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (self *Ghost) Ping() error {
+// Ping sends a ping message to the overlord server.
+func (ghost *Ghost) Ping() error {
 	pingHandler := func(res *Response) error {
 		if res == nil {
-			self.reset = true
+			ghost.reset = true
 			return errors.New("Ping timeout")
 		}
 		return nil
 	}
 	req := NewRequest("ping", nil)
-	req.SetTimeout(PING_TIMEOUT)
-	return self.SendRequest(req, pingHandler)
+	req.SetTimeout(pingTimeout)
+	return ghost.SendRequest(req, pingHandler)
 }
 
-func (self *Ghost) HandleTTYControl(tty *os.File, control_string string) error {
+func (ghost *Ghost) handleTTYControl(tty *os.File, controlString string) error {
 	// Terminal Command for ghost
 	// Implements the Message interface.
 	type TerminalCommand struct {
@@ -625,7 +695,7 @@ func (self *Ghost) HandleTTYControl(tty *os.File, control_string string) error {
 	}
 
 	var control TerminalCommand
-	err := json.Unmarshal([]byte(control_string), &control)
+	err := json.Unmarshal([]byte(controlString), &control)
 	if err != nil {
 		log.Println("mal-formed JSON request, ignored")
 		return nil
@@ -648,7 +718,7 @@ func (self *Ghost) HandleTTYControl(tty *os.File, control_string string) error {
 	return nil
 }
 
-func (self *Ghost) getTTYName() (string, error) {
+func (ghost *Ghost) getTTYName() (string, error) {
 	ttyName, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/0", os.Getpid()))
 	if err != nil {
 		return "", err
@@ -656,8 +726,8 @@ func (self *Ghost) getTTYName() (string, error) {
 	return ttyName, nil
 }
 
-// Spawn a TTY server and forward I/O to the TCP socket.
-func (self *Ghost) SpawnTTYServer(res *Response) error {
+// SpawnTTYServer Spawns a TTY server and forward I/O to the TCP socket.
+func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 	log.Println("SpawnTTYServer: started")
 
 	var tty *os.File
@@ -665,19 +735,19 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 	stopConn := make(chan bool, 1)
 
 	defer func() {
-		self.quit = true
+		ghost.quit = true
 		if tty != nil {
 			tty.Close()
 		}
-		self.Conn.Close()
+		ghost.Conn.Close()
 		log.Println("SpawnTTYServer: terminated")
 	}()
 
-	if self.ttyDevice == "" {
+	if ghost.ttyDevice == "" {
 		// No TTY device specified, open a PTY (pseudo terminal) instead.
 		shell := os.Getenv("SHELL")
 		if shell == "" {
-			shell = DEFAULT_SHELL
+			shell = defaultShell
 		}
 
 		home := os.Getenv("HOME")
@@ -709,31 +779,31 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 			return err
 		}
 
-		client, err := GhostRPCServer()
+		client, err := ghostRPCStubServer()
 
 		// Ghost could be launched without RPC server, ignore registraion
 		if err == nil {
-			err = client.Call("rpc.RegisterTTY", []string{self.sid, ttyName},
+			err = client.Call("rpc.RegisterTTY", []string{ghost.sid, ttyName},
 				&EmptyReply{})
 			if err != nil {
 				return err
 			}
 
 			err = client.Call("rpc.RegisterSession", []string{
-				self.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
+				ghost.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
 			if err != nil {
 				return err
 			}
 		}
 
 		go func() {
-			io.Copy(self.Conn, tty)
+			io.Copy(ghost.Conn, tty)
 			cmd.Wait()
 			stopConn <- true
 		}()
 	} else {
 		// Open a TTY device
-		tty, err = os.OpenFile(self.ttyDevice, os.O_RDWR, 0)
+		tty, err = os.OpenFile(ghost.ttyDevice, os.O_RDWR, 0)
 		if err != nil {
 			return err
 		}
@@ -755,70 +825,69 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 		}
 
 		go func() {
-			io.Copy(self.Conn, tty)
+			io.Copy(ghost.Conn, tty)
 			stopConn <- true
 		}()
 	}
 
-	var control_buffer bytes.Buffer
-	var write_buffer bytes.Buffer
-	control_state := CONTROL_NONE
+	var controlBuffer bytes.Buffer
+	var writeBuffer bytes.Buffer
+	controlState := controlNone
 
 	processBuffer := func(buffer []byte) error {
-		write_buffer.Reset()
+		writeBuffer.Reset()
 		for len(buffer) > 0 {
-			if control_state != CONTROL_NONE {
-				index := bytes.IndexByte(buffer, CONTROL_END)
+			if controlState != controlNone {
+				index := bytes.IndexByte(buffer, controlEnd)
 				if index != -1 {
-					control_buffer.Write(buffer[:index])
-					err := self.HandleTTYControl(tty, control_buffer.String())
-					control_state = CONTROL_NONE
-					control_buffer.Reset()
+					controlBuffer.Write(buffer[:index])
+					err := ghost.handleTTYControl(tty, controlBuffer.String())
+					controlState = controlNone
+					controlBuffer.Reset()
 					if err != nil {
 						return err
 					}
 					buffer = buffer[index+1:]
 				} else {
-					control_buffer.Write(buffer)
+					controlBuffer.Write(buffer)
 					buffer = buffer[0:0]
 				}
 			} else {
-				index := bytes.IndexByte(buffer, CONTROL_START)
+				index := bytes.IndexByte(buffer, controlStart)
 				if index != -1 {
-					control_state = CONTROL_START
-					write_buffer.Write(buffer[:index])
+					controlState = controlStart
+					writeBuffer.Write(buffer[:index])
 					buffer = buffer[index+1:]
 				} else {
-					write_buffer.Write(buffer)
+					writeBuffer.Write(buffer)
 					buffer = buffer[0:0]
 				}
 			}
 		}
-		if write_buffer.Len() != 0 {
-			tty.Write(write_buffer.Bytes())
+		if writeBuffer.Len() != 0 {
+			tty.Write(writeBuffer.Bytes())
 		}
 		return nil
 	}
 
-	if self.ReadBuffer != "" {
-		processBuffer([]byte(self.ReadBuffer))
-		self.ReadBuffer = ""
+	if ghost.ReadBuffer != "" {
+		processBuffer([]byte(ghost.ReadBuffer))
+		ghost.ReadBuffer = ""
 	}
 
 	for {
 		select {
-		case buffer := <-self.readChan:
+		case buffer := <-ghost.readChan:
 			err := processBuffer(buffer)
 			if err != nil {
 				log.Println("SpawnTTYServer:", err)
 			}
-		case err := <-self.readErrChan:
+		case err := <-ghost.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnTTYServer: connection terminated")
 				return nil
-			} else {
-				return err
 			}
+			return err
 		case s := <-stopConn:
 			if s {
 				return nil
@@ -829,18 +898,18 @@ func (self *Ghost) SpawnTTYServer(res *Response) error {
 	return nil
 }
 
-// Spawn a Shell server and forward input/output from/to the TCP socket.
-func (self *Ghost) SpawnShellServer(res *Response) error {
+// SpawnShellServer spawns a Shell server and forward input/output from/to the TCP socket.
+func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	log.Println("SpawnShellServer: started")
 
 	var err error
 
 	defer func() {
-		self.quit = true
+		ghost.quit = true
 		if err != nil {
-			self.Conn.Write([]byte(err.Error() + "\n"))
+			ghost.Conn.Write([]byte(err.Error() + "\n"))
 		}
-		self.Conn.Close()
+		ghost.Conn.Close()
 		log.Println("SpawnShellServer: terminated")
 	}()
 
@@ -858,7 +927,7 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 			filepath.Dir(exePath)))
 	}
 
-	cmd := exec.Command(DEFAULT_SHELL, "-c", self.shellCommand)
+	cmd := exec.Command(defaultShell, "-c", ghost.shellCommand)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -874,14 +943,14 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 
 	stopConn := make(chan bool, 1)
 
-	if self.ReadBuffer != "" {
-		stdin.Write([]byte(self.ReadBuffer))
-		self.ReadBuffer = ""
+	if ghost.ReadBuffer != "" {
+		stdin.Write([]byte(ghost.ReadBuffer))
+		ghost.ReadBuffer = ""
 	}
 
-	go io.Copy(self.Conn, stdout)
+	go io.Copy(ghost.Conn, stdout)
 	go func() {
-		io.Copy(self.Conn, stderr)
+		io.Copy(ghost.Conn, stderr)
 		stopConn <- true
 	}()
 
@@ -894,7 +963,7 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 
 		process := (*PollableProcess)(cmd.Process)
 		_, err = process.Poll()
-		// Check if the process is terminated. If not, send SIGTERM to the process,
+		// Check if the process is terminated. If not, send SIGlogcatTypeVT100 to the process,
 		// then wait for 1 second.  Send another SIGKILL to make sure the process is
 		// terminated.
 		if err != nil {
@@ -907,9 +976,9 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 
 	for {
 		select {
-		case buf := <-self.readChan:
-			if len(buf) >= len(STDIN_CLOSED)*2 {
-				idx := bytes.Index(buf, []byte(STDIN_CLOSED+STDIN_CLOSED))
+		case buf := <-ghost.readChan:
+			if len(buf) >= len(stdinClosed)*2 {
+				idx := bytes.Index(buf, []byte(stdinClosed+stdinClosed))
 				if idx != -1 {
 					stdin.Write(buf[:idx])
 					stdin.Close()
@@ -917,14 +986,13 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 				}
 			}
 			stdin.Write(buf)
-		case err := <-self.readErrChan:
+		case err := <-ghost.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnShellServer: connection terminated")
 				return nil
-			} else {
-				log.Printf("SpawnShellServer: %s\n", err)
-				return err
 			}
+			log.Printf("SpawnShellServer: %s\n", err)
+			return err
 		case s := <-stopConn:
 			if s {
 				return nil
@@ -935,56 +1003,57 @@ func (self *Ghost) SpawnShellServer(res *Response) error {
 	return nil
 }
 
-// Initiate file operation.
+// InitiatefileOperation initiates a file operation.
 // The operation could either be 'download' or 'upload'
 // This function starts handshake with overlord then execute download sequence.
-func (self *Ghost) InitiateFileOperation(res *Response) error {
-	if self.fileOperation.Action == "download" {
-		fi, err := os.Stat(self.fileOperation.Filename)
+func (ghost *Ghost) InitiatefileOperation(res *Response) error {
+	if ghost.fileOp.Action == "download" {
+		fi, err := os.Stat(ghost.fileOp.Filename)
 		if err != nil {
 			return err
 		}
 
 		req := NewRequest("request_to_download", map[string]interface{}{
-			"terminal_sid": self.terminalSid,
-			"filename":     filepath.Base(self.fileOperation.Filename),
+			"terminal_sid": ghost.terminalSid,
+			"filename":     filepath.Base(ghost.fileOp.Filename),
 			"size":         fi.Size(),
 		})
 
-		return self.SendRequest(req, nil)
-	} else if self.fileOperation.Action == "upload" {
-		self.upload.Ready = true
+		return ghost.SendRequest(req, nil)
+	} else if ghost.fileOp.Action == "upload" {
+		ghost.uploadContext.Ready = true
 		req := NewRequest("clear_to_upload", nil)
 		req.SetTimeout(-1)
-		err := self.SendRequest(req, nil)
+		err := ghost.SendRequest(req, nil)
 		if err != nil {
 			return err
 		}
-		go self.StartUploadServer()
+		go ghost.StartUploadServer()
 		return nil
 	} else {
-		return errors.New("InitiateFileOperation: unknown file operation, ignored")
+		return errors.New("InitiatefileOperation: unknown file operation, ignored")
 	}
 	return nil
 }
 
-// Spawn a port forwarding server and forward I/O to the TCP socket.
-func (self *Ghost) SpawnPortForwardServer(res *Response) error {
-	log.Println("SpawnPortForwardServer: started")
+// SpawnPortModeForwardServer spawns a port forwarding server and forward I/O to
+// the TCP socket.
+func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
+	log.Println("SpawnPortModeForwardServer: started")
 
 	var err error
 
 	defer func() {
-		self.quit = true
+		ghost.quit = true
 		if err != nil {
-			self.Conn.Write([]byte(err.Error() + "\n"))
+			ghost.Conn.Write([]byte(err.Error() + "\n"))
 		}
-		self.Conn.Close()
-		log.Println("SpawnPortForwardServer: terminated")
+		ghost.Conn.Close()
+		log.Println("SpawnPortModeForwardServer: terminated")
 	}()
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", self.port),
-		CONNECT_TIMEOUT*time.Second)
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", ghost.port),
+		connectTimeout)
 	if err != nil {
 		return err
 	}
@@ -992,27 +1061,26 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 
 	stopConn := make(chan bool, 1)
 
-	if self.ReadBuffer != "" {
-		conn.Write([]byte(self.ReadBuffer))
-		self.ReadBuffer = ""
+	if ghost.ReadBuffer != "" {
+		conn.Write([]byte(ghost.ReadBuffer))
+		ghost.ReadBuffer = ""
 	}
 
 	go func() {
-		io.Copy(self.Conn, conn)
+		io.Copy(ghost.Conn, conn)
 		stopConn <- true
 	}()
 
 	for {
 		select {
-		case buf := <-self.readChan:
+		case buf := <-ghost.readChan:
 			conn.Write(buf)
-		case err := <-self.readErrChan:
+		case err := <-ghost.readErrChan:
 			if err == io.EOF {
-				log.Println("SpawnPortForwardServer: connection terminated")
+				log.Println("SpawnPortModeForwardServer: connection terminated")
 				return nil
-			} else {
-				return err
 			}
+			return err
 		case s := <-stopConn:
 			if s {
 				return nil
@@ -1024,66 +1092,66 @@ func (self *Ghost) SpawnPortForwardServer(res *Response) error {
 }
 
 // Register existent to Overlord.
-func (self *Ghost) Register() error {
-	for _, addr := range self.addrs {
+func (ghost *Ghost) Register() error {
+	for _, addr := range ghost.addrs {
 		var (
 			conn net.Conn
 			err  error
 		)
 
 		log.Printf("Trying %s ...\n", addr)
-		self.Reset()
+		ghost.Reset()
 
-		conn, err = net.DialTimeout("tcp", addr, CONNECT_TIMEOUT*time.Second)
+		conn, err = net.DialTimeout("tcp", addr, connectTimeout)
 		if err == nil {
 			log.Println("Connection established, registering...")
-			if self.tlsSettings.Enabled() {
+			if ghost.tls.Enabled() {
 				colonPos := strings.LastIndex(addr, ":")
-				config := self.tlsSettings.Config
+				config := ghost.tls.Config
 				config.ServerName = addr[:colonPos]
 				conn = tls.Client(conn, config)
 			}
 
-			self.Conn = conn
+			ghost.Conn = conn
 			req := NewRequest("register", map[string]interface{}{
-				"mid":        self.mid,
-				"sid":        self.sid,
-				"mode":       self.mode,
-				"properties": self.properties,
+				"mid":        ghost.mid,
+				"sid":        ghost.sid,
+				"mode":       ghost.mode,
+				"properties": ghost.properties,
 			})
 
 			registered := func(res *Response) error {
 				if res == nil {
-					self.reset = true
+					ghost.reset = true
 					return errors.New("Register request timeout")
-				} else if res.Response != SUCCESS {
+				} else if res.Response != Success {
 					log.Println("Register:", res.Response)
 				} else {
 					log.Printf("Registered with Overlord at %s", addr)
-					self.connectedAddr = addr
-					if err := self.Upgrade(); err != nil {
+					ghost.connectedAddr = addr
+					if err := ghost.Upgrade(); err != nil {
 						log.Println(err)
 					}
-					self.pauseLanDisc = true
+					ghost.pauseLanDisc = true
 				}
-				self.RegisterStatus = res.Response
+				ghost.RegisterStatus = res.Response
 				return nil
 			}
 
 			var handler ResponseHandler
-			switch self.mode {
-			case AGENT:
+			switch ghost.mode {
+			case ModeControl:
 				handler = registered
-			case TERMINAL:
-				handler = self.SpawnTTYServer
-			case SHELL:
-				handler = self.SpawnShellServer
-			case FILE:
-				handler = self.InitiateFileOperation
-			case FORWARD:
-				handler = self.SpawnPortForwardServer
+			case ModeTerminal:
+				handler = ghost.SpawnTTYServer
+			case ModeShell:
+				handler = ghost.SpawnShellServer
+			case ModeFile:
+				handler = ghost.InitiatefileOperation
+			case ModeForward:
+				handler = ghost.SpawnPortModeForwardServer
 			}
-			err = self.SendRequest(req, handler)
+			err = ghost.SendRequest(req, handler)
 			return nil
 		}
 	}
@@ -1091,77 +1159,76 @@ func (self *Ghost) Register() error {
 	return errors.New("Cannot connect to any server")
 }
 
-// Initiate a client-side download request
-func (self *Ghost) InitiateDownload(info DownloadInfo) {
+// InitiateDownload initiates a client-initiated download request.
+func (ghost *Ghost) InitiateDownload(info downloadInfo) {
 	go func() {
-		addrs := []string{self.connectedAddr}
-		g := NewGhost(addrs, self.tlsSettings, FILE, RANDOM_MID).SetTerminalSid(
-			self.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
+		addrs := []string{ghost.connectedAddr}
+		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetTerminalSid(
+			ghost.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
 		g.Start(false, false)
 	}()
 }
 
 // Reset all states for a new connection.
-func (self *Ghost) Reset() {
-	self.ClearRequests()
-	self.reset = false
-	self.LoadProperties()
-	self.RegisterStatus = DISCONNECTED
+func (ghost *Ghost) Reset() {
+	ghost.ClearRequests()
+	ghost.reset = false
+	ghost.loadProperties()
+	ghost.RegisterStatus = statusDisconnected
 }
 
-// Main routine for listen to socket messages.
-func (self *Ghost) Listen() error {
-	readChan, readErrChan := self.SpawnReaderRoutine()
-	pingTicker := time.NewTicker(time.Duration(PING_INTERVAL * time.Second))
-	reqTicker := time.NewTicker(time.Duration(TIMEOUT_CHECK_SECS * time.Second))
+// Listen is the main routine for listen to socket messages.
+func (ghost *Ghost) Listen() error {
+	readChan, readErrChan := ghost.SpawnReaderRoutine()
+	pingTicker := time.NewTicker(time.Duration(pingInterval))
+	reqTicker := time.NewTicker(time.Duration(timeoutCheckInterval))
 
-	self.readChan = readChan
-	self.readErrChan = readErrChan
+	ghost.readChan = readChan
+	ghost.readErrChan = readErrChan
 
 	defer func() {
-		self.Conn.Close()
-		self.pauseLanDisc = false
+		ghost.Conn.Close()
+		ghost.pauseLanDisc = false
 	}()
 
 	for {
 		select {
 		case buffer := <-readChan:
-			if self.upload.Ready {
-				if self.ReadBuffer != "" {
+			if ghost.uploadContext.Ready {
+				if ghost.ReadBuffer != "" {
 					// Write the leftover from previous ReadBuffer
-					self.upload.Data <- []byte(self.ReadBuffer)
-					self.ReadBuffer = ""
+					ghost.uploadContext.Data <- []byte(ghost.ReadBuffer)
+					ghost.ReadBuffer = ""
 				}
-				self.upload.Data <- buffer
+				ghost.uploadContext.Data <- buffer
 				continue
 			}
-			reqs := self.ParseRequests(string(buffer), self.RegisterStatus != SUCCESS)
-			if self.quit {
+			reqs := ghost.ParseRequests(string(buffer), ghost.RegisterStatus != Success)
+			if ghost.quit {
 				return nil
 			}
-			if err := self.ProcessRequests(reqs); err != nil {
+			if err := ghost.processRequests(reqs); err != nil {
 				log.Println(err)
 			}
 		case err := <-readErrChan:
 			if err == io.EOF {
-				if self.upload.Ready {
-					self.upload.Data <- nil
-					self.quit = true
+				if ghost.uploadContext.Ready {
+					ghost.uploadContext.Data <- nil
+					ghost.quit = true
 					return nil
 				}
 				return errors.New("Connection dropped")
-			} else {
-				return err
 			}
-		case info := <-self.downloadQueue:
-			self.InitiateDownload(info)
+			return err
+		case info := <-ghost.downloadQueue:
+			ghost.InitiateDownload(info)
 		case <-pingTicker.C:
-			if self.mode == AGENT {
-				self.Ping()
+			if ghost.mode == ModeControl {
+				ghost.Ping()
 			}
 		case <-reqTicker.C:
-			err := self.ScanForTimeoutRequests()
-			if self.reset {
+			err := ghost.ScanForTimeoutRequests()
+			if ghost.reset {
 				if err == nil {
 					err = errors.New("reset request")
 				}
@@ -1171,27 +1238,30 @@ func (self *Ghost) Listen() error {
 	}
 }
 
-func (self *Ghost) RegisterTTY(session_id, ttyName string) {
-	self.ttyName2Sid[ttyName] = session_id
+// RegisterTTY register the TTY to a session.
+func (ghost *Ghost) RegisterTTY(sesssionID, ttyName string) {
+	ghost.ttyName2Sid[ttyName] = sesssionID
 }
 
-func (self *Ghost) RegisterSession(session_id, pidStr string) {
+// RegisterSession register the PID to a session.
+func (ghost *Ghost) RegisterSession(sesssionID, pidStr string) {
 	pid, err := strconv.Atoi(pidStr)
 	if err != nil {
 		panic(err)
 	}
-	self.terminalSid2Pid[session_id] = pid
+	ghost.terminalSid2Pid[sesssionID] = pid
 }
 
-func (self *Ghost) AddToDownloadQueue(ttyName, filename string) {
-	self.downloadQueue <- DownloadInfo{ttyName, filename}
+// AddToDownloadQueue adds a downloadInfo to the download queue
+func (ghost *Ghost) AddToDownloadQueue(ttyName, filename string) {
+	ghost.downloadQueue <- downloadInfo{ttyName, filename}
 }
 
-// Start listening to LAN discovery message.
-func (self *Ghost) StartLanDiscovery() {
+// StartLanDiscovery starts listening to LAN discovery message.
+func (ghost *Ghost) StartLanDiscovery() {
 	log.Println("LAN discovery: started")
-	buf := make([]byte, BUFSIZ)
-	conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", OVERLORD_LD_PORT))
+	buf := make([]byte, bufferSize)
+	conn, err := net.ListenPacket("udp", fmt.Sprintf(":%d", OverlordLDPort))
 	if err != nil {
 		log.Printf("LAN discovery: %s, abort\n", err)
 		return
@@ -1203,17 +1273,17 @@ func (self *Ghost) StartLanDiscovery() {
 	}()
 
 	for {
-		conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT * time.Second))
+		conn.SetReadDeadline(time.Now().Add(readTimeout))
 		n, remote, err := conn.ReadFrom(buf)
 
-		if self.pauseLanDisc {
+		if ghost.pauseLanDisc {
 			log.Println("LAN discovery: paused")
-			ticker := time.NewTicker(READ_TIMEOUT * time.Second)
+			ticker := time.NewTicker(readTimeout)
 		waitLoop:
 			for {
 				select {
 				case <-ticker.C:
-					if !self.pauseLanDisc {
+					if !ghost.pauseLanDisc {
 						break waitLoop
 					}
 				}
@@ -1242,15 +1312,15 @@ func (self *Ghost) StartLanDiscovery() {
 			remoteAddr = data[1]
 		}
 
-		if !self.ExistsInAddr(remoteAddr) {
+		if !ghost.existsInAddr(remoteAddr) {
 			log.Printf("LAN discovery: got overlord address %s", remoteAddr)
-			self.addrs = append(self.addrs, remoteAddr)
+			ghost.addrs = append(ghost.addrs, remoteAddr)
 		}
 	}
 }
 
 // ServeHTTP method for serving JSON-RPC over HTTP.
-func (self *Ghost) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (ghost *Ghost) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var conn, _, err = w.(http.Hijacker).Hijack()
 	if err != nil {
 		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
@@ -1258,69 +1328,69 @@ func (self *Ghost) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	io.WriteString(conn, "HTTP/1.1 200\n")
 	io.WriteString(conn, "Content-Type: application/json-rpc\n\n")
-	self.server.ServeCodec(jsonrpc.NewServerCodec(conn))
+	ghost.server.ServeCodec(jsonrpc.NewServerCodec(conn))
 }
 
-// Starts a local RPC server used for communication between ghost instances.
-func (self *Ghost) StartRPCServer() {
+// StartRPCServer starts a local RPC server used for communication between
+// ghost instances.
+func (ghost *Ghost) StartRPCServer() {
 	log.Println("RPC Server: started")
 
-	ghostRPC := NewGhostRPC(self)
-	self.server = rpc.NewServer()
-	self.server.RegisterName("rpc", ghostRPC)
+	ghost.server = rpc.NewServer()
+	ghost.server.RegisterName("rpc", &ghostRPCStub{ghost})
 
-	http.Handle("/", self)
-	err := http.ListenAndServe(fmt.Sprintf("localhost:%d", GHOST_RPC_PORT), nil)
+	http.Handle("/", ghost)
+	err := http.ListenAndServe(fmt.Sprintf("localhost:%d", ghostRPCStubPort), nil)
 	if err != nil {
-		log.Fatalf("Unable to listen at prt %d: %s\n", GHOST_RPC_PORT, err)
+		log.Fatalf("Unable to listen at port %d: %s\n", ghostRPCStubPort, err)
 	}
 }
 
-// ScanGateWay scans currenty netowrk gateway and add it into addrs if not
+// ScanGateway scans currenty netowrk gateway and add it into addrs if not
 // already exist.
-func (self *Ghost) ScanGateway() {
+func (ghost *Ghost) ScanGateway() {
 	if gateways, err := GetGateWayIP(); err == nil {
 		for _, gw := range gateways {
-			addr := fmt.Sprintf("%s:%d", gw, OVERLORD_PORT)
-			if !self.ExistsInAddr(addr) {
-				self.addrs = append(self.addrs, addr)
+			addr := fmt.Sprintf("%s:%d", gw, OverlordPort)
+			if !ghost.existsInAddr(addr) {
+				ghost.addrs = append(ghost.addrs, addr)
 			}
 		}
 	}
 }
 
-// Bootstrap and start the client.
-func (self *Ghost) Start(lanDisc bool, RPCServer bool) {
-	log.Printf("%s started\n", ModeStr(self.mode))
-	log.Printf("MID: %s\n", self.mid)
-	log.Printf("SID: %s\n", self.sid)
+// Start bootstraps and start the client.
+func (ghost *Ghost) Start(lanDisc bool, RPCServer bool) {
+	log.Printf("%s started\n", ModeStr(ghost.mode))
+	log.Printf("MID: %s\n", ghost.mid)
+	log.Printf("SID: %s\n", ghost.sid)
 
 	if lanDisc {
-		go self.StartLanDiscovery()
+		go ghost.StartLanDiscovery()
 	}
 
 	if RPCServer {
-		go self.StartRPCServer()
+		go ghost.StartRPCServer()
 	}
 
 	for {
-		self.ScanGateway()
-		err := self.Register()
+		ghost.ScanGateway()
+		err := ghost.Register()
 		if err == nil {
-			err = self.Listen()
+			err = ghost.Listen()
 		}
-		if self.quit {
+		if ghost.quit {
 			break
 		}
-		log.Printf("%s, retrying in %ds\n", err, RETRY_INTERVAL)
-		time.Sleep(RETRY_INTERVAL * time.Second)
-		self.Reset()
+		log.Printf("%s, retrying in %ds\n", err, retryIntervalSeconds)
+		time.Sleep(retryIntervalSeconds * time.Second)
+		ghost.Reset()
 	}
 }
 
-// Returns a GhostRPC client object which can be used to call GhostRPC methods.
-func GhostRPCServer() (*rpc.Client, error) {
-	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", GHOST_RPC_PORT))
+// Returns a ghostRPCStub client object which can be used to call ghostRPCStub methods.
+func ghostRPCStubServer() (*rpc.Client, error) {
+	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", ghostRPCStubPort))
 	if err != nil {
 		return nil, err
 	}
@@ -1333,10 +1403,10 @@ func GhostRPCServer() (*rpc.Client, error) {
 	return nil, err
 }
 
-// Add a file to the download queue, which would be pickup by the ghost
-// control channel instance and perform download.
+// DownloadFile adds a file to the download queue, which would be pickup by the
+// ghost control channel instance and perform download.
 func DownloadFile(filename string) {
-	client, err := GhostRPCServer()
+	client, err := ghostRPCStubServer()
 	if err != nil {
 		log.Printf("error: %s\n", err)
 		os.Exit(1)
@@ -1378,13 +1448,14 @@ fail:
 	os.Exit(1)
 }
 
+// StartGhost starts the Ghost client.
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	tlsCertFile string, enableTLSWithoutVerify bool, propFile string, download string,
 	reset bool) {
 	var addrs []string
 
 	if reset {
-		client, err := GhostRPCServer()
+		client, err := ghostRPCStubServer()
 		if err != nil {
 			log.Printf("error: %s\n", err)
 			os.Exit(1)
@@ -1403,11 +1474,11 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 
 	if len(args) >= 1 {
-		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OVERLORD_PORT))
+		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OverlordPort))
 	}
-	addrs = append(addrs, fmt.Sprintf("%s:%d", LOCALHOST, OVERLORD_PORT))
+	addrs = append(addrs, fmt.Sprintf("%s:%d", localhost, OverlordPort))
 
-	tlsSettings := NewTLSSettings(tlsCertFile, enableTLSWithoutVerify)
+	tlsSettings := newTLSSettings(tlsCertFile, enableTLSWithoutVerify)
 
 	if propFile != "" {
 		var err error
@@ -1418,7 +1489,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 		}
 	}
 
-	g := NewGhost(addrs, tlsSettings, AGENT, mid)
+	g := NewGhost(addrs, tlsSettings, ModeControl, mid)
 	g.SetPropFile(propFile)
 	go g.Start(!noLanDisc, !noRPCServer)
 

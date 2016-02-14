@@ -14,6 +14,7 @@ import (
 	"strings"
 )
 
+// GetGateWayIP return the IPs of the gateways.
 func GetGateWayIP() ([]string, error) {
 	f, err := os.Open("/proc/net/route")
 	if err != nil {
@@ -82,10 +83,12 @@ func GetMachineID() (string, error) {
 	return "", errors.New("can't generate machine ID")
 }
 
+// GetProcessWorkingDirectory returns the current working directory of a process.
 func GetProcessWorkingDirectory(pid int) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 }
 
+// GetExecutablePath return the executable path of the current process.
 func GetExecutablePath() (string, error) {
 	path, err := os.Readlink("/proc/self/exe")
 	return path, err

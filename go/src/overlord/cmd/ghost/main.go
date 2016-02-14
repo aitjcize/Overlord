@@ -43,7 +43,7 @@ func main() {
 	}
 
 	if *randMid {
-		finalMid = overlord.RANDOM_MID
+		finalMid = overlord.RandomMID
 	} else {
 		finalMid = *mid
 	}

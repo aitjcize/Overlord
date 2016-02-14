@@ -17,11 +17,7 @@ import (
 	"unsafe"
 )
 
-const (
-	MAXPATHLEN            = 1024
-	PROC_PIDVNODEPATHINFO = 9
-)
-
+// GetGateWayIP return the IPs of the gateways.
 func GetGateWayIP() ([]string, error) {
 	out, err := exec.Command("route", "-n", "get", "default").Output()
 	if err == nil {
@@ -48,31 +44,33 @@ func GetMachineID() (string, error) {
 	return "", errors.New("can't generate machine ID")
 }
 
+// GetProcessWorkingDirectory returns the current working directory of a process.
 func GetProcessWorkingDirectory(pid int) (string, error) {
 	const (
-		proc_vnodepathinfo_size = 2352
-		vid_path_offset         = 152
+		procVnodepathinfoSize = 2352
+		vidPathOffset         = 152
 	)
 
-	buf := make([]byte, proc_vnodepathinfo_size)
-	ret := C.proc_pidinfo(C.int(os.Getpid()), C.int(PROC_PIDVNODEPATHINFO),
-		C.uint64_t(0), unsafe.Pointer(&buf[0]), C.int(proc_vnodepathinfo_size))
+	buf := make([]byte, procVnodepathinfoSize)
+	ret := C.proc_pidinfo(C.int(os.Getpid()), C.int(C.PROC_PIDVNODEPATHINFO),
+		C.uint64_t(0), unsafe.Pointer(&buf[0]), C.int(procVnodepathinfoSize))
 	if ret == 0 {
-		return "", errors.New(fmt.Sprintf("proc_pidinfo returned %d", ret))
+		return "", fmt.Errorf("proc_pidinfo returned %d", ret)
 	}
-	buf = buf[vid_path_offset : vid_path_offset+MAXPATHLEN]
+	buf = buf[vidPathOffset : vidPathOffset+C.MAXPATHLEN]
 	n := bytes.Index(buf, []byte{0})
 
 	return string(buf[:n]), nil
 }
 
+// GetExecutablePath return the executable path of the current process.
 func GetExecutablePath() (string, error) {
-	buf := make([]byte, MAXPATHLEN*4)
+	buf := make([]byte, C.MAXPATHLEN*4)
 	length := C.proc_pidpath(C.int(os.Getpid()), unsafe.Pointer(&buf[0]),
-		C.uint32_t(MAXPATHLEN*4))
+		C.uint32_t(C.MAXPATHLEN*4))
 
 	if length == 0 {
-		return "", errors.New(fmt.Sprintf("proc_pidpath returned %d", length))
+		return "", fmt.Errorf("proc_pidpath returned %d", length)
 	}
 	return string(buf[:length]), nil
 }

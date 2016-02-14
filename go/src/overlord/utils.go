@@ -15,11 +15,12 @@ import (
 	"syscall"
 )
 
+// ToVTNewLine replace the newline character to VT100 newline control.
 func ToVTNewLine(text string) string {
 	return strings.Replace(text, "\n", "\r\n", -1)
 }
 
-// Return machine architecture string.
+// GetArchString returns machine architecture string.
 // For ARM platform, return armvX, where X is ARM version.
 func GetArchString() string {
 	if runtime.GOARCH == "arm" {
@@ -28,12 +29,13 @@ func GetArchString() string {
 	return runtime.GOARCH
 }
 
-// Return machine platform string.
+// GetPlatformString returns machine platform string.
 // Platform stream has the format of GOOS.GOARCH
 func GetPlatformString() string {
 	return fmt.Sprintf("%s.%s", runtime.GOOS, GetArchString())
 }
 
+// GetFileSha1 return the sha1sum of a file.
 func GetFileSha1(filename string) (string, error) {
 	fd, err := os.Open(filename)
 	if err != nil {
@@ -49,8 +51,10 @@ func GetFileSha1(filename string) (string, error) {
 	return fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())), nil
 }
 
+// PollableProcess is a os.Process which supports the polling for it's status.
 type PollableProcess os.Process
 
+// Poll polls the process for it's execution status.
 func (p *PollableProcess) Poll() (uint32, error) {
 	var wstatus syscall.WaitStatus
 	pid, err := syscall.Wait4(p.Pid, &wstatus, syscall.WNOHANG, nil)
