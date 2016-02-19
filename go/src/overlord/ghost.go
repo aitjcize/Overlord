@@ -13,8 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pkg/term/termios"
 	"github.com/kr/pty"
+	"github.com/pkg/term/termios"
 	"github.com/satori/go.uuid"
 	"io"
 	"io/ioutil"
@@ -125,8 +125,8 @@ type fileUploadContext struct {
 }
 
 type tlsSettings struct {
-	tlsCertFile      string      // TLS certificate in PEM format
-	Config           *tls.Config // TLS configuration
+	tlsCertFile string      // TLS certificate in PEM format
+	Config      *tls.Config // TLS configuration
 }
 
 func newTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *tlsSettings {
@@ -143,7 +143,7 @@ func newTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *tlsSetting
 		caCertPool := x509.NewCertPool()
 		caCertPool.AppendCertsFromPEM(cert)
 		tlsConfig = &tls.Config{
-			RootCAs: caCertPool,
+			RootCAs:    caCertPool,
 			MinVersion: tls.VersionTLS12,
 		}
 	}

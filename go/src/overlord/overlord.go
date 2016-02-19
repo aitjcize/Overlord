@@ -307,7 +307,7 @@ func (ovl *Overlord) ServSocket(port int) {
 
 		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
-			MinVersion: tls.VersionTLS12,
+			MinVersion:   tls.VersionTLS12,
 		}
 	}
 
