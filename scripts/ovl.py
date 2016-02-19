@@ -299,8 +299,8 @@ class OverlordClientDaemon:
   """Overlord Client Daemon."""
   def __init__(self):
     # Use full module path for jsonrpclib to resolve.
-    import cros.factory.tools.ovl
-    self._state = cros.factory.tools.ovl.DaemonState()
+    import ovl
+    self._state = ovl.DaemonState()
     self._server = None
 
   def Start(self):

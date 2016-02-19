@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"overlord"
+	"../../overlord"
 )
 
 var lanDiscInterface = flag.String("lan-disc-iface", "",

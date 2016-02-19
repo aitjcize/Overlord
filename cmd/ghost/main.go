@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"overlord"
+	"../../overlord"
 )
 
 var mid = flag.String("mid", "", "machine ID to set")

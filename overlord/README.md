@@ -59,7 +59,7 @@ There are some options available for the overlordd command, use `overlord
 By default, overlordd is started with HTTP basic auth enabled. The default
 account / password is `overlord/cros`, **please follow the later section in
 this document to change the password for production environment**. To disable
-HTTP basic auth, simply add the `-no-auth` option when launching overlordd.
+HTTP basic auth, simply add the `-noauth` option when launching overlordd.
 **This is strongly discouraged in production environment**, as it expose your
 server for anyone to access it.
 
@@ -116,11 +116,11 @@ shopfloor:~/overlord $ htpasswd -B app/overlord.htpasswd username2
 # Enable SSL Support
 
 To ensure the privacy of the communication with the overlord server via the web
-frontend. It's encouraged to enable SSL on a production environment.
+frontend. It`s encouraged to enable SSL on a production environment.
 
 You can either use a CA-signed SSL certificate or a self-signed SSL
 certificate. We usually use a self-signed certificate in the factory since we
-can't be 100% sure we are the only one that have access to the server. If the
+can`t be 100% sure we are the only one that have access to the server. If the
 partner have access to the server, they can steal your SSL certificate file!
 
 To generate a self-signed SSL certificate, you need the openssl software suite
