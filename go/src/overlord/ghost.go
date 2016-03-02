@@ -37,7 +37,6 @@ import (
 const (
 	ghostRPCStubPort     = 4499
 	defaultShell         = "/bin/bash"
-	localhost            = "localhost"
 	pingInterval         = 10 * time.Second
 	readTimeout          = 3 * time.Second
 	connectTimeout       = 3 * time.Second
@@ -1476,7 +1475,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	if len(args) >= 1 {
 		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OverlordPort))
 	}
-	addrs = append(addrs, fmt.Sprintf("%s:%d", localhost, OverlordPort))
+	addrs = append(addrs, fmt.Sprintf("localhost:%d", OverlordPort))
 
 	tlsSettings := newTLSSettings(tlsCertFile, enableTLSWithoutVerify)
 
