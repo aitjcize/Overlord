@@ -1394,7 +1394,7 @@ func ghostRPCStubServer() (*rpc.Client, error) {
 		return nil, err
 	}
 
-	io.WriteString(conn, "GET / HTTP/1.1\n\n")
+	io.WriteString(conn, "GET / HTTP/1.1\nHost: localhost\n\n")
 	_, err = http.ReadResponse(bufio.NewReader(conn), nil)
 	if err == nil {
 		return jsonrpc.NewClient(conn), nil
