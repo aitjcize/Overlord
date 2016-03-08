@@ -288,17 +288,8 @@ var TerminalWindow = React.createClass({
       }.bind(this);
 
       sock.onclose = function (event) {
-        // If the current focus element is same as this terminal, we assume that
-        // this connection close is initiated by the user (i.e. by typing 'exit'
-        // in the shell). If the current focus element is not this terminal, it
-        // means the connection dropped unexpectedly. We show a 'connection
-        // lost' overlay to indicate this situation in this case.
-        if (document.activeElement == $el.find(".terminal")[0]) {
-          this.onCloseMouseUp2();
-        } else {
-          term.write("\r\nConnection lost.");
-          $el.find(".terminal-disconnected-overlay").css("display", "block");
-        }
+        term.write("\r\nConnection lost.");
+        $el.find(".terminal-disconnected-overlay").css("display", "block");
 
         var callback = this.props.onClose;
         if (typeof(callback) != "undefined") {
