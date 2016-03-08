@@ -46,9 +46,6 @@ Terminal.prototype.CopyAll = function () {
 
 var TerminalWindow = React.createClass({
   mixins: [BaseWindow],
-  randomID: function () {
-    return Math.random().toString(36).replace(/[^a-z]+/g, "").substr(0, 6);
-  },
   getInitialState: function () {
     return {sid: ""};
   },
@@ -122,7 +119,7 @@ var TerminalWindow = React.createClass({
 
         for (var i = 0; i < files.length; i++) {
           function postFile(file) {
-            var id = $this.randomID();
+            var id = randomID();
             var formData = new FormData();
             formData.append("file", file);
 
@@ -175,7 +172,7 @@ var TerminalWindow = React.createClass({
             }(files[i]),
             error: function (file) {
               return function (data) {
-                var id = $this.randomID();
+                var id = randomID();
                 var response = JSON.parse(data.responseText);
                 $this.props.progressBars.addRecord(
                     {error: true, filename: file.name, id: id,

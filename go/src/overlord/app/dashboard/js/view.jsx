@@ -220,7 +220,7 @@ var RecentList = React.createClass({
 
 var ClientInfo = React.createClass({
   openTerminal: function (event) {
-    this.props.app.addTerminal(this.props.data.mid, this.props.data);
+    this.props.app.addTerminal(randomID(), this.props.data);
   },
   openCamera: function (event) {
     this.props.app.addCamera(this.props.data.mid, this.props.data);
@@ -312,7 +312,7 @@ var Windows = React.createClass({
                 extra = "?tty_device=" + term.path;
               }
               return (
-                <TerminalWindow key={id} mid={term.mid} id={id} title={id}
+                <TerminalWindow key={id} mid={term.mid} id={id} title={term.mid}
                  path={"/api/agent/tty/" + term.mid + extra}
                  uploadPath={"/api/agent/upload/" + term.mid}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
@@ -330,7 +330,7 @@ var Windows = React.createClass({
                 var width = cam_prop.width || 640;
                 var height = cam_prop.height || 640;
                 return (
-                    <CameraWindow key={id} mid={cam.mid} id={id} title={id}
+                    <CameraWindow key={id} mid={cam.mid} id={id} title={cam.mid}
                      path={"/api/agent/shell/" + cam.mid + "?command=" +
                            encodeURIComponent(command)}
                      width={width} height={height} app={this.props.app}
