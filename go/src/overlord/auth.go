@@ -6,7 +6,6 @@ package overlord
 
 import (
 	"bufio"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"golang.org/x/crypto/bcrypt"
@@ -89,20 +88,13 @@ func (auth *basicAuthHTTPHandlerDecorator) ServeHTTP(w http.ResponseWriter, r *h
 		return
 	}
 
-	authString := r.Header.Get("Authorization")
-	if authString == "" {
-		auth.Unauthorized(w, r, "no authorization request", false)
+	username, password, ok := r.BasicAuth()
+	if !ok {
+		auth.Unauthorized(w, r, "authorization failed", false)
 		return
 	}
 
-	credential, err := base64.StdEncoding.DecodeString(authString[len("Basic "):])
-	if err != nil {
-		auth.Unauthorized(w, r, "invaid base64 encoding", true)
-		return
-	}
-
-	parts := strings.Split(string(credential), ":")
-	pass, err := auth.auth.Authenticate(parts[0], parts[1])
+	pass, err := auth.auth.Authenticate(username, password)
 	if !pass {
 		auth.Unauthorized(w, r, err.Error(), true)
 		return
