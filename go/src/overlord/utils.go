@@ -21,19 +21,10 @@ func ToVTNewLine(text string) string {
 	return strings.Replace(text, "\n", "\r\n", -1)
 }
 
-// GetArchString returns machine architecture string.
-// For ARM platform, return armvX, where X is ARM version.
-func GetArchString() string {
-	if runtime.GOARCH == "arm" {
-		return fmt.Sprintf("armv%s", os.Getenv("GOARM"))
-	}
-	return runtime.GOARCH
-}
-
 // GetPlatformString returns machine platform string.
 // Platform stream has the format of GOOS.GOARCH
 func GetPlatformString() string {
-	return fmt.Sprintf("%s.%s", runtime.GOOS, GetArchString())
+	return fmt.Sprintf("%s.%s", runtime.GOOS, runtime.GOARCH)
 }
 
 // GetFileSha1 return the sha1sum of a file.
