@@ -5,10 +5,11 @@
 package overlord
 
 import (
-	"bytes"
 	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -37,18 +38,17 @@ func GetPlatformString() string {
 
 // GetFileSha1 return the sha1sum of a file.
 func GetFileSha1(filename string) (string, error) {
-	fd, err := os.Open(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return "", err
 	}
+	defer f.Close()
 
-	var buffer bytes.Buffer
-	_, err = buffer.ReadFrom(fd)
-	if err != nil {
+	h := sha1.New()
+	if _, err = io.Copy(h, f); err != nil {
 		return "", err
 	}
-
-	return fmt.Sprintf("%x", sha1.Sum(buffer.Bytes())), nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // PollableProcess is a os.Process which supports the polling for it's status.
