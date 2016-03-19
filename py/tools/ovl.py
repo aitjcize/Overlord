@@ -446,9 +446,10 @@ class SSLEnabledWebSocketBaseClient(WebSocketBaseClient):
 
 
 class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
-  def __init__(self, host, mid, *args, **kwargs):
+  def __init__(self, host, mid, escape, *args, **kwargs):
     super(TerminalWebSocketClient, self).__init__(host, *args, **kwargs)
     self._mid = mid
+    self._escape = escape
     self._stdin_fd = sys.stdin.fileno()
     self._old_termios = None
 
@@ -484,16 +485,17 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
           ch = sys.stdin.read(1)
 
           # Scan for escape sequence
-          if state == READY:
-            state = ENTER_PRESSED if ch == chr(0x0d) else READY
-          elif state == ENTER_PRESSED:
-            state = ESCAPE_PRESSED if ch == _ESCAPE else READY
-          elif state == ESCAPE_PRESSED:
-            if ch == '.':
-              self.close()
-              break
-          else:
-            state = READY
+          if self._escape:
+            if state == READY:
+              state = ENTER_PRESSED if ch == chr(0x0d) else READY
+            elif state == ENTER_PRESSED:
+              state = ESCAPE_PRESSED if ch == self._escape else READY
+            elif state == ESCAPE_PRESSED:
+              if ch == '.':
+                self.close()
+                break
+            else:
+              state = READY
 
           self.send(ch)
       except (KeyboardInterrupt, RuntimeError):
@@ -633,6 +635,7 @@ class OverlordCLIClient(object):
     self._selected_mid = None
     self._server = None
     self._state = None
+    self._escape = None
 
   def _BuildParser(self):
     root_parser = argparse.ArgumentParser(prog='ovl')
@@ -644,6 +647,10 @@ class OverlordCLIClient(object):
     root_parser.add_argument('-S', dest='select_mid_before_action',
                              action='store_true', default=False,
                              help='select target before executing command')
+    root_parser.add_argument('-e', dest='escape', metavar='ESCAPE_CHAR',
+                             action='store', default=_ESCAPE, type=str,
+                             help='set shell escape character, \'none\' to '
+                             'disable escape completely')
 
     for attr in self.SUBCOMMANDS:
       parser = subparsers.add_parser(attr['command'], help=attr['help'])
@@ -665,6 +672,9 @@ class OverlordCLIClient(object):
 
     command = args.which
     self._selected_mid = args.selected_mid
+
+    if args.escape and args.escape != 'none':
+      self._escape = args.escape[0]
 
     if command == 'start-server':
       self.StartServer()
@@ -1037,6 +1047,7 @@ class OverlordCLIClient(object):
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     if len(command) == 0:
       ws = TerminalWebSocketClient(self._state.host, self._selected_mid,
+                                   self._escape,
                                    scheme + '%s:%d/api/agent/tty/%s' %
                                    (self._state.host, self._state.port,
                                     self._selected_mid), headers=headers)
