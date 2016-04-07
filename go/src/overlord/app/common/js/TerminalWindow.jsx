@@ -26,6 +26,11 @@
 // - UploadProgress
 //   - [(ProgressBar|ProgressBar) ...]
 
+// Terminal control sequence identifier
+var CONTROL_START = 128;
+var CONTROL_END = 129;
+
+
 Terminal.prototype.CopyAll = function () {
   var term = this;
   var textarea = term.getCopyTextarea();
@@ -44,10 +49,46 @@ Terminal.prototype.CopyAll = function () {
   }, 1);
 };
 
+
 var TerminalWindow = React.createClass({
   mixins: [BaseWindow],
   getInitialState: function () {
-    return {sid: ""};
+    return {sid: "", maximized: false, window_params: undefined};
+  },
+  resizeWindowToVisualSize: function (visualWidth, visualHeight) {
+    // We use CONTROL_START and CONTROL_END to specify the control buffer
+    // region.  Ghost can use the 2 characters to know the control string.
+    // format:
+    // CONTROL_START ControlString_in_JSON CONTROL_END
+    var term = this.term;
+
+    if (visualWidth == 0 || visualHeight == 0) {
+      return;
+    }
+
+    var widthToColsFactor = term.cols / term.element.clientWidth;
+    var heightToRowsFactor = term.rows / term.element.clientHeight;
+
+    var newCols = Math.floor(visualWidth * widthToColsFactor);
+    var newRows = Math.floor(visualHeight * heightToRowsFactor);
+
+    // Change visual size
+    term.element.width = visualWidth;
+    term.element.height = visualHeight;
+
+    if (newCols != term.cols || newRows != term.rows) {
+      var msg = {
+        command: "resize",
+        params: [newRows, newCols]
+      }
+      term.resize(newCols, newRows);
+      term.refresh(0, term.rows - 1);
+
+      // Send terminal control sequence
+      this.sock.send((new Uint8Array([CONTROL_START])).buffer);
+      this.sock.send(JSON.stringify(msg));
+      this.sock.send((new Uint8Array([CONTROL_END])).buffer);
+    }
   },
   componentDidMount: function () {
     var el = this.refs.window;
@@ -72,8 +113,9 @@ var TerminalWindow = React.createClass({
     var term = new Terminal({
       cols: 80,
       rows: 24,
+      scrollback: 10000,
       useStyle: true,
-      screenKeys: true
+      screenKeys: false
     });
     this.term = term;
 
@@ -186,72 +228,6 @@ var TerminalWindow = React.createClass({
       }.bind(this));
     }.bind(this);
 
-    var bindResizeEvent = function () {
-      // Calculate terminal and app-window width/height relation.  Used for
-      // resize procedure we will hide right and bottom border of teriminal.
-      // and add the same size to app-window for good looking and resize
-      // indicator
-      var $terminal = $el.find(".terminal");
-      var termBorderRightWidth = $terminal.css("border-right-width");
-      var termBorderBottomWidth = $terminal.css("border-bottom-width");
-      var termWidthOffset = $el.outerWidth() - term.element.clientWidth;
-      var termHeightOffset = $el.outerHeight() - term.element.clientHeight;
-      var totalWidthOffset = termWidthOffset + parseInt(termBorderRightWidth);
-      var totalHeightOffset = termHeightOffset + parseInt(termBorderBottomWidth);
-
-      // hide terminal right and bottom border
-      $terminal.css("border-right-width", "0px");
-      $terminal.css("border-bottom-width", "0px");
-
-      // initial app-window size
-      el.style.width = term.element.clientWidth + totalWidthOffset;
-      el.style.height = term.element.clientHeight + totalHeightOffset;
-
-      $el.resizable();
-      $el.bind("resize", function () {
-        // We use CONTROL_START and CONTROL_END to specify the control buffer
-        // region.  Ghost can use the 2 characters to know the control string.
-        // format:
-        // CONTROL_START ControlString CONTROL_END
-        var CONTROL_START = 128;
-        var CONTROL_END = 129;
-
-        // If there is no terminal now, just return.
-        // It may happen when we close the window
-        if (term.element.clientWidth == 0 || term.element.clientHeight == 0) {
-          return;
-        }
-
-        // convert to cols/rows
-        var widthToColsFactor = term.cols / term.element.clientWidth;
-        var heightToRowsFactor = term.rows / term.element.clientHeight;
-
-        newTermWidth = parseInt(el.style.width) - totalWidthOffset;
-        newTermHeight = parseInt(el.style.height) - totalHeightOffset;
-        newCols = Math.floor(newTermWidth * widthToColsFactor);
-        newRows = Math.floor(newTermHeight * heightToRowsFactor);
-
-        if (newCols != term.cols || newRows != term.rows) {
-          var msg = {
-            command: "resize",
-            params: [newRows, newCols]
-          }
-          term.resize(newCols, newRows);
-          term.refresh(0, term.rows - 1);
-
-          // Fine tune app-window size to match terminal.
-          // Prevent white space between app-window and terminal.
-          el.style.width = term.element.clientWidth + totalWidthOffset;
-          el.style.height = term.element.clientHeight + totalHeightOffset;
-
-          // Send to ghost to set new size
-          sock.send((new Uint8Array([CONTROL_START])).buffer);
-          sock.send(JSON.stringify(msg));
-          sock.send((new Uint8Array([CONTROL_END])).buffer);
-        }
-      });
-    }
-
     sock.onopen = function (event) {
       term.open(el);
       term.on("title", function (title) {
@@ -298,7 +274,6 @@ var TerminalWindow = React.createClass({
       }.bind(this);
 
       // Bind events
-      bindResizeEvent();
       bindDisconnectEvent();
 
       // Only bind drag and drop event if uploadPath is provided
@@ -316,30 +291,76 @@ var TerminalWindow = React.createClass({
     this.onCloseMouseUp();
     this.sock.close();
   },
+  onMaximizeMouseUp: function (event) {
+    var el = this.refs.window;
+    if (!this.state.maximized) {
+      var window_params = {
+        left: el.offsetLeft,
+        top: el.offsetTop,
+        width: this.term.element.clientWidth,
+        height: this.term.element.clientHeight,
+      };
+      var offsetWidth = el.offsetWidth - this.term.element.clientWidth;
+      var offsetHeight = el.offsetHeight - this.term.element.clientHeight;
+      this.disableDraggable();
+      this.resizeWindowToVisualSize(window.innerWidth - offsetWidth,
+                                    window.innerHeight - offsetHeight);
+      this.setState(function (state, props) {
+        state.maximized = true;
+        state.window_params = window_params;
+      });
+    } else {
+      var params = this.state.window_params;
+      this.enableDraggable();
+      $(el).css({
+        top: params.top,
+        left: params.left,
+        position: "fixed",
+      });
+      this.resizeWindowToVisualSize(params.width, params.height);
+      this.setState(function (state, props) {
+        state.maximized = false;
+        state.window_params = undefined;
+      });
+    }
+  },
   onCopyMouseUp: function (event) {
     this.term.CopyAll();
   },
   render: function () {
-    var minimize_icon_node = "", copy_icon_node = "";
-    if (this.props.enableMinimize) {
-      copy_icon_node = (
-          <div className="app-window-icon app-window-minimize"
-           onMouseUp={this.onMinimizeMouseUp}></div>
-      );
-    }
+    var minimize_icon_node = "",
+        maximize_icon_node = "",
+        copy_icon_node = "",
+        app_window_class = "";
     if (this.props.enableCopy) {
       copy_icon_node = (
           <div className="app-window-icon app-window-copy"
            onMouseUp={this.onCopyMouseUp}></div>
       );
     }
+    if (this.props.enableMinimize) {
+      minimize_icon_node = (
+          <div className="app-window-icon app-window-minimize"
+           onMouseUp={this.onMinimizeMouseUp}></div>
+      );
+    }
+    if (this.props.enableMaximize) {
+      maximize_icon_node = (
+          <div className="app-window-icon app-window-maximize"
+           onMouseUp={this.onMaximizeMouseUp}></div>
+      );
+    }
+    if (this.state.maximized) {
+      app_window_class = "app-window-maximized";
+    }
     return (
-      <div className="app-window" ref="window"
+      <div className={"app-window " + app_window_class} ref="window"
           onMouseDown={this.onWindowMouseDown}>
         <div className="app-window-title">{this.props.title}</div>
         <div className="app-window-control">
           {copy_icon_node}
           {minimize_icon_node}
+          {maximize_icon_node}
           <div className="app-window-icon app-window-close"
            onMouseUp={this.onCloseMouseUp2}></div>
         </div>

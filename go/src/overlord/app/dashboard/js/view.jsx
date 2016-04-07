@@ -315,6 +315,7 @@ var Windows = React.createClass({
                 <TerminalWindow key={id} mid={term.mid} id={id} title={term.mid}
                  path={"/api/agent/tty/" + term.mid + extra}
                  uploadPath={"/api/agent/upload/" + term.mid}
+                 enableMaximize={true}
                  app={this.props.app} progressBars={this.refs.uploadProgress}
                  onControl={onTerminalControl}
                  onCloseClicked={onTerminalCloseClicked} />

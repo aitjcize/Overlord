@@ -21,6 +21,12 @@
   position: relative;
 }
 
+.app-window-maximized {
+  position: fixed;
+  left: 0px !important;
+  top: 0px !important;
+}
+
 .app-window-title {
   float: left;
   text-align: center;
@@ -57,6 +63,10 @@
 
 .app-window-close {
   background-image: url(/common/img/close.png);
+}
+
+.app-window-maximize {
+  background-image: url(/common/img/maximize.png);
 }
 
 .app-window-minimize {

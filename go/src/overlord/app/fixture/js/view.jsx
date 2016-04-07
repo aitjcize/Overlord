@@ -98,6 +98,7 @@ var App = React.createClass({
                 <TerminalWindow key={id} mid={term.mid} id={id} title={id}
                  path={"/api/agent/tty/" + term.mid + extra}
                  uploadPath={"/api/agent/upload/" + term.mid}
+                 enableMaximize={true}
                  app={this} progressBars={this.refs.uploadProgress}
                  onControl={onControl} onCloseClicked={onCloseClicked} />
               );

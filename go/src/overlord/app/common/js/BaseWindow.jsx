@@ -21,6 +21,12 @@ var BaseWindow = {
       cancel: cancel
     });
   },
+  enableDraggable: function () {
+    $(this.refs.window).draggable('enable');
+  },
+  disableDraggable: function () {
+    $(this.refs.window).draggable('disable');
+  },
   onWindowMouseDown: function (event) {
     this.bringToFront();
   },
@@ -38,7 +44,7 @@ var BaseWindow = {
   },
   bringToFront: function () {
     if (typeof(window.maxz) == "undefined") {
-      window.maxz = 100;
+      window.maxz = $('.navbar').css('z-index') + 1;
     }
     var $el = $(this.refs.window);
     if ($el.css("z-index") != window.maxz) {
