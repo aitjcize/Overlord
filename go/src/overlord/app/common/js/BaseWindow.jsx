@@ -44,7 +44,7 @@ var BaseWindow = {
   },
   bringToFront: function () {
     if (typeof(window.maxz) == "undefined") {
-      window.maxz = $('.navbar').css('z-index') + 1;
+      window.maxz = parseInt($('.navbar').css('z-index')) + 1;
     }
     var $el = $(this.refs.window);
     if ($el.css("z-index") != window.maxz) {
