@@ -1,6 +1,7 @@
 {
   "context": ["ui", "cam", "whale"],
   "ui": {
+    "group": "Project X",
     "lights": {
       "update_command": "update_light_status",
       "items": [

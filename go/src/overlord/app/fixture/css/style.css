@@ -30,6 +30,16 @@ html, body, #main {
 
 .app-box .panel-heading .panel-title {
   height: 35px;
+  line-height: 35px;
   vertical-align: middle;
-  display: table-cell !important;
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.group-dropdown {
+  display: inline-block;
+}
+
+.caret {
+  margin-left: 3px !important;
 }

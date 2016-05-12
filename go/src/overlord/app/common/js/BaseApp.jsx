@@ -46,7 +46,6 @@ var BaseApp = {
     }
     return this.state.midPattern.test(client.mid);
   },
-
   getInitialState: function () {
     this.onNewClientHandlers = [];
     return {

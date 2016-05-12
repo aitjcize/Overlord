@@ -13,12 +13,30 @@
 //  - NavBar
 //  - FixtureWidget
 
+// Identifier for selecting all clients
+ALL = "All";
+
 var App = React.createClass({
   mixins: [BaseApp],
   onNewClient: function (client) {
-    return !(typeof(client.properties) == "undefined" ||
-        typeof(client.properties.context) == "undefined" ||
-        client.properties.context.indexOf("ui") === -1);
+    var prop = client.properties;
+
+    if (typeof(prop) == "undefined" ||
+        typeof(prop.context) == "undefined" ||
+        prop.context.indexOf("ui") === -1) {
+      return false;
+    }
+
+    if (typeof(prop.ui) != "undefined" &&
+        typeof(prop.ui.group) != "undefined") {
+      if (this.state.groups.indexOf(prop.ui.group) == -1) {
+        this.setState(function (state, props) {
+          state.groups.push(prop.ui.group);
+        });
+      }
+    }
+
+    return true;
   },
   addTerminal: function (id, term) {
     this.setState(function (state, props) {
@@ -33,7 +51,7 @@ var App = React.createClass({
     });
   },
   getInitialState: function () {
-    return {terminals: {}};
+    return {terminals: {}, groups: [ALL]};
   },
   componentWillMount: function () {
     this.addOnNewClientHandler(this.onNewClient);
@@ -128,10 +146,30 @@ Paginator = React.createClass({
     this.props.app.setMidFilterPattern(this.refs.filter.value);
   },
   changePage: function (i) {
-    this.setState({pageNumber: i});
+    this.setState(function (state, props) {
+      state.pageNumber = i;
+    });
   },
   getInitialState: function () {
-    return {pageNumber: 0};
+    return {pageNumber: 0, selectedGroup: ALL};
+  },
+  filterBySelectedGroup: function (client) {
+    var prop = client.properties;
+    if (this.state.selectedGroup == ALL)
+      return true;
+
+    if (typeof(prop.ui) == "undefined")
+      return false;
+    return prop.ui.group == this.state.selectedGroup;
+  },
+  componentWillMount: function () {
+    this.props.app.addClientFilter(this.filterBySelectedGroup);
+  },
+  onGroupSelected: function (e) {
+    this.setState(function (state, props) {
+      state.selectedGroup = e.target.hash.substring(1);
+      this.props.app.forceUpdate();
+    });
   },
   render: function () {
     var nPage = Math.ceil(this.props.children.length / this.props.pageSize);
@@ -139,15 +177,29 @@ Paginator = React.createClass({
     var start = pageNumber * this.props.pageSize;
     var end = start + this.props.pageSize;
     var children = this.props.children.slice(start, end);
-
     var pages = Array.apply(null, {length: nPage}).map(Number.call, Number);
-
     return (
       <div className="app-box panel panel-info">
         <div className="panel-heading">
           <div className="container-fluid panel-container">
             <div className="col-xs-3 text-left">
-              <h2 className="panel-title">{this.props.header}</h2>
+              <h3 className="panel-title">{this.props.header}</h3>
+              <div className="dropdown group-dropdown">
+                <button className="btn btn-default dropdown-toggle"
+                type="button" data-toggle="dropdown"
+                aria-haspopup="true" aria-expanded="true">
+                  {this.state.selectedGroup}
+                  <span className="caret"></span>
+                </button>
+                <ul className="dropdown-menu">
+                  {
+                    this.props.app.state.groups.map(function (i) {
+                      return <li><a href={"#" + i}
+                                  onClick={this.onGroupSelected}>{i}</a></li>
+                    }.bind(this))
+                  }
+                </ul>
+              </div>
             </div>
             <div className="col-xs-6 text-center">
               <ul className="pagination panel-pagination">
