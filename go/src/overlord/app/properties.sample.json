@@ -1,22 +1,27 @@
 {
-  "context": ["ui", "cam", "whale"],
+  "context": ["ui", "cam"],
   "ui": {
     "group": "Project X",
-    "lights": {
-      "update_command": "update_light_status",
-      "items": [
-        {"id": "ccd", "label": "CCD", "light": "light-toggle-off",
-         "command": "case_close_debug",
-         "init_cmd": "case_close_debug status"},
-        {"id": "battery", "label": "Battery", "light": "light-toggle-off",
-         "command": "battery_switch",
-         "poll": {"cmd": "battery_switch status", "interval": 20000}},
-        {"id": "dut-lid", "label": "DUT LID", "light": "light-toggle-off",
-         "poll": {"cmd": "check_dut_exists -t lid", "interval": 20000}},
-        {"id": "dut-base", "label": "DUT BASE", "light": "light-toggle-off",
-         "poll": {"cmd": "check_dut_exists -t base", "interval": 20000}}
+    "update_ui_command": "update_ui_status",
+    "display": {
+      "template": "<b>Report</b><ul><li>Version: {{:version}}</li><li>Status: {{:status}}</li></ul>",
+      "data": [
+        {"id": "version", "init_cmd": "get_version"},
+        {"id": "status", "poll": {"cmd": "get_status", "interval": 2000}}
       ]
     },
+    "lights": [
+      {"id": "ccd", "label": "CCD", "light": "light-toggle-off",
+       "command": "case_close_debug",
+       "init_cmd": "case_close_debug status"},
+      {"id": "battery", "label": "Battery", "light": "light-toggle-off",
+       "command": "battery_switch",
+       "poll": {"cmd": "battery_switch status", "interval": 20000}},
+      {"id": "dut-lid", "label": "DUT LID", "light": "light-toggle-off",
+       "poll": {"cmd": "check_dut_exists -t lid", "interval": 20000}},
+      {"id": "dut-base", "label": "DUT BASE", "light": "light-toggle-off",
+       "poll": {"cmd": "check_dut_exists -t base", "interval": 20000}}
+    ],
     "terminals": [
       {"name": "NUC"},
       {"name": "AP",

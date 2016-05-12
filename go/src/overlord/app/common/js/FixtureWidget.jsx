@@ -58,43 +58,40 @@ var LIGHT_CSS_MAP = {
 //   "properties": {
 //     "ip": "127.0.0.1",
 //     "ui": {
+//       // A master command which updates ui states.
+//       // "update_ui_status" is a script we wrote that will respect
+//       // @init_cmd and @poll attributes in lights and display.data, you can
+//       // implement your own script instead.
+//       "update_ui_command": "update_ui_status",
 //       // Lights are used to show current status of the fixture, lights has
 //       // two states: on and off, which is represent by setting "light"
 //       // attribute to 'light-toggle-on' or 'light-toggle-off' (see below)
-//       "lights": {
-//         // A list of lights
-//         "items": [
-//           {
-//             // Identifier of this light, if the output of @command contains
-//             // LIGHT[@id]='light-toggle-on', then @light will be set to on.
-//             "id": "ccd",
-//             // Text to be shown
-//             "label": "CCD",
-//             // Set default state to off
-//             "light": "light-toggle-off",
-//             // Command to execute when clicked
-//             "command": "case_close_debug",
-//             // Will be called when the FixtureWidget is opened.
-//             "init_cmd": "case_close_debug status"
+//       "lights": [
+//         {
+//           // Identifier of this light, if the output of @command contains
+//           // LIGHT[@id]='light-toggle-on', then @light will be set to on.
+//           "id": "ccd",
+//           // Text to be shown
+//           "label": "CCD",
+//           // Set default state to off
+//           "light": "light-toggle-off",
+//           // Command to execute when clicked
+//           "command": "case_close_debug",
+//           // Will be called when the FixtureWidget is opened.
+//           "init_cmd": "case_close_debug status"
+//         },
+//         {
+//           "id": "dut-lid",
+//           "label": "DUT LID"
+//           "light": "light-toggle-off",
+//           // @cmd will be execute every @interval milliseconds, you can
+//           // output LIGHT[@id]='light-toggle-on' to change the light.
+//           "poll": {
+//             "cmd": "check_dut_exists -t lid",
+//             "interval": 20000
 //           },
-//           {
-//             "id": "dut-lid",
-//             "label": "DUT LID"
-//             "light": "light-toggle-off",
-//             // @cmd will be execute every @interval milliseconds, you can
-//             // output LIGHT[@id]='light-toggle-on' to change the light.
-//             "poll": {
-//               "cmd": "check_dut_exists -t lid",
-//               "interval": 20000
-//             },
-//           }, ...
-//         ],
-//         // A master command which updates light status.
-//         // "update_light_status" is a script we wrote that will respect
-//         // @init_cmd and @poll attributes in items, you can implement your
-//         // own script instead.
-//         "update_command": "update_light_status"
-//       },
+//         }, ...
+//       ],
 //       // A list of terminals connected to this fixture, for example, there
 //       // might be a terminal for fixture itself and a terminal for DUT.
 //       "terminals": [
@@ -108,6 +105,29 @@ var LIGHT_CSS_MAP = {
 //           "path_cmd": "ls /dev/google/Ryu_debug-*/serial/AP 2>/dev/null",
 //         },
 //       ],
+//       // A display section
+//       "display": {
+//         // A jsrender template
+//         "template": "<b>Report</b><ul><li>Version: {{:version}}</li>"
+//                     "<li>Status: {{:status}}</li></ul>",
+//         "data": [
+//           {
+//             // id: the name of data binding in the template
+//             "id": "version",
+//             // Will be called when the FixtureWidget is opened.
+//             "init_cmd": "get_version",
+//           },
+//           {
+//             "id": "status",
+//             // @cmd will be execute every @interval milliseconds, you can
+//             // output DATA[@id]='value' to change the binding value.
+//             "poll": {
+//               "cmd": "get_status",
+//               "interval": 20000
+//             },
+//           }, ...
+//         ]
+//       },
 //       // A list of buttons to control some functionality of the fixture.
 //       "controls": [
 //         // A command
@@ -184,7 +204,22 @@ var FixtureWidget = React.createClass({
     }.bind(this)
     this.socks.push(sock);
   },
-  componentWillUnmount: function() {
+  scanForUiMessages: function (text) {
+    if (typeof(this.refs.lights) != "undefined") {
+      this.refs.lights.scanForLightMessage(text);
+    }
+    if (typeof(this.refs.display) != "undefined") {
+      this.refs.display.scanForDataMessage(text);
+    }
+  },
+  componentDidMount: function () {
+    var client = this.props.client;
+    var update_ui_command = client.properties.ui.update_ui_command;
+    setTimeout(function() {
+      this.executeRemoteCmd(client.mid, update_ui_command);
+    }.bind(this), 1000);
+  },
+  componentWillUnmount: function () {
     for (var i = 0; i < this.socks.length; ++i) {
       this.socks[i].close();
     }
@@ -195,25 +230,77 @@ var FixtureWidget = React.createClass({
   },
   render: function () {
     var client = this.props.client;
+    var ui = client.properties.ui;
     var style = {
       width: FIXTURE_WINDOW_WIDTH + 'px',
       margin: FIXTURE_WINDOW_MARGIN + 'px',
     };
+    var display = ui.display && (
+          <Display ref="display" client={client} fixture={this} />
+        ) || "";
+    var lights = ui.lights && (
+          <Lights ref="lights" client={client} fixture={this} />
+        ) || "";
+    var terminals = ui.terminals && (
+          <Terminals client={client} app={this.props.app} />
+        ) || "";
+    var controls = ui.controls && (
+          <Controls ref="controls" client={client} fixture={this} />
+        ) || "";
+    var auxlogs = ui.logs && (
+          <AuxLogs client={client} fixture={this} />
+        ) || "";
     return (
       <div className="fixture-block panel panel-success" style={style}>
         <div className="panel-heading text-center">{abbr(client.mid, 60)}</div>
         <div className="panel-body">
-          <Lights ref="lights" client={client} fixture={this} />
-          <Terminals client={client} app={this.props.app} />
-          <Controls ref="controls" client={client} fixture={this} />
+          {display}
+          {lights}
+          {terminals}
+          {controls}
           <MainLog ref="mainlog" fixture={this} id={client.mid} />
-          <AuxLogs client={client} fixture={this} />
+          {auxlogs}
         </div>
       </div>
     );
   }
 });
 
+var Display = React.createClass({
+  updateDisplay: function (key, value) {
+    this.setState(function (state, props) {
+      state[key] = value;
+    });
+  },
+  scanForDataMessage: function (msg) {
+    var patt = /DATA\[(.*)\]\s*=\s*'([^']*)'/g;
+    var found;
+    while (found = patt.exec(msg)) {
+      this.updateDisplay(found[1], found[2]);
+    }
+  },
+  getInitialState: function () {
+    var display = this.props.client.properties.ui.display;
+    var data = {};
+    for (var i = 0; i < display.data.length; i++) {
+      data[display.data[i].id] = ""
+    }
+    return data;
+  },
+  componentWillMount: function() {
+    var display = this.props.client.properties.ui.display;
+    this.template = $.templates(display.template);
+  },
+  render: function () {
+    var client = this.props.client;
+    var displayHTML = this.template.render(this.state);
+    return (
+      <div className="status-block well well-sm">
+        <div dangerouslySetInnerHTML={{__html: displayHTML}} />
+      </div>
+    );
+  }
+});
 
 var Lights = React.createClass({
   updateLightStatus: function (id, status_class) {
@@ -222,31 +309,16 @@ var Lights = React.createClass({
     node.addClass(status_class);
     this.refs[id].props.prevLight = status_class;
   },
-  scanForLightMsg: function (msg) {
+  scanForLightMessage: function (msg) {
     var patt = /LIGHT\[(.*)\]\s*=\s*'(\S*)'/g;
     var found;
     while (found = patt.exec(msg)) {
       this.updateLightStatus(found[1], LIGHT_CSS_MAP[found[2]]);
     }
   },
-  componentDidMount: function() {
-    var client = this.props.client;
-    var update_command;
-
-    if (typeof(client.properties.ui) != "undefined") {
-      update_command = client.properties.ui.lights.update_command;
-    }
-    setTimeout(function() {
-      this.props.fixture.executeRemoteCmd(client.mid, update_command);
-    }.bind(this), 5000);
-  },
   render: function () {
     var client = this.props.client;
-    var lights = [];
-
-    if (typeof(client.properties.ui) != "undefined") {
-      lights = client.properties.ui.lights.items || [];
-    }
+    var lights = client.properties.ui.lights || [];
     return (
       <div className="status-block well well-sm">
       {
@@ -333,11 +405,7 @@ var Terminals = React.createClass({
   },
   render: function () {
     var client = this.props.client;
-    var terminals = [];
-
-    if (typeof(client.properties.ui) != "undefined") {
-      terminals = client.properties.ui.terminals || [];
-    }
+    var terminals = client.properties.ui.terminals || [];
     return (
       <div className="status-block well well-sm">
       {
@@ -374,12 +442,8 @@ var Controls = React.createClass({
   },
   render: function () {
     var client = this.props.client;
-    var controls = [];
     var mid = client.mid;
-
-    if (typeof(client.properties.ui) != "undefined") {
-      controls = client.properties.ui.controls || [];
-    }
+    var controls = client.properties.ui.controls || [];
     return (
       <div className="controls-block well well-sm">
       {
@@ -421,7 +485,7 @@ var Controls = React.createClass({
 var MainLog = React.createClass({
   appendLog: function (text) {
     var odiv = this.odiv;
-    this.props.fixture.refs.lights.scanForLightMsg(text);
+    this.props.fixture.scanForUiMessages(text);
     var innerHTML = $(odiv).html();
     innerHTML += text.replace(/\n/g, "<br />");
     if (innerHTML.length > LOG_BUF_SIZE) {
@@ -445,11 +509,7 @@ var MainLog = React.createClass({
 var AuxLogs = React.createClass({
   render: function () {
     var client = this.props.client;
-    var logs = [];
-
-    if (typeof(client.properties.ui) != "undefined") {
-      logs = client.properties.ui.logs || [];
-    }
+    var logs = client.properties.ui.logs || [];
     return (
       <div className="log-block">
         {
@@ -478,7 +538,7 @@ var AuxLog = React.createClass({
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function (text) {
-            this.props.fixture.refs.lights.scanForLightMsg(text);
+            this.props.fixture.scanForUiMessages(text);
             var innerHTML = $(odiv).html();
             innerHTML += text.replace(/\n/g, "<br />");
             if (innerHTML.length > LOG_BUF_SIZE) {
