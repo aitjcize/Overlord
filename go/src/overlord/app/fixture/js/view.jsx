@@ -2,16 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// View for Fixture dashboard App
-//
 // Requires:
 //   NavBar.jsx :: NavBar
+//   UploadProgressWidget.jsx :: UploadProgressWidget
 //   FixtureWidget.jsx :: FixtureWidget
 //   TerminalWindow.jsx :: TerminalWindow
 //
+// View for Fixture Dashboard App
 // - App
 //  - NavBar
-//  - FixtureWidget
+//  - UploadProgressWidget
+//  - Paginator
+//   - [FixtureWidget ...]
 
 // Identifier for selecting all clients
 ALL = "All";
@@ -115,7 +117,7 @@ var App = React.createClass({
               return (
                 <TerminalWindow key={id} mid={term.mid} id={id} title={id}
                  path={"/api/agent/tty/" + term.mid + extra}
-                 uploadPath={"/api/agent/upload/" + term.mid}
+                 uploadRequestPath={"/api/agent/upload/" + term.mid}
                  enableMaximize={true}
                  app={this} progressBars={this.refs.uploadProgress}
                  onControl={onControl} onCloseClicked={onCloseClicked} />
@@ -124,14 +126,15 @@ var App = React.createClass({
           }
         </div>
         <div className="upload-progress">
-          <UploadProgress ref="uploadProgress" />
+          <UploadProgressWidget ref="uploadProgress"/>
         </div>
         <Paginator header="Clients" app={this}
             pageSize={this.computePageSize()}>
           {
             this.getFilteredClientList().map(function (data) {
               return (
-                <FixtureWidget key={data.mid} client={data} app={this}/>
+                <FixtureWidget key={data.mid} client={data} app={this}
+                 progressBars={this.refs.uploadProgress}/>
               );
             }.bind(this))
           }

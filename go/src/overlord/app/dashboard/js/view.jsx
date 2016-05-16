@@ -4,26 +4,27 @@
 //
 // Requires:
 //   NavBar.jsx :: NavBar
+//   UploadProgressWidget.jsx :: UploadProgressWidget
 //   FixtureWidget.jsx :: FixtureWidget
-//   TerminalWindow.jsx :: TerminalWindow, UploadProgress
+//   TerminalWindow.jsx :: TerminalWindow
 //   CameraWindow.jsx :: CameraWindow
 //
 // View for Dashboard App:
 // - App
 //  - NavBar
 //  - SideBar
-//    - ClientBox
-//      - FilterInput
-//      - ClientList
-//        - [ClientInfo ...]
+//   - ClientBox
+//    - FilterInput
+//    - ClientList
+//     - [ClientInfo ...]
 //    - RecentList
-//      - ClientInfo
+//     - ClientInfo
 //  - Windows
-//    - [TerminalWindow ...]
-//    - [CameraWindow ...]
-//    - UploadProgress
+//   - [TerminalWindow ...]
+//   - [CameraWindow ...]
+//   - UploadProgressWidget
 //  - FixtureGroup
-//    - [FixtureWidget ...]
+//   - [FixtureWidget ...]
 
 var App = React.createClass({
   mixins: [BaseApp],
@@ -127,11 +128,16 @@ var App = React.createClass({
         <div id="container">
           <SideBar clients={this.getFilteredClientList()} ref="sidebar"
               recentclients={this.state.recentclients} app={this} />
-          <FixtureGroup data={this.state.fixtures} app={this} />
+          <FixtureGroup data={this.state.fixtures} app={this}
+           uploadProgress={this.refs.uploadProgress} />
         </div>
         <div className="windows">
           <Windows app={this} terminals={this.state.terminals}
+           uploadProgress={this.refs.uploadProgress}
            cameras={this.state.cameras} />
+        </div>
+        <div className="upload-progress">
+          <UploadProgressWidget ref="uploadProgress" />
         </div>
       </div>
     );
@@ -314,9 +320,9 @@ var Windows = React.createClass({
               return (
                 <TerminalWindow key={id} mid={term.mid} id={id} title={term.mid}
                  path={"/api/agent/tty/" + term.mid + extra}
-                 uploadPath={"/api/agent/upload/" + term.mid}
+                 uploadRequestPath={"/api/agent/upload/" + term.mid}
                  enableMaximize={true}
-                 app={this.props.app} progressBars={this.refs.uploadProgress}
+                 app={this.props.app} progressBars={this.props.uploadProgress}
                  onControl={onTerminalControl}
                  onCloseClicked={onTerminalCloseClicked} />
               );
@@ -341,9 +347,6 @@ var Windows = React.createClass({
             }.bind(this))
           }
         </div>
-        <div className="upload-progress">
-          <UploadProgress ref="uploadProgress" />
-        </div>
       </div>
     );
   }
@@ -357,6 +360,7 @@ var FixtureGroup = React.createClass({
           this.props.data.map(function (item) {
             return (
               <FixtureWidget key={item.mid} client={item}
+               progressBars={this.props.uploadProgress}
                app={this.props.app} />
             );
           }.bind(this))

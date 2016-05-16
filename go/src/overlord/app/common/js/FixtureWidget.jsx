@@ -2,14 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
+// External dependencies:
+// - JsRender: https://github.com/BorisMoore/jsrender
+//
+// Internal dependencies:
+// - UploadProgressWidget
+//
 // View for FixtureWidget:
 // - FixtureWidget
-//   - Lights
-//   - Terminals
-//   - Controls
-//   - MainLog
-//   - AuxLogs
-//     - AuxLog
+//   props:
+//     app: react reference to the app object with addTerminal method
+//     client: a overlord client client object with properties object
+//     progressBars: an react reference to UploadProgressWidget instance
+//  - Display
+//  - Lights
+//  - Terminals
+//  - Controls
+//  - MainLog
+//  - AuxLogs
+//   - AuxLog
 
 var LOG_BUF_SIZE = 8192;
 
@@ -22,17 +33,9 @@ var LIGHT_CSS_MAP = {
 };
 
 // FixtureWidget defines the layout and behavior of a fixture window,
-// which has lights, terminals, controls and logs.
+// which has display, lights, terminals, controls and logs.
 //
 // Usage:
-//   <FixtureWidget client={client} app={app}
-//       [other attributes...] />
-// where
-//  @app: FixtureWidget will invoke app.addTerminal(id, term) to open an
-//        terminal, where @id is a string used to distinguish different
-//        terminals, @term is a terminal description object.
-//  @client: an agent object, should have "properties" attribute,
-//           which is an object defined by file "properties.json".
 // A terminal description object would looks like the following in json:
 // {
 //   "name":"NUC",
@@ -132,8 +135,8 @@ var LIGHT_CSS_MAP = {
 //       "controls": [
 //         // A command
 //         {
-//           "name": "Upgrade Firmware"
-//           "command": "whale firmware upgrade",
+//           "name": "Factory Restart"
+//           "command": "factory_restart",
 //         },
 //         // A command that will be toggled between two state.
 //         {
@@ -141,6 +144,17 @@ var LIGHT_CSS_MAP = {
 //           "type": "toggle",
 //           "on_command": "command to start measuring voltage",
 //           "off_command": "command to stop measuring"
+//         },
+//         // A button that allow uploading a file, then execute a command
+//         {
+//           "name": "Update Tollkit",
+//           "type": "upload",
+//           "dest": "/tmp/install_factory_toolkit.run",
+//           // @command is optional, you can omit this if you don't need to
+//           // execute any command.
+//           "command": "rm -rf /usr/local/factory && "
+//                      "sh /tmp/install_factory_toolkit.run -- -y &&"
+//                      "factory_restart"
 //         },
 //         // A group of commands
 //         {
@@ -245,7 +259,8 @@ var FixtureWidget = React.createClass({
           <Terminals client={client} app={this.props.app} />
         ) || "";
     var controls = ui.controls && (
-          <Controls ref="controls" client={client} fixture={this} />
+          <Controls ref="controls" client={client} fixture={this}
+           progressBars={this.props.progressBars} />
         ) || "";
     var auxlogs = ui.logs && (
           <AuxLogs client={client} fixture={this} />
@@ -430,20 +445,45 @@ var Controls = React.createClass({
     var ctrl = target.data("ctrl");
     if (ctrl.type == "toggle") {
       if (target.hasClass("active")) {
-        this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.off_command);
+        this.props.fixture.executeRemoteCmd(target.data("mid"),
+                                            ctrl.off_command);
         target.removeClass("active");
       } else {
-        this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.on_command);
+        this.props.fixture.executeRemoteCmd(target.data("mid"),
+                                            ctrl.on_command);
         target.addClass("active");
       }
     } else {
       this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.command);
     }
   },
+  onUploadButtonChanged: function (event) {
+    var file = event.target;
+    var mid = $(file).data("mid");
+    var ctrl = $(file).data("ctrl");
+
+    var runCommand = function () {
+      if (typeof(ctrl.command) != "undefined") {
+        this.props.fixture.executeRemoteCmd(mid, ctrl.command);
+      }
+      // Reset the file value, so user can click the button again.
+      file.value = "";
+    };
+
+    if (file.value != "") {
+      this.props.progressBars.upload("/api/agent/upload/" + mid,
+                                     file.files[0], ctrl.dest,
+                                     undefined, runCommand.bind(this));
+    }
+  },
+  componentDidMount: function () {
+    $('input[type=file]').fileinput();
+  },
   render: function () {
     var client = this.props.client;
     var mid = client.mid;
     var controls = client.properties.ui.controls || [];
+    var btnClasses = "btn btn-xs btn-primary";
     return (
       <div className="controls-block well well-sm">
       {
@@ -467,14 +507,26 @@ var Controls = React.createClass({
               </div>
             );
           }
-          return (
-            <div key={control.name}
-                className="command-btn btn btn-xs btn-primary"
-                data-mid={mid} data-ctrl={JSON.stringify(control)}
-                onClick={this.onCommandClicked}>
-              {control.name}
-            </div>
-          );
+          if (control.type == "upload") {
+            return (
+              <input type="file" className="file"
+               data-browse-label={control.name}
+               data-browse-icon="" data-show-preview="false"
+               data-show-caption="false" data-show-upload="false"
+               data-show-remove="false" data-browse-class={btnClasses}
+               data-mid={mid} data-ctrl={JSON.stringify(control)}
+               onChange={this.onUploadButtonChanged} />
+            );
+          } else {
+            return (
+              <div key={control.name}
+               className={"command-btn " + btnClasses}
+               data-mid={mid} data-ctrl={JSON.stringify(control)}
+               onClick={this.onCommandClicked}>
+                {control.name}
+              </div>
+            );
+          }
         }.bind(this))
       }
       </div>

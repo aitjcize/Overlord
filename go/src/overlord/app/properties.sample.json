@@ -30,9 +30,12 @@
        "path_cmd": "ls /dev/google/Ryu_debug-*/serial/EC_PD 2>/dev/null"}
     ],
     "controls": [
+      {"name": "Factory Restart", "command": "factory_restart"},
       {"name": "Voltage Measurement", "type": "toggle",
        "on_command": "measure voltage", "off_command": "measure off"},
-      {"name": "Upgrade Firmware", "command": "whale firmware upgrade"},
+      {"name": "Upgrade Toolkit", "type": "upload",
+       "dest": "/tmp/install_factory_toolkit.run",
+       "command": "rm -rf /usr/local/factory && sh /tmp/install_factory_toolkit.run -- -y && factory_restart"},
       {"name": "Fixture control", "group": [
         {"name": "whale close", "command": "whale close"},
         {"name": "whale open", "command": "whale open"},

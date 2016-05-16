@@ -187,3 +187,7 @@
 .status-light-clickable {
   cursor: pointer;
 }
+
+.file-input {
+  display: inline-block;
+}
