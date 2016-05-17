@@ -156,6 +156,21 @@ var LIGHT_CSS_MAP = {
 //                      "sh /tmp/install_factory_toolkit.run -- -y &&"
 //                      "factory_restart"
 //         },
+//         // A button that allow execute a command, then download a file
+//         {
+//           "name": "Download Log",
+//           "type": "download",
+//           // @command is optional, you can omit this if you don't need to
+//           // execute any command.
+//           "command": "dmesg > /tmp/dmesg.log",
+//
+//           // The filename can be specified in both static @filename
+//           // attribute, or a @filename_cmd attribute, which the output
+//           // of the command is the download filename.
+//           "filename": "/tmp/dmesg.log",
+//           // or (exclusively)
+//           "filename_cmd": "get_filename_cmd",
+//         },
 //         // A group of commands
 //         {
 //           "name": "Fixture control"
@@ -202,8 +217,9 @@ var FixtureWidget = React.createClass({
               "://" + window.location.host + "/api/agent/shell/" + mid +
               "?command=" + encodeURIComponent(cmd);
     var sock = new WebSocket(url);
+    var deferred = $.Deferred();
 
-    sock.onopen = function () {
+    sock.onopen = function (event) {
       sock.onmessage = function (msg) {
         if (!this.isMounted()) {
           sock.close();
@@ -216,15 +232,22 @@ var FixtureWidget = React.createClass({
         }
       }.bind(this)
     }.bind(this)
+
+    sock.onclose = function (event) {
+      deferred.resolve();
+    }
     this.socks.push(sock);
+
+    return deferred.promise();
   },
-  scanForUiMessages: function (text) {
+  extractUIMessages: function (text) {
     if (typeof(this.refs.lights) != "undefined") {
-      this.refs.lights.scanForLightMessage(text);
+      text = this.refs.lights.extractLightMessages(text);
     }
     if (typeof(this.refs.display) != "undefined") {
-      this.refs.display.scanForDataMessage(text);
+      text = this.refs.display.extractDataMessages(text);
     }
+    return text;
   },
   componentDidMount: function () {
     var client = this.props.client;
@@ -256,7 +279,7 @@ var FixtureWidget = React.createClass({
           <Lights ref="lights" client={client} fixture={this} />
         ) || "";
     var terminals = ui.terminals && (
-          <Terminals client={client} app={this.props.app} />
+          <Terminals client={client} app={this.props.app} fixture={this} />
         ) || "";
     var controls = ui.controls && (
           <Controls ref="controls" client={client} fixture={this}
@@ -287,12 +310,13 @@ var Display = React.createClass({
       state[key] = value;
     });
   },
-  scanForDataMessage: function (msg) {
-    var patt = /DATA\[(.*)\]\s*=\s*'([^']*)'/g;
+  extractDataMessages: function (msg) {
+    var patt = /DATA\[(.*?)\]\s*=\s*'(.*?)'\n?/g;
     var found;
     while (found = patt.exec(msg)) {
       this.updateDisplay(found[1], found[2]);
     }
+    return msg.replace(patt, "");
   },
   getInitialState: function () {
     var display = this.props.client.properties.ui.display;
@@ -324,12 +348,13 @@ var Lights = React.createClass({
     node.addClass(status_class);
     this.refs[id].props.prevLight = status_class;
   },
-  scanForLightMessage: function (msg) {
-    var patt = /LIGHT\[(.*)\]\s*=\s*'(\S*)'/g;
+  extractLightMessages: function (msg) {
+    var patt = /LIGHT\[(.*?)\]\s*=\s*'(.*?)'\n?/g;
     var found;
     while (found = patt.exec(msg)) {
       this.updateLightStatus(found[1], LIGHT_CSS_MAP[found[2]]);
     }
+    return msg.replace(patt, "");
   },
   render: function () {
     var client = this.props.client;
@@ -361,39 +386,6 @@ var Lights = React.createClass({
 });
 
 var Terminals = React.createClass({
-  getCmdOutput: function (mid, cmd) {
-    var url = "ws" + ((window.location.protocol == "https:")? "s": "" ) +
-              "://" + window.location.host + "/api/agent/shell/" + mid +
-              "?command=" + cmd;
-    var sock = new WebSocket(url);
-    var deferred = $.Deferred();
-
-    sock.onopen = function (event) {
-      var blobs = [];
-      sock.onmessage = function (msg) {
-        if (msg.data instanceof Blob) {
-          blobs.push(msg.data);
-        }
-      }
-      sock.onclose = function (event) {
-        var value = "";
-        if (blobs.length == 0) {
-          deferred.resolve("");
-        }
-        for (var i = 0; i < blobs.length; i++) {
-          ReadBlobAsText(blobs[i], function(current) {
-            return function(text) {
-              value += text;
-              if (current == blobs.length - 1) {
-                deferred.resolve(value);
-              }
-            }
-          }(i));
-        }
-      }
-    }
-    return deferred.promise();
-  },
   onTerminalClick: function (event) {
     var target = $(event.target);
     var mid = target.data("mid");
@@ -405,7 +397,7 @@ var Terminals = React.createClass({
 
     if (typeof(term.path_cmd) != "undefined" &&
         term.path_cmd.match(/^\s+$/) == null) {
-      this.getCmdOutput(mid, term.path_cmd).done(function(path) {
+      getRemoteCmdOutput(mid, term.path_cmd).done(function (path) {
         if (path.replace(/^\s+|\s+$/g, "") == "") {
           alert("This TTY device does not exist!");
         } else {
@@ -443,18 +435,43 @@ var Controls = React.createClass({
   onCommandClicked: function (event) {
     var target = $(event.target);
     var ctrl = target.data("ctrl");
+    var mid = target.data("mid");
+    var fixture = this.props.fixture;
+
     if (ctrl.type == "toggle") {
       if (target.hasClass("active")) {
-        this.props.fixture.executeRemoteCmd(target.data("mid"),
-                                            ctrl.off_command);
+        fixture.executeRemoteCmd(mid, ctrl.off_command);
         target.removeClass("active");
       } else {
-        this.props.fixture.executeRemoteCmd(target.data("mid"),
-                                            ctrl.on_command);
+        fixture.executeRemoteCmd(mid, ctrl.on_command);
         target.addClass("active");
       }
+    } else if (ctrl.type == "download") {
+      // Helper function for downloading a file
+      var downloadFile = function (filename) {
+        var url = window.location.protocol + "//" + window.location.host +
+                  "/api/agent/download/" + mid +
+                  "?filename=" + filename;
+        $("<iframe src='" + url + "' style='display:none'>" +
+          "</iframe>").appendTo('body');
+      }
+      var startDownload = function () {
+        // Check if there is filename_cmd
+        if (typeof(ctrl.filename_cmd) != "undefined") {
+          getRemoteCmdOutput(mid, ctrl.filename_cmd)
+            .done(function (path) { downloadFile(path); });
+        } else {
+          downloadFile(ctrl.filename);
+        }
+      }
+      if (typeof(ctrl.command) != "undefined") {
+        fixture.executeRemoteCmd(mid, ctrl.command)
+          .done(function() { startDownload(); });
+      } else {
+        startDownload();
+      }
     } else {
-      this.props.fixture.executeRemoteCmd(target.data("mid"), ctrl.command);
+      fixture.executeRemoteCmd(mid, ctrl.command);
     }
   },
   onUploadButtonChanged: function (event) {
@@ -537,8 +554,9 @@ var Controls = React.createClass({
 var MainLog = React.createClass({
   appendLog: function (text) {
     var odiv = this.odiv;
-    this.props.fixture.scanForUiMessages(text);
     var innerHTML = $(odiv).html();
+
+    text = this.props.fixture.extractUIMessages(text);
     innerHTML += text.replace(/\n/g, "<br />");
     if (innerHTML.length > LOG_BUF_SIZE) {
       innerHTML = innerHTML.substr(innerHTML.length -
@@ -590,8 +608,8 @@ var AuxLog = React.createClass({
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function (text) {
-            this.props.fixture.scanForUiMessages(text);
             var innerHTML = $(odiv).html();
+            text = this.props.fixture.extractUIMessages(text);
             innerHTML += text.replace(/\n/g, "<br />");
             if (innerHTML.length > LOG_BUF_SIZE) {
               innerHTML = innerHTML.substr(innerHTML.length -

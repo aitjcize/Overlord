@@ -117,7 +117,7 @@ var App = React.createClass({
     socket.on("file download", function (sid) {
       var url = window.location.protocol + "//" + window.location.host +
                 "/api/file/download/" + sid;
-      $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
+      $("<iframe src='" + url + "' style='display:none'>" +
         "</iframe>").appendTo('body');
     });
   },

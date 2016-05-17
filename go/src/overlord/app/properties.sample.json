@@ -36,6 +36,9 @@
       {"name": "Upgrade Toolkit", "type": "upload",
        "dest": "/tmp/install_factory_toolkit.run",
        "command": "rm -rf /usr/local/factory && sh /tmp/install_factory_toolkit.run -- -y && factory_restart"},
+      {"name": "Download Log", "type": "download",
+       "command": "dmesg > /tmp/dmesg.log",
+       "filename": "/tmp/dmesg.log"},
       {"name": "Fixture control", "group": [
         {"name": "whale close", "command": "whale close"},
         {"name": "whale open", "command": "whale open"},
