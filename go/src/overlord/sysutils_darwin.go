@@ -52,7 +52,7 @@ func GetProcessWorkingDirectory(pid int) (string, error) {
 	)
 
 	buf := make([]byte, procVnodepathinfoSize)
-	ret := C.proc_pidinfo(C.int(os.Getpid()), C.int(C.PROC_PIDVNODEPATHINFO),
+	ret := C.proc_pidinfo(C.int(pid), C.int(C.PROC_PIDVNODEPATHINFO),
 		C.uint64_t(0), unsafe.Pointer(&buf[0]), C.int(procVnodepathinfoSize))
 	if ret == 0 {
 		return "", fmt.Errorf("proc_pidinfo returned %d", ret)
