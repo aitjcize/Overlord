@@ -64,7 +64,9 @@ def main():
         (when, poll) = queue.get_nowait()
         if time.time() < when: # not now
           queue.put((when, poll))
-          time.sleep(when - time.time())
+          sleep_time = when - time.time()
+          if sleep_time > 0:
+            time.sleep(sleep_time)
         else:
           subprocess.call(poll['cmd'], shell=True)
           queue.put((time.time() + (poll['interval'] / 1000.0), poll))
