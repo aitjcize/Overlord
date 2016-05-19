@@ -171,6 +171,18 @@ var LIGHT_CSS_MAP = {
 //           // or (exclusively)
 //           "filename_cmd": "get_filename_cmd",
 //         },
+//         // A button that opens a link
+//         {
+//           "name": "VNC",
+//           "type": "link",
+//           // @url is a URL template, here is a list of supported attributes:
+//           // host: the hostname of the webserver serving this page
+//           // port: the HTTP port of the webserver serving this page
+//           // client: the client object
+//           "url": "/third_party/noVNC/vnc_auto.html?host={{:host}}&"
+//                  "port={{:port}}&path=api/agent/forward/{{:client.mid}}"
+//                  "%3fport=5901"
+//         },
 //         // A group of commands
 //         {
 //           "name": "Fixture control"
@@ -533,6 +545,19 @@ var Controls = React.createClass({
                data-show-remove="false" data-browse-class={btnClasses}
                data-mid={mid} data-ctrl={JSON.stringify(control)}
                onChange={this.onUploadButtonChanged} />
+            );
+          } else if (control.type == "link") {
+            var data = {
+              'host': location.hostname,
+              'port': location.port,
+              'client': client
+            };
+            var url = $.templates(control.url).render(data);
+            return (
+              <a key={control.name} className={"command-btn " + btnClasses}
+               href={url} target="_blank">
+                {control.name}
+              </a>
             );
           } else {
             return (

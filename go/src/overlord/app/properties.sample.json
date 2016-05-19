@@ -39,6 +39,8 @@
       {"name": "Download Log", "type": "download",
        "command": "dmesg > /tmp/dmesg.log",
        "filename": "/tmp/dmesg.log"},
+      {"name": "VNC", "type": "link",
+       "url": "/third_party/noVNC/vnc_auto.html?host={{:host}}&port={{:port}}&path=api/agent/forward/{{:client.mid}}%3fport=5901"},
       {"name": "Fixture control", "group": [
         {"name": "whale close", "command": "whale close"},
         {"name": "whale open", "command": "whale open"},
