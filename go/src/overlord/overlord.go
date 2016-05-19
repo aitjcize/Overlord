@@ -396,7 +396,7 @@ func (ovl *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	var appNames []string
 
 	isSpecial := func(target string) bool {
-		for _, name := range []string{"common", "index", "upgrade"} {
+		for _, name := range []string{"common", "upgrade", "third_party"} {
 			if name == target {
 				return true
 			}
@@ -431,6 +431,7 @@ func (ovl *Overlord) ServHTTP(port int) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  bufferSize,
 		WriteBufferSize: bufferSize,
+		Subprotocols: []string{"binary"},
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
@@ -925,6 +926,8 @@ func (ovl *Overlord) ServHTTP(port int) {
 
 	http.Handle("/api/", auth.WrapHandler(r))
 	http.Handle("/api/socket.io/", auth.WrapHandler(ovl.ioserver))
+
+	// /upgrade/ does not need authenticiation
 	http.Handle("/upgrade/", http.StripPrefix("/upgrade/",
 		http.FileServer(http.Dir(filepath.Join(appDir, "upgrade")))))
 	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
@@ -942,7 +945,7 @@ func (ovl *Overlord) ServHTTP(port int) {
 		if app == "upgrade" {
 			continue
 		}
-		if app != "common" && app != "index" {
+		if app != "common" && app != "third_party" {
 			log.Printf("Serving app `%s' ...\n", app)
 		}
 		prefix := fmt.Sprintf("/%s/", app)
