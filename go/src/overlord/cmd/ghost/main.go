@@ -20,8 +20,8 @@ var propFile = flag.String("prop-file", "",
 	"file containing the JSON representation of client properties")
 var tlsCertFile = flag.String("tls-cert-file", "",
 	"file containing the server TLS certificate in PEM format")
-var enableTLSWithoutVerify = flag.Bool("enable-tls-without-verify", false,
-	"Enable TLS but don't verify certificate")
+var tlsNoVerify = flag.Bool("tls-no-verify", false,
+	"do not verify certificate if TLS is enabled")
 var download = flag.String("download", "", "file to download")
 var reset = flag.Bool("reset", false, "reset ghost and reload all configs")
 
@@ -49,5 +49,5 @@ func main() {
 	}
 
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,
-	  *enableTLSWithoutVerify, *propFile, *download, *reset)
+	  !*tlsNoVerify, *propFile, *download, *reset)
 }

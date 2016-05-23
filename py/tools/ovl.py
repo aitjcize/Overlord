@@ -68,9 +68,18 @@ _STDIN_CLOSED = '##STDIN_CLOSED##'
 _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
                                           'ovl-ssh-control-')
 
-# A string that will always be included in the response of
-# GET http://OVERLORD_SERVER:_OVERLORD_HTTP_PORT
-_OVERLORD_RESPONSE_KEYWORD = 'HTTP'
+_TLS_CERT_FAILED_WARNING = """
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@ WARNING: REMOTE HOST VERIFICATION HAS FAILED! @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that the server is using a self-signed certificate.
+The fingerprint for the TLS host certificate sent by the remote host is
+
+%s
+
+Do you want to trust this certificate and proceed? [Y/n] """
 
 _TLS_CERT_CHANGED_WARNING = """
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -78,8 +87,8 @@ _TLS_CERT_CHANGED_WARNING = """
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
 Someone could be eavesdropping on you right now (man-in-the-middle attack)!
-It is also possible that the SSL host certificate has just been changed.
-The fingerprint for the SSL host certificate sent by the remote host is
+It is also possible that the TLS host certificate has just been changed.
+The fingerprint for the TLS host certificate sent by the remote host is
 
 %s
 
@@ -180,10 +189,10 @@ class ProgressBar(object):
     self._name_max = 0
     self._stat_width = 0
     self._max = 0
-    self.CalculateSize()
+    self._CalculateSize()
     self.SetProgress(0)
 
-  def CalculateSize(self):
+  def _CalculateSize(self):
     self._width = GetTerminalSize()[1] or _DEFAULT_TERMINAL_WIDTH
     self._name_width = int(self._width * 0.3)
     self._name_max = self._name_width
@@ -191,7 +200,7 @@ class ProgressBar(object):
     self._max = (self._width - self._name_width - self._stat_width -
                  self.PERCENTAGE_WIDTH)
 
-  def SizeToHuman(self, size_in_bytes):
+  def _SizeToHuman(self, size_in_bytes):
     if size_in_bytes < 1024:
       unit = 'B'
       value = size_in_bytes
@@ -206,7 +215,7 @@ class ProgressBar(object):
       value = size_in_bytes / (1024.0 ** 3)
     return ' %6.1f %3s' % (value, unit)
 
-  def SpeedToHuman(self, speed_in_bs):
+  def _SpeedToHuman(self, speed_in_bs):
     if speed_in_bs < 1024:
       unit = 'B'
       value = speed_in_bs
@@ -221,13 +230,13 @@ class ProgressBar(object):
       value = speed_in_bs / (1024.0 ** 3)
     return ' %6.1f%s/s' % (value, unit)
 
-  def DurationToClock(self, duration):
+  def _DurationToClock(self, duration):
     return ' %02d:%02d' % (duration / 60, duration % 60)
 
   def SetProgress(self, percentage, size=None):
     current_width = GetTerminalSize()[1]
     if self._width != current_width:
-      self.CalculateSize()
+      self._CalculateSize()
 
     if size is not None:
       self._size = size
@@ -235,9 +244,9 @@ class ProgressBar(object):
     elapse_time = time.time() - self._start_time
     speed = self._size / float(elapse_time)
 
-    size_str = self.SizeToHuman(self._size)
-    speed_str = self.SpeedToHuman(speed)
-    elapse_str = self.DurationToClock(elapse_time)
+    size_str = self._SizeToHuman(self._size)
+    speed_str = self._SpeedToHuman(speed)
+    elapse_str = self._DurationToClock(elapse_time)
 
     width = int(self._max * percentage / 100.0)
     sys.stdout.write(
@@ -262,6 +271,7 @@ class DaemonState(object):
     self.host = None
     self.port = None
     self.ssl = False
+    self.ssl_self_signed = False
     self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
     self.ssh = False
     self.orig_host = None
@@ -328,18 +338,24 @@ class OverlordClientDaemon(object):
     url = '%s:%d%s' % (self._state.host, self._state.port, path)
     return json.loads(UrlOpen(self._state, url).read())
 
-  def _OverlordHTTPSEnabled(self):
-    """Determine if SSL is enabled on the Overlord HTTP server."""
+  def _TLSEnabled(self):
+    """Determine if TLS is enabled on given server address."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+      # Allow any certificate since we only want to check if server talks TLS.
+      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context.verify_mode = ssl.CERT_NONE
+
+      sock = context.wrap_socket(sock, server_hostname=self._state.host)
       sock.settimeout(_CONNECT_TIMEOUT)
       sock.connect((self._state.host, self._state.port))
-      sock.send('GET\r\n')
-
-      data = sock.recv(16)
-      return _OVERLORD_RESPONSE_KEYWORD not in data
+      return True
+    except ssl.SSLError as e:
+        return False
+    except socket.error:  # Connect refused or timeout
+      raise
     except Exception:
-      return False  # For whatever reason above failed, assume HTTP
+      return False  # For whatever reason above failed, assume False
 
   def _CheckTLSCertificate(self):
     """Check TLS certificate.
@@ -347,29 +363,37 @@ class OverlordClientDaemon(object):
     Returns:
       A tupple (check_result, if_certificate_is_loaded)
     """
+    def _DoConnect(context):
+      sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+      try:
+        sock.settimeout(_CONNECT_TIMEOUT)
+        sock = context.wrap_socket(sock, server_hostname=self._state.host)
+        sock.connect((self._state.host, self._state.port))
+      except ssl.SSLError:
+        return False
+      finally:
+        sock.close()
+
+      # Save SSLContext for future use.
+      self._state.ssl_context = context
+      return True
+
+    # First try connect with built-in certificates
+    tls_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    if _DoConnect(tls_context):
+      return True
+
+    # Try with already saved certificate, if any.
     tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
     tls_context.verify_mode = ssl.CERT_REQUIRED
     tls_context.check_hostname = True
-    cert_loaded = False
 
     tls_cert_path = GetTLSCertPath(self._state.host)
     if os.path.exists(tls_cert_path):
       tls_context.load_verify_locations(tls_cert_path)
-      cert_loaded = True
+      self._state.ssl_self_signed = True
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-      sock.settimeout(_CONNECT_TIMEOUT)
-      sock = tls_context.wrap_socket(sock, server_hostname=self._state.host)
-      sock.connect((self._state.host, self._state.port))
-    except ssl.SSLError:
-      return False, cert_loaded
-    finally:
-      sock.close()
-
-    # Save SSLContext for future use.
-    self._state.ssl_context = tls_context
-    return True, None
+    return _DoConnect(tls_context)
 
   def Connect(self, host, port=_OVERLORD_HTTP_PORT, ssh_pid=None,
               username=None, password=None, orig_host=None):
@@ -378,15 +402,16 @@ class OverlordClientDaemon(object):
     self._state.host = host
     self._state.port = port
     self._state.ssl = False
+    self._state.ssl_self_signed = False
     self._state.orig_host = orig_host
     self._state.ssh_pid = ssh_pid
     self._state.selected_mid = None
 
-    tls_enabled = self._OverlordHTTPSEnabled()
+    tls_enabled = self._TLSEnabled()
     if tls_enabled:
-      result, cert_loaded = self._CheckTLSCertificate()
+      result = self._CheckTLSCertificate()
       if not result:
-        if cert_loaded:
+        if self._state.ssl_self_signed:
           return ('SSLCertificateChanged', ssl.get_server_certificate(
               (self._state.host, self._state.port)))
         else:
@@ -436,18 +461,29 @@ class OverlordClientDaemon(object):
 
 
 class SSLEnabledWebSocketBaseClient(WebSocketBaseClient):
-  def __init__(self, host, *args, **kwargs):
+  def __init__(self, state, *args, **kwargs):
+    cafile = ssl.get_default_verify_paths().openssl_cafile
+    # For some system / distribution, python can not detect system cafile path.
+    # In such case we fallback to the default path.
+    if not os.path.exists(cafile):
+      cafile = '/etc/ssl/certs/ca-certificates.crt'
+
+    if state.ssl_self_signed:
+      cafile = GetTLSCertPath(state.host)
+
     ssl_options = {
         'cert_reqs': ssl.CERT_REQUIRED,
-        'ca_certs': GetTLSCertPath(host)
+        'ca_certs': cafile
     }
+    # ws4py does not allow you to specify SSLContext, but rather passing in the
+    # argument of ssl.wrap_socket
     super(SSLEnabledWebSocketBaseClient, self).__init__(
         ssl_options=ssl_options, *args, **kwargs)
 
 
 class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
-  def __init__(self, host, mid, escape, *args, **kwargs):
-    super(TerminalWebSocketClient, self).__init__(host, *args, **kwargs)
+  def __init__(self, state, mid, escape, *args, **kwargs):
+    super(TerminalWebSocketClient, self).__init__(state, *args, **kwargs)
     self._mid = mid
     self._escape = escape
     self._stdin_fd = sys.stdin.fileno()
@@ -516,14 +552,14 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
 
 
 class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
-  def __init__(self, host, output, *args, **kwargs):
+  def __init__(self, state, output, *args, **kwargs):
     """Constructor.
 
     Args:
       output: output file object.
     """
     self.output = output
-    super(ShellWebSocketClient, self).__init__(host, *args, **kwargs)
+    super(ShellWebSocketClient, self).__init__(state, *args, **kwargs)
 
   def handshake_ok(self):
     pass
@@ -555,8 +591,8 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
 
 
 class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
-  def __init__(self, host, sock, *args, **kwargs):
-    super(ForwarderWebSocketClient, self).__init__(host, *args, **kwargs)
+  def __init__(self, state, sock, *args, **kwargs):
+    super(ForwarderWebSocketClient, self).__init__(state, *args, **kwargs)
     self._sock = sock
     self._stop = threading.Event()
 
@@ -863,7 +899,7 @@ class OverlordCLIClient(object):
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     sio = StringIO.StringIO()
-    ws = ShellWebSocketClient(self._state.host, sio,
+    ws = ShellWebSocketClient(self._state, sio,
                               scheme + '%s:%d/api/agent/shell/%s?command=%s' %
                               (self._state.host, self._state.port,
                                self._selected_mid, urllib2.quote(command)),
@@ -942,10 +978,12 @@ class OverlordCLIClient(object):
             print(_TLS_CERT_CHANGED_WARNING % (fp_text, GetTLSCertPath(host)))
             return
           elif ret[0] == 'SSLVerifyFailed':
-            print('Server fingerprint: %s' % fp_text)
-            response = raw_input('Do you want to continue? [Y/n] ')
+            print(_TLS_CERT_FAILED_WARNING % (fp_text), end='')
+            response = raw_input()
             if response.lower() in ['y', 'ye', 'yes']:
               self._SaveTLSCertificate(host, cert_pem)
+              print('TLS host Certificate trusted, you will not be prompted '
+                    'next time.\n')
               continue
             else:
               print('connection aborted.')
@@ -1046,14 +1084,14 @@ class OverlordCLIClient(object):
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     if len(command) == 0:
-      ws = TerminalWebSocketClient(self._state.host, self._selected_mid,
+      ws = TerminalWebSocketClient(self._state, self._selected_mid,
                                    self._escape,
                                    scheme + '%s:%d/api/agent/tty/%s' %
                                    (self._state.host, self._state.port,
                                     self._selected_mid), headers=headers)
     else:
       cmd = ' '.join(command)
-      ws = ShellWebSocketClient(self._state.host, sys.stdout,
+      ws = ShellWebSocketClient(self._state, sys.stdout,
                                 scheme + '%s:%d/api/agent/shell/%s?command=%s' %
                                 (self._state.host, self._state.port,
                                  self._selected_mid, urllib2.quote(cmd)),
@@ -1279,7 +1317,7 @@ class OverlordCLIClient(object):
 
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
-          self._state.host, conn,
+          self._state, conn,
           scheme + '%s:%d/api/agent/forward/%s?port=%d' %
           (self._state.host, self._state.port, self._selected_mid, remote),
           headers=headers)

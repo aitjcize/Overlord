@@ -124,34 +124,58 @@ type fileUploadContext struct {
 }
 
 type tlsSettings struct {
+	Enabled     bool        // TLS enabled or not
 	tlsCertFile string      // TLS certificate in PEM format
+	verify      bool        // Wether or not to verify the certificate
 	Config      *tls.Config // TLS configuration
 }
 
-func newTLSSettings(tlsCertFile string, enableTLSWithoutVerify bool) *tlsSettings {
-	var tlsConfig *tls.Config
-
-	if enableTLSWithoutVerify {
-		tlsConfig = &tls.Config{InsecureSkipVerify: true}
-	} else if tlsCertFile != "" {
-		// Load certificate
-		cert, err := ioutil.ReadFile(tlsCertFile)
-		if err != nil {
-			log.Fatalln(err)
-		}
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(cert)
-		tlsConfig = &tls.Config{
-			RootCAs:    caCertPool,
-			MinVersion: tls.VersionTLS12,
-		}
-	}
-
-	return &tlsSettings{tlsCertFile, tlsConfig}
+func newTLSSettings(tlsCertFile string, verify bool) *tlsSettings {
+	return &tlsSettings{false, tlsCertFile, verify, nil}
 }
 
-func (t *tlsSettings) Enabled() bool {
-	return t.Config != nil
+func (t *tlsSettings) updateContext() {
+	if !t.Enabled {
+		t.Config = nil
+		return
+	}
+
+	if t.verify {
+		config := &tls.Config{
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS12,
+			RootCAs:            nil,
+		}
+		if t.tlsCertFile != "" {
+			log.Println("TLSSettings: using user-supplied ca-certificate")
+			cert, err := ioutil.ReadFile(t.tlsCertFile)
+			if err != nil {
+				log.Fatalln(err)
+			}
+			caCertPool := x509.NewCertPool()
+			caCertPool.AppendCertsFromPEM(cert)
+			config.RootCAs = caCertPool
+		} else {
+			log.Println("TLSSettings: using built-in ca-certificates")
+		}
+		t.Config = config
+	} else {
+		log.Println("TLSSettings: skipping TLS verification!!!")
+		t.Config = &tls.Config{InsecureSkipVerify: true}
+	}
+}
+
+func (t *tlsSettings) SetEnabled(enabled bool) {
+	status := "True"
+	if !enabled {
+		status = "False"
+	}
+
+	log.Println("TLSSettings: enabled:", status)
+	if enabled != t.Enabled {
+		t.Enabled = enabled
+		t.updateContext()
+	}
 }
 
 // Ghost type is the main context for storing the ghost state.
@@ -289,23 +313,37 @@ func (ghost *Ghost) loadProperties() {
 	}
 }
 
-func (ghost *Ghost) overlordHTTPSEnabled() bool {
-	parts := strings.Split(ghost.connectedAddr, ":")
-	conn, err := net.DialTimeout("tcp",
-		fmt.Sprintf("%s:%d", parts[0], OverlordHTTPPort),
-		connectTimeout)
+func (ghost *Ghost) tlsEnabled(addr string) (bool, error) {
+	conn, err := net.DialTimeout("tcp", addr, connectTimeout)
 	if err != nil {
-		return false
+		return false, err
 	}
 	defer conn.Close()
 
-	conn.Write([]byte("GET\r\n"))
-	buf := make([]byte, 16)
-	_, err = conn.Read(buf)
-	if err != nil {
-		return false
+	colonPos := strings.LastIndex(addr, ":")
+	tlsConn := tls.Client(conn, &tls.Config{
+		// Allow any certificate since we only want to check if server talks TLS.
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS12,
+		RootCAs:            nil,
+		ServerName:         addr[:colonPos],
+	})
+	defer tlsConn.Close()
+
+	handshakeTimeout := false
+
+	// Close the connection to stop handshake if it's taking too long.
+	go func() {
+		time.Sleep(connectTimeout)
+		conn.Close()
+		handshakeTimeout = true
+	}()
+
+	err = tlsConn.Handshake()
+	if err != nil || handshakeTimeout {
+		return false, nil
 	}
-	return strings.Index(string(buf), "HTTP") == -1
+	return true, nil
 }
 
 // Upgrade starts the upgrade sequence of the ghost instance.
@@ -320,23 +358,28 @@ func (ghost *Ghost) Upgrade() error {
 	var buffer bytes.Buffer
 	var client http.Client
 
-	serverTLSEnabled := ghost.overlordHTTPSEnabled()
+	parts := strings.Split(ghost.connectedAddr, ":")
+	httpsEnabled, err := ghost.tlsEnabled(
+		fmt.Sprintf("%s:%d", parts[0], OverlordHTTPPort))
+	if err != nil {
+		return errors.New("Upgrade: failed to connect to Overlord HTTP server, " +
+			"abort")
+	}
 
-	if ghost.tls.Enabled() && !serverTLSEnabled {
+	if ghost.tls.Enabled && !httpsEnabled {
 		return errors.New("Upgrade: TLS enforced but found Overlord HTTP server " +
 			"without TLS enabled! Possible mis-configuration or DNS/IP spoofing " +
 			"detected, abort")
 	}
 
 	proto := "http"
-	if serverTLSEnabled {
+	if httpsEnabled {
 		proto = "https"
 	}
-	parts := strings.Split(ghost.connectedAddr, ":")
 	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
 		OverlordHTTPPort, GetPlatformString())
 
-	if serverTLSEnabled {
+	if httpsEnabled {
 		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
 		client = http.Client{Transport: tr, Timeout: connectTimeout}
 	} else {
@@ -1101,58 +1144,67 @@ func (ghost *Ghost) Register() error {
 		log.Printf("Trying %s ...\n", addr)
 		ghost.Reset()
 
+		// Check if server has TLS enabled
+		enabled, err := ghost.tlsEnabled(addr)
+		if err != nil {
+			continue
+		}
+		ghost.tls.SetEnabled(enabled)
+
 		conn, err = net.DialTimeout("tcp", addr, connectTimeout)
-		if err == nil {
-			log.Println("Connection established, registering...")
-			if ghost.tls.Enabled() {
-				colonPos := strings.LastIndex(addr, ":")
-				config := ghost.tls.Config
-				config.ServerName = addr[:colonPos]
-				conn = tls.Client(conn, config)
-			}
+		if err != nil {
+			continue
+		}
 
-			ghost.Conn = conn
-			req := NewRequest("register", map[string]interface{}{
-				"mid":        ghost.mid,
-				"sid":        ghost.sid,
-				"mode":       ghost.mode,
-				"properties": ghost.properties,
-			})
+		log.Println("Connection established, registering...")
+		if ghost.tls.Enabled {
+			colonPos := strings.LastIndex(addr, ":")
+			config := ghost.tls.Config
+			config.ServerName = addr[:colonPos]
+			conn = tls.Client(conn, config)
+		}
 
-			registered := func(res *Response) error {
-				if res == nil {
-					ghost.reset = true
-					return errors.New("Register request timeout")
-				} else if res.Response != Success {
-					log.Println("Register:", res.Response)
-				} else {
-					log.Printf("Registered with Overlord at %s", addr)
-					ghost.connectedAddr = addr
-					if err := ghost.Upgrade(); err != nil {
-						log.Println(err)
-					}
-					ghost.pauseLanDisc = true
+		ghost.Conn = conn
+		req := NewRequest("register", map[string]interface{}{
+			"mid":        ghost.mid,
+			"sid":        ghost.sid,
+			"mode":       ghost.mode,
+			"properties": ghost.properties,
+		})
+
+		registered := func(res *Response) error {
+			if res == nil {
+				ghost.reset = true
+				return errors.New("Register request timeout")
+			} else if res.Response != Success {
+				log.Println("Register:", res.Response)
+			} else {
+				log.Printf("Registered with Overlord at %s", addr)
+				ghost.connectedAddr = addr
+				if err := ghost.Upgrade(); err != nil {
+					log.Println(err)
 				}
-				ghost.RegisterStatus = res.Response
-				return nil
+				ghost.pauseLanDisc = true
 			}
-
-			var handler ResponseHandler
-			switch ghost.mode {
-			case ModeControl:
-				handler = registered
-			case ModeTerminal:
-				handler = ghost.SpawnTTYServer
-			case ModeShell:
-				handler = ghost.SpawnShellServer
-			case ModeFile:
-				handler = ghost.InitiatefileOperation
-			case ModeForward:
-				handler = ghost.SpawnPortModeForwardServer
-			}
-			err = ghost.SendRequest(req, handler)
+			ghost.RegisterStatus = res.Response
 			return nil
 		}
+
+		var handler ResponseHandler
+		switch ghost.mode {
+		case ModeControl:
+			handler = registered
+		case ModeTerminal:
+			handler = ghost.SpawnTTYServer
+		case ModeShell:
+			handler = ghost.SpawnShellServer
+		case ModeFile:
+			handler = ghost.InitiatefileOperation
+		case ModeForward:
+			handler = ghost.SpawnPortModeForwardServer
+		}
+		err = ghost.SendRequest(req, handler)
+		return nil
 	}
 
 	return errors.New("Cannot connect to any server")
@@ -1449,7 +1501,7 @@ fail:
 
 // StartGhost starts the Ghost client.
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
-	tlsCertFile string, enableTLSWithoutVerify bool, propFile string, download string,
+	tlsCertFile string, verify bool, propFile string, download string,
 	reset bool) {
 	var addrs []string
 
@@ -1477,7 +1529,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 	addrs = append(addrs, fmt.Sprintf("localhost:%d", OverlordPort))
 
-	tlsSettings := newTLSSettings(tlsCertFile, enableTLSWithoutVerify)
+	tlsSettings := newTLSSettings(tlsCertFile, verify)
 
 	if propFile != "" {
 		var err error

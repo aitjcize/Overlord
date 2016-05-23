@@ -60,10 +60,6 @@ _CONNECT_TIMEOUT = 3
 # Stream control
 _STDIN_CLOSED = '##STDIN_CLOSED##'
 
-# A string that will always be included in the response of
-# GET http://OVERLORD_SERVER:_OVERLORD_HTTP_PORT
-_OVERLORD_RESPONSE_KEYWORD = 'HTTP'
-
 SUCCESS = 'success'
 FAILED = 'failed'
 DISCONNECTED = 'disconnected'
@@ -119,30 +115,51 @@ class BufferedSocket(object):
 
 
 class TLSSettings(object):
-  def __init__(self, tls_cert_file, enable_tls_without_verify):
+  def __init__(self, tls_cert_file, verify):
     """Constructor.
 
     Args:
       tls_cert_file: TLS certificate in PEM format.
       enable_tls_without_verify: enable TLS but don't verify certificate.
     """
+    self._enabled = False
     self._tls_cert_file = tls_cert_file
+    self._verify = verify
     self._tls_context = None
 
-    if self._tls_cert_file is not None or enable_tls_without_verify:
-      self._tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-      self._tls_context.verify_mode = ssl.CERT_NONE
+  def _UpdateContext(self):
+    if not self._enabled:
+      self._tls_context = None
+      return
+
+    self._tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    self._tls_context.verify_mode = ssl.CERT_REQUIRED
+
+    if self._verify:
       if self._tls_cert_file:
-        self._tls_context.verify_mode = ssl.CERT_REQUIRED
         self._tls_context.check_hostname = True
         try:
           self._tls_context.load_verify_locations(self._tls_cert_file)
+          logging.info('TLSSettings: using user-supplied ca-certificate')
         except IOError as e:
           logging.error('TLSSettings: %s: %s', self._tls_cert_file, e)
           sys.exit(1)
+      else:
+        self._tls_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        logging.info('TLSSettings: using built-in ca-certificates')
+    else:
+      self._tls_context.verify_mode = ssl.CERT_NONE
+      logging.info('TLSSettings: skipping TLS verification!!!')
+
+  def SetEnabled(self, enabled):
+    logging.info('TLSSettings: enabled: %s', enabled)
+
+    if self._enabled != enabled:
+      self._enabled = enabled
+      self._UpdateContext()
 
   def Enabled(self):
-    return self._tls_context is not None
+    return self._enabled
 
   def Context(self):
     return self._tls_context
@@ -237,24 +254,37 @@ class Ghost(object):
     with open(filename, 'r') as f:
       return hashlib.sha1(f.read()).hexdigest()
 
-  def OverlordHTTPSEnabled(self):
-    """Determine if SSL is enabled on the Overlord HTTP server."""
+  def TLSEnabled(self, host, port):
+    """Determine if TLS is enabled on given server address."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-      sock.settimeout(_CONNECT_TIMEOUT)
-      sock.connect((self._connected_addr[0], _OVERLORD_HTTP_PORT))
-      sock.send('GET\r\n')
+      # Allow any certificate since we only want to check if server talks TLS.
+      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context.verify_mode = ssl.CERT_NONE
 
-      data = sock.recv(16)
-      return _OVERLORD_RESPONSE_KEYWORD not in data
+      sock = context.wrap_socket(sock, server_hostname=host)
+      sock.settimeout(_CONNECT_TIMEOUT)
+      sock.connect((host, port))
+      return True
+    except ssl.SSLError as e:
+        return False
+    except socket.error:  # Connect refused or timeout
+      raise
     except Exception:
-      return False  # For whatever reason above failed, assume HTTP
+      return False  # For whatever reason above failed, assume False
 
   def Upgrade(self):
     logging.info('Upgrade: initiating upgrade sequence...')
 
-    server_tls_enabled = self.OverlordHTTPSEnabled()
-    if self._tls_settings.Enabled() and not server_tls_enabled:
+    try:
+        https_enabled = self.TLSEnabled(
+            self._connected_addr[0], _OVERLORD_HTTP_PORT)
+    except socket.error:
+        logging.error('Upgrade: failed to connect to Overlord HTTP server, '
+                      'abort')
+        return
+
+    if self._tls_settings.Enabled() and not https_enabled:
       logging.error('Upgrade: TLS enforced but found Overlord HTTP server '
                     'without TLS enabled! Possible mis-configuration or '
                     'DNS/IP spoofing detected, abort')
@@ -262,7 +292,7 @@ class Ghost(object):
 
     scriptpath = os.path.abspath(sys.argv[0])
     url = 'http%s://%s:%d/upgrade/ghost.py' % (
-        's' if server_tls_enabled else '', self._connected_addr[0],
+        's' if https_enabled else '', self._connected_addr[0],
         _OVERLORD_HTTP_PORT)
 
     # Download sha1sum for ghost.py for verification
@@ -1012,6 +1042,9 @@ class Ghost(object):
         logging.info('Trying %s:%d ...', *addr)
         self.Reset()
 
+        # Check if server has TLS enabled
+        self._tls_settings.SetEnabled(self.TLSEnabled(*addr))
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(_CONNECT_TIMEOUT)
 
@@ -1237,10 +1270,9 @@ def main():
                       dest='tls_cert_file', type=str, default=None,
                       help='file containing the server TLS certificate in PEM '
                            'format')
-  parser.add_argument('--enable-tls-without-verify',
-                      dest='enable_tls_without_verify', action='store_true',
-                      default=False,
-                      help='Enable TLS but don\'t verify certificate')
+  parser.add_argument('--tls-no-verify', dest='tls_no_verify',
+                      action='store_true', default=False,
+                      help='do not verify certificate if TLS is enabled')
   parser.add_argument('--prop-file', metavar='PROP_FILE', dest='prop_file',
                       type=str, default=None,
                       help='file containing the JSON representation of client '
@@ -1265,11 +1297,11 @@ def main():
     DownloadFile(args.download)
 
   addrs = [('localhost', _OVERLORD_PORT)]
-  addrs += [(x, _OVERLORD_PORT) for x in args.overlord_ip]
+  addrs = [(x, _OVERLORD_PORT) for x in args.overlord_ip] + addrs
 
   prop_file = os.path.abspath(args.prop_file) if args.prop_file else None
 
-  tls_settings = TLSSettings(args.tls_cert_file, args.enable_tls_without_verify)
+  tls_settings = TLSSettings(args.tls_cert_file, not args.tls_no_verify)
   g = Ghost(addrs, tls_settings, Ghost.AGENT, args.mid,
             prop_file=prop_file)
   g.Start(args.lan_disc, args.rpc_server)
