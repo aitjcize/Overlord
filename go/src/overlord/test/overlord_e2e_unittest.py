@@ -80,7 +80,7 @@ class TestOverlord(unittest.TestCase):
   def testWebAPI(self):
     # Test /api/app/list
     appdir = os.path.join(self.basedir, '../app')
-    specialApps = ['common', 'upgrade']
+    specialApps = ['common', 'upgrade', 'third_party']
     apps = [x for x in os.listdir(appdir)
             if os.path.isdir(os.path.join(appdir, x)) and x not in specialApps]
     res = self._GetJSON('/api/apps/list')
