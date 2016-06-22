@@ -431,7 +431,7 @@ func (ovl *Overlord) ServHTTP(port int) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  bufferSize,
 		WriteBufferSize: bufferSize,
-		Subprotocols: []string{"binary"},
+		Subprotocols:    []string{"binary"},
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},

@@ -1144,12 +1144,16 @@ func (ghost *Ghost) Register() error {
 		log.Printf("Trying %s ...\n", addr)
 		ghost.Reset()
 
-		// Check if server has TLS enabled
-		enabled, err := ghost.tlsEnabled(addr)
-		if err != nil {
-			continue
+		// Check if server has TLS enabled.
+		// Only control channel needs to determine if TLS is enabled. Other mode
+		// should use the tlsSettings passed in when it was spawned.
+		if ghost.mode == ModeControl {
+			enabled, err := ghost.tlsEnabled(addr)
+			if err != nil {
+				continue
+			}
+			ghost.tls.SetEnabled(enabled)
 		}
-		ghost.tls.SetEnabled(enabled)
 
 		conn, err = net.DialTimeout("tcp", addr, connectTimeout)
 		if err != nil {

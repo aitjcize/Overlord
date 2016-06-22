@@ -266,8 +266,8 @@ class Ghost(object):
       sock.settimeout(_CONNECT_TIMEOUT)
       sock.connect((host, port))
       return True
-    except ssl.SSLError as e:
-        return False
+    except ssl.SSLError:
+      return False
     except socket.error:  # Connect refused or timeout
       raise
     except Exception:
@@ -277,12 +277,12 @@ class Ghost(object):
     logging.info('Upgrade: initiating upgrade sequence...')
 
     try:
-        https_enabled = self.TLSEnabled(
-            self._connected_addr[0], _OVERLORD_HTTP_PORT)
+      https_enabled = self.TLSEnabled(self._connected_addr[0],
+                                      _OVERLORD_HTTP_PORT)
     except socket.error:
-        logging.error('Upgrade: failed to connect to Overlord HTTP server, '
-                      'abort')
-        return
+      logging.error('Upgrade: failed to connect to Overlord HTTP server, '
+                    'abort')
+      return
 
     if self._tls_settings.Enabled() and not https_enabled:
       logging.error('Upgrade: TLS enforced but found Overlord HTTP server '
@@ -1042,8 +1042,11 @@ class Ghost(object):
         logging.info('Trying %s:%d ...', *addr)
         self.Reset()
 
-        # Check if server has TLS enabled
-        self._tls_settings.SetEnabled(self.TLSEnabled(*addr))
+        # Check if server has TLS enabled.
+        # Only control channel needs to determine if TLS is enabled. Other mode
+        # should use the TLSSettings passed in when it was spawned.
+        if self._mode == Ghost.AGENT:
+          self._tls_settings.SetEnabled(self.TLSEnabled(*addr))
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(_CONNECT_TIMEOUT)
