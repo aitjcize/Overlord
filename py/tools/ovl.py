@@ -34,6 +34,7 @@ import time
 import tty
 import urllib2
 import urlparse
+import unicodedata  # required by pyinstaller, pylint: disable=W0611
 
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
 from jsonrpclib.config import Config
@@ -98,7 +99,9 @@ SSL Certificate verification failed."""
 
 def GetVersionDigest():
   """Return the sha1sum of the current executing script."""
-  with open(__file__, 'r') as f:
+  # Because of how pyinstaller works internally, __file__ does not work here.
+  # We use sys.argv[0] as script file here instead.
+  with open(sys.argv[0], 'r') as f:
     return hashlib.sha1(f.read()).hexdigest()
 
 
@@ -350,8 +353,8 @@ class OverlordClientDaemon(object):
       sock.settimeout(_CONNECT_TIMEOUT)
       sock.connect((self._state.host, self._state.port))
       return True
-    except ssl.SSLError as e:
-        return False
+    except ssl.SSLError:
+      return False
     except socket.error:  # Connect refused or timeout
       raise
     except Exception:
