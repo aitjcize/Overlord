@@ -99,9 +99,16 @@ SSL Certificate verification failed."""
 
 def GetVersionDigest():
   """Return the sha1sum of the current executing script."""
-  # Because of how pyinstaller works internally, __file__ does not work here.
-  # We use sys.argv[0] as script file here instead.
-  with open(sys.argv[0], 'r') as f:
+  # Check python script by default
+  filename = __file__
+
+  # If we are running from a frozen binary, we should calculate the checksum
+  # against that binary instead of the python script.
+  # See: https://pyinstaller.readthedocs.io/en/stable/runtime-information.html
+  if getattr(sys, 'frozen', False):
+    filename = sys.executable
+
+  with open(filename, 'r') as f:
     return hashlib.sha1(f.read()).hexdigest()
 
 
