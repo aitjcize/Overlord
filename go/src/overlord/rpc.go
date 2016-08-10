@@ -179,9 +179,6 @@ func (rpc *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 			n, err := rpc.Conn.Read(buf)
 			readChan <- buf[:n]
 			if err != nil {
-				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
-					continue
-				}
 				readErrChan <- err
 				return
 			}
