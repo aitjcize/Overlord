@@ -4,6 +4,9 @@
 
 GO=go
 FACTORY=$(CURDIR)/../../..
+BUILDDIR=$(FACTORY)/build
+PACKAGEDIR=$(BUILDDIR)/overlord
+PACKAGE_OUTPUT_PATH?=$(BUILDDIR)/overlord.tar.gz
 BINDIR=$(FACTORY)/go/bin
 GOPATH=$(FACTORY)/build/go:$(FACTORY)/go
 OVERLORD=overlord
@@ -32,6 +35,14 @@ overlordd: deps
 ghost: deps
 	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
 		$(OVERLORD)/cmd/$@)
+
+package: overlordd ghost
+	rm -rf $(PACKAGEDIR)
+	mkdir $(PACKAGEDIR)
+	cp -r app $(PACKAGEDIR)
+	cp -r $(foreach target,$^,$(BINDIR)/$(target)) $(PACKAGEDIR)
+	tar -C $(BUILDDIR) -zcf $(PACKAGE_OUTPUT_PATH) overlord
+	@echo "Please find the tarball at $(PACKAGE_OUTPUT_PATH)"
 
 clean:
 	rm -rf $(FACTORY)/go/pkg $(FACTORY)/go/bin
