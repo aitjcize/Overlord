@@ -41,6 +41,7 @@ package: overlordd ghost
 	mkdir $(PACKAGEDIR)
 	cp -r app $(PACKAGEDIR)
 	cp -r $(foreach target,$^,$(BINDIR)/$(target)) $(PACKAGEDIR)
+	cp setup.sh $(PACKAGEDIR)
 	tar -C $(BUILDDIR) -zcf $(PACKAGE_OUTPUT_PATH) overlord
 	@echo "Please find the tarball at $(PACKAGE_OUTPUT_PATH)"
 
