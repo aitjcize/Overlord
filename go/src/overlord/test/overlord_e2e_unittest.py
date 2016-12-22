@@ -7,7 +7,9 @@
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 import urllib
 
@@ -35,11 +37,18 @@ class TestOverlord(unittest.TestCase):
   def setUpClass(cls):
     # Build overlord, only do this once over all tests.
     basedir = os.path.dirname(__file__)
-    subprocess.call('make -C %s' % os.path.join(basedir, '..'), shell=True)
+    cls.bindir = tempfile.mkdtemp()
+    subprocess.call('make -C %s BINDIR=%s' % (
+        os.path.join(basedir, '..'), cls.bindir), shell=True)
+
+  @classmethod
+  def tearDownClass(cls):
+    if os.path.isdir(cls.bindir):
+      shutil.rmtree(cls.bindir)
 
   def setUp(self):
     self.basedir = os.path.dirname(__file__)
-    bindir = os.path.normpath(os.path.join(self.basedir, '../../../bin'))
+    bindir = self.__class__.bindir
     factorydir = os.path.normpath(os.path.join(self.basedir, '../../../..'))
 
     env = os.environ.copy()
