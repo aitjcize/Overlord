@@ -31,14 +31,16 @@ class CloseWebSocket(Exception):
 
 
 class TestOverlord(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    # Build overlord, only do this once over all tests.
+    basedir = os.path.dirname(__file__)
+    subprocess.call('make -C %s' % os.path.join(basedir, '..'), shell=True)
+
   def setUp(self):
     self.basedir = os.path.dirname(__file__)
     bindir = os.path.normpath(os.path.join(self.basedir, '../../../bin'))
     factorydir = os.path.normpath(os.path.join(self.basedir, '../../../..'))
-
-    # Build overlord
-    subprocess.call('make -C %s' % os.path.join(self.basedir, '..'),
-                    shell=True)
 
     env = os.environ.copy()
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')
@@ -57,20 +59,25 @@ class TestOverlord(unittest.TestCase):
     # Launch go implementation of ghost
     self.goghost = subprocess.Popen(['%s/ghost' % bindir,
                                      '-rand-mid', '-no-lan-disc',
-                                     '-no-rpc-server'], env=env)
+                                     '-no-rpc-server', '-tls=n'], env=env)
 
     # Launch python implementation of ghost
     self.pyghost = subprocess.Popen(['%s/py/tools/ghost.py' % factorydir,
                                      '--rand-mid', '--no-lan-disc',
-                                     '--no-rpc-server'], env=env)
+                                     '--no-rpc-server', '--tls=n'],
+                                    env=env)
 
-    def CheckClicent():
-      clients = self._GetJSON('/api/agents/list')
-      return len(clients) == 2
+    def CheckClient():
+      try:
+        clients = self._GetJSON('/api/agents/list')
+        return len(clients) == 2
+      except IOError:
+        # overlordd is not ready yet.
+        return False
 
     # Wait for clients to connect
     try:
-      sync_utils.WaitFor(CheckClicent, 30)
+      sync_utils.WaitFor(CheckClient, 30)
     except:
       self.tearDown()
       raise

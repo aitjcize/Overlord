@@ -22,6 +22,8 @@ var tlsCertFile = flag.String("tls-cert-file", "",
 	"file containing the server TLS certificate in PEM format")
 var tlsNoVerify = flag.Bool("tls-no-verify", false,
 	"do not verify certificate if TLS is enabled")
+var tlsModeFlag = flag.String("tls", "detect",
+	"specify 'y' or 'n' to force enable/disable TLS")
 var download = flag.String("download", "", "file to download")
 var reset = flag.Bool("reset", false, "reset ghost and reload all configs")
 
@@ -48,6 +50,15 @@ func main() {
 		finalMid = *mid
 	}
 
+	tlsMode := overlord.TlsDetect
+	if *tlsModeFlag == "detect" {
+		tlsMode = overlord.TlsDetect
+	} else if *tlsModeFlag == "y" {
+		tlsMode = overlord.TlsForceEnable
+	} else if *tlsModeFlag == "n" {
+		tlsMode = overlord.TlsForceDisable
+	}
+
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,
-	  !*tlsNoVerify, *propFile, *download, *reset)
+		!*tlsNoVerify, *propFile, *download, *reset, tlsMode)
 }

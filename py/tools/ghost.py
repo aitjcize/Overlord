@@ -187,7 +187,7 @@ class Ghost(object):
 
   def __init__(self, overlord_addrs, tls_settings=None, mode=AGENT, mid=None,
                sid=None, prop_file=None, terminal_sid=None, tty_device=None,
-               command=None, file_op=None, port=None):
+               command=None, file_op=None, port=None, tls_mode=None):
     """Constructor.
 
     Args:
@@ -207,6 +207,8 @@ class Ghost(object):
       file_op: a tuple (action, filepath, perm). action is either 'download' or
         'upload'. perm is the permission to set for the file.
       port: port number to forward.
+      tls_mode: can be [True, False, None]. if not None, skip detection of
+        TLS and assume whether server use TLS or not.
     """
     assert mode in [Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL, Ghost.FILE,
                     Ghost.FORWARD]
@@ -231,6 +233,7 @@ class Ghost(object):
     self._properties = {}
     self._register_status = DISCONNECTED
     self._reset = threading.Event()
+    self._tls_mode = tls_mode
 
     # RPC
     self._requests = {}
@@ -1031,7 +1034,7 @@ class Ghost(object):
         self._register_status = response['response']
         if response['response'] != SUCCESS:
           self._reset.set()
-          raise RuntimeError('Reigster: ' + response['response'])
+          raise RuntimeError('Register: ' + response['response'])
         else:
           logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
           self._connected_addr = non_local['addr']
@@ -1042,11 +1045,14 @@ class Ghost(object):
         logging.info('Trying %s:%d ...', *addr)
         self.Reset()
 
-        # Check if server has TLS enabled.
+        # Check if server has TLS enabled. Only check if self._tls_mode is
+        # None.
         # Only control channel needs to determine if TLS is enabled. Other mode
         # should use the TLSSettings passed in when it was spawned.
         if self._mode == Ghost.AGENT:
-          self._tls_settings.SetEnabled(self.TLSEnabled(*addr))
+          self._tls_settings.SetEnabled(
+              self.TLSEnabled(*addr) if self._tls_mode is None
+              else self._tls_mode)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(_CONNECT_TIMEOUT)
@@ -1269,6 +1275,9 @@ def main():
   parser.add_argument('--no-rpc-server', dest='rpc_server',
                       action='store_false', default=True,
                       help='disable RPC server')
+  parser.add_argument('--tls', dest='tls_mode', default='detect',
+                      choices=('y', 'n', 'detect'),
+                      help="specify 'y' or 'n' to force enable/disable TLS")
   parser.add_argument('--tls-cert-file', metavar='TLS_CERT_FILE',
                       dest='tls_cert_file', type=str, default=None,
                       help='file containing the server TLS certificate in PEM '
@@ -1305,8 +1314,10 @@ def main():
   prop_file = os.path.abspath(args.prop_file) if args.prop_file else None
 
   tls_settings = TLSSettings(args.tls_cert_file, not args.tls_no_verify)
+  tls_mode = args.tls_mode
+  tls_mode = {'y': True, 'n': False, 'detect': None}[tls_mode]
   g = Ghost(addrs, tls_settings, Ghost.AGENT, args.mid,
-            prop_file=prop_file)
+            prop_file=prop_file, tls_mode=tls_mode)
   g.Start(args.lan_disc, args.rpc_server)
 
 

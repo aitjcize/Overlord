@@ -50,6 +50,13 @@ const (
 	RandomMID = "##random_mid##" // Random Machine ID identifier
 )
 
+// TLS modes
+const (
+	TlsDetect = iota
+	TlsForceDisable
+	TlsForceEnable
+)
+
 // Terminal resize control
 const (
 	controlNone  = 255 // Control State None
@@ -206,6 +213,7 @@ type Ghost struct {
 	downloadQueue   chan downloadInfo      // Download queue
 	uploadContext   fileUploadContext      // File upload context
 	port            int                    // Port number to forward
+	tlsMode         int                    // Tls mode
 }
 
 // NewGhost creates a Ghost object.
@@ -285,6 +293,12 @@ func (ghost *Ghost) SetFileOp(operation, filename string, perm int) *Ghost {
 // SetModeForwardPort sets the port to forward.
 func (ghost *Ghost) SetModeForwardPort(port int) *Ghost {
 	ghost.port = port
+	return ghost
+}
+
+// SetTlsMode sets the mode of tls detection.
+func (ghost *Ghost) SetTlsMode(mode int) *Ghost {
+	ghost.tlsMode = mode
 	return ghost
 }
 
@@ -1149,10 +1163,20 @@ func (ghost *Ghost) Register() error {
 		// Only control channel needs to determine if TLS is enabled. Other mode
 		// should use the tlsSettings passed in when it was spawned.
 		if ghost.mode == ModeControl {
-			enabled, err := ghost.tlsEnabled(addr)
-			if err != nil {
-				continue
+			var enabled bool
+
+			switch ghost.tlsMode {
+			case TlsDetect:
+				enabled, err = ghost.tlsEnabled(addr)
+				if err != nil {
+					continue
+				}
+			case TlsForceEnable:
+				enabled = true
+			case TlsForceDisable:
+				enabled = false
 			}
+
 			ghost.tls.SetEnabled(enabled)
 		}
 
@@ -1507,7 +1531,7 @@ fail:
 // StartGhost starts the Ghost client.
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	tlsCertFile string, verify bool, propFile string, download string,
-	reset bool) {
+	reset bool, tlsMode int) {
 	var addrs []string
 
 	if reset {
@@ -1546,7 +1570,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 
 	g := NewGhost(addrs, tlsSettings, ModeControl, mid)
-	g.SetPropFile(propFile)
+	g.SetPropFile(propFile).SetTlsMode(tlsMode)
 	go g.Start(!noLanDisc, !noRPCServer)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
