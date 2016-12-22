@@ -15,9 +15,10 @@ from ws4py.client import WebSocketBaseClient
 
 import factory_common  # pylint: disable=W0611
 from cros.factory.utils import sync_utils
+from cros.factory.utils import net_utils
 
 
-_HOST = '127.0.0.1:9000'
+_HOST = '127.0.0.1'
 _INCREMENT = 42
 
 
@@ -42,8 +43,16 @@ class TestOverlord(unittest.TestCase):
     env = os.environ.copy()
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')
 
+    # set ports for overlord to bind
+    overlord_http_port = net_utils.GetUnusedPort()
+    self.host = '%s:%d' % (_HOST, overlord_http_port)
+    env['OVERLORD_PORT'] = str(net_utils.GetUnusedPort())
+    env['OVERLORD_LD_PORT'] = str(net_utils.GetUnusedPort())
+    env['OVERLORD_HTTP_PORT'] = str(overlord_http_port)
+    env['GHOST_RPC_PORT'] = str(net_utils.GetUnusedPort())
+
     # Launch overlord
-    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-noauth'])
+    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-noauth'], env=env)
 
     # Launch go implementation of ghost
     self.goghost = subprocess.Popen(['%s/ghost' % bindir,
@@ -75,7 +84,7 @@ class TestOverlord(unittest.TestCase):
     self.pyghost.kill()
 
   def _GetJSON(self, path):
-    return json.loads(urllib.urlopen('http://' + _HOST + path).read())
+    return json.loads(urllib.urlopen('http://' + self.host + path).read())
 
   def testWebAPI(self):
     # Test /api/app/list
@@ -119,7 +128,7 @@ class TestOverlord(unittest.TestCase):
     assert len(clients) > 0
 
     for client in clients:
-      ws = TestClient('ws://' + _HOST + '/api/agent/shell/%s' %
+      ws = TestClient('ws://' + self.host + '/api/agent/shell/%s' %
                       urllib.quote(client['mid']) + '?command=' +
                       urllib.quote('uname -r'))
       ws.connect()
@@ -171,7 +180,7 @@ class TestOverlord(unittest.TestCase):
     assert len(clients) > 0
 
     for client in clients:
-      ws = TestClient('ws://' + _HOST + '/api/agent/tty/%s' %
+      ws = TestClient('ws://' + self.host + '/api/agent/tty/%s' %
                       urllib.quote(client['mid']))
       ws.connect()
       try:

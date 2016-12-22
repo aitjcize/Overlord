@@ -34,8 +34,9 @@ import (
 	"unsafe"
 )
 
+var ghostRPCStubPort = GetenvInt("GHOST_RPC_PORT", 4499)
+
 const (
-	ghostRPCStubPort     = 4499
 	defaultShell         = "/bin/bash"
 	pingInterval         = 10 * time.Second
 	readTimeout          = 3 * time.Second

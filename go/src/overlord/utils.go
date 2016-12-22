@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -53,4 +54,13 @@ func (p *PollableProcess) Poll() (uint32, error) {
 		return uint32(wstatus), nil
 	}
 	return 0, errors.New("Wait4 failed")
+}
+
+func GetenvInt(key string, defaultValue int) int {
+	env := os.Getenv(key)
+	if value, err := strconv.Atoi(env); err != nil {
+		return defaultValue
+	} else {
+		return value
+	}
 }
