@@ -164,6 +164,7 @@ class TestOverlord(unittest.TestCase):
         self.state = self.NONE
         self.answer = 0
         self.test_run = False
+        self.buffer = ''
 
       def handshake_ok(self):
         pass
@@ -173,8 +174,16 @@ class TestOverlord(unittest.TestCase):
           raise RuntimeError('test exit before being run: %s' % reason)
 
       def received_message(self, msg):
+        if msg.is_text:
+          # Ignore control messages.
+          return
+
+        self.buffer += msg.data
+        if '\r\n' not in self.buffer:
+          return
+
         self.test_run = True
-        msg_text = msg.data
+        msg_text, self.buffer = self.buffer.split('\r\n', 1)
         if self.state == self.NONE:
           if msg_text.startswith('TEST-SHELL-CHALLENGE'):
             self.state = self.PROMPT
@@ -190,7 +199,7 @@ class TestOverlord(unittest.TestCase):
           elif msg_text and int(msg_text) == self.answer:
             pass
           else:
-            raise TestError('Unexpected response: %s' % msg_text)
+            raise TestError('Unexpected response: %r' % msg_text)
 
     clients = self._GetJSON('/api/agents/list')
     assert len(clients) > 0
