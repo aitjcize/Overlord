@@ -45,7 +45,10 @@ func (auth *basicAuthHTTPHandlerDecorator) Unauthorized(w http.ResponseWriter, r
 		if _, ok := auth.failedCount[ip]; !ok {
 			auth.failedCount[ip] = 0
 		}
-		auth.failedCount[ip]++
+		if ip != "127.0.0.1" {
+			// Only count for non-trusted IP.
+			auth.failedCount[ip]++
+		}
 
 		log.Printf("BasicAuth: IP %s failed to login, count: %d\n", ip,
 			auth.failedCount[ip])
