@@ -311,6 +311,9 @@ func (ovl *Overlord) ServSocket(port int) {
 		}
 	}
 
+	// Initialize socket IO server
+	ovl.InitSocketIOServer()
+
 	ln, err = net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Unable to listen at %s: %s\n", addr, err)
@@ -898,9 +901,6 @@ func (ovl *Overlord) ServHTTP(port int) {
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
 		ovl.noAuth)
-
-	// Initialize socket IO server
-	ovl.InitSocketIOServer()
 
 	// Register the request handlers and start the WebServer.
 	r := mux.NewRouter()
