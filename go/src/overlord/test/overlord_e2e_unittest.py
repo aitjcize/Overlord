@@ -1,6 +1,4 @@
 #!/usr/bin/python -u
-# -*- coding: utf-8 -*-
-#
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,9 +13,9 @@ import urllib
 
 from ws4py.client import WebSocketBaseClient
 
-import factory_common  # pylint: disable=W0611
-from cros.factory.utils import sync_utils
+import factory_common  # pylint: disable=unused-import
 from cros.factory.utils import net_utils
+from cros.factory.utils import sync_utils
 
 
 _HOST = '127.0.0.1'
@@ -125,35 +123,25 @@ class TestOverlord(unittest.TestCase):
     class TestClient(WebSocketBaseClient):
       def __init__(self, *args, **kwargs):
         super(TestClient, self).__init__(*args, **kwargs)
-        self.answer = subprocess.check_output(['uname', '-r'])
-        self.test_run = False
-
-      def closed(self, code, reason=None):
-        if not self.test_run:
-          raise RuntimeError('test exit before being run: %s' % reason)
+        self.message = ''
 
       def handshake_ok(self):
         pass
 
       def received_message(self, msg):
-        self.test_run = True
-        assert msg.data == self.answer
-        raise CloseWebSocket
+        self.message += msg.data
 
     clients = self._GetJSON('/api/agents/list')
-    assert len(clients) > 0
+    self.assertTrue(clients)
+    answer = subprocess.check_output(['uname', '-r'])
 
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/shell/%s' %
                       urllib.quote(client['mid']) + '?command=' +
                       urllib.quote('uname -r'))
       ws.connect()
-      try:
-        ws.run()
-      except TestError as e:
-        raise e
-      except CloseWebSocket:
-        ws.close()
+      ws.run()
+      self.assertEqual(ws.message, answer)
 
   def testTerminalCommand(self):
     class TestClient(WebSocketBaseClient):
