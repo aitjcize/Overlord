@@ -53,12 +53,12 @@ class TestOverlord(unittest.TestCase):
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')
 
     # set ports for overlord to bind
-    overlord_http_port = net_utils.GetUnusedPort()
+    overlord_http_port = net_utils.FindUnusedPort()
     self.host = '%s:%d' % (_HOST, overlord_http_port)
-    env['OVERLORD_PORT'] = str(net_utils.GetUnusedPort())
-    env['OVERLORD_LD_PORT'] = str(net_utils.GetUnusedPort())
+    env['OVERLORD_PORT'] = str(net_utils.FindUnusedPort())
+    env['OVERLORD_LD_PORT'] = str(net_utils.FindUnusedPort())
     env['OVERLORD_HTTP_PORT'] = str(overlord_http_port)
-    env['GHOST_RPC_PORT'] = str(net_utils.GetUnusedPort())
+    env['GHOST_RPC_PORT'] = str(net_utils.FindUnusedPort())
 
     # Launch overlord
     self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-noauth'], env=env)
