@@ -85,7 +85,7 @@ class TestOverlord(unittest.TestCase):
     # Wait for clients to connect
     try:
       sync_utils.WaitFor(CheckClient, 30)
-    except:
+    except Exception:
       self.tearDown()
       raise
 
