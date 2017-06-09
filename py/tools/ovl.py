@@ -367,7 +367,7 @@ class OverlordClientDaemon(object):
     except Exception:
       return False  # For whatever reason above failed, assume False
 
-  def _CheckTLSCertificate(self):
+  def _CheckTLSCertificate(self, check_hostname=True):
     """Check TLS certificate.
 
     Returns:
@@ -396,7 +396,7 @@ class OverlordClientDaemon(object):
     # Try with already saved certificate, if any.
     tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
     tls_context.verify_mode = ssl.CERT_REQUIRED
-    tls_context.check_hostname = True
+    tls_context.check_hostname = check_hostname
 
     tls_cert_path = GetTLSCertPath(self._state.host)
     if os.path.exists(tls_cert_path):
@@ -406,7 +406,8 @@ class OverlordClientDaemon(object):
     return _DoConnect(tls_context)
 
   def Connect(self, host, port=_OVERLORD_HTTP_PORT, ssh_pid=None,
-              username=None, password=None, orig_host=None):
+              username=None, password=None, orig_host=None,
+              check_hostname=True):
     self._state.username = username
     self._state.password = password
     self._state.host = host
@@ -419,7 +420,7 @@ class OverlordClientDaemon(object):
 
     tls_enabled = self._TLSEnabled()
     if tls_enabled:
-      result = self._CheckTLSCertificate()
+      result = self._CheckTLSCertificate(check_hostname)
       if not result:
         if self._state.ssl_self_signed:
           return ('SSLCertificateChanged', ssl.get_server_certificate(
@@ -951,7 +952,10 @@ class OverlordCLIClient(object):
       Arg('-u', '--user', dest='user', default=None,
           type=str, help='Overlord HTTP auth username'),
       Arg('-w', '--passwd', dest='passwd', default=None, type=str,
-          help='Overlord HTTP auth password')])
+          help='Overlord HTTP auth password'),
+      Arg('-i', '--no-check-hostname', dest='check_hostname',
+          default=True, action='store_false',
+          help='Ignore SSL cert hostname check')])
   def Connect(self, args):
     ssh_pid = None
     host = args.host
@@ -977,7 +981,8 @@ class OverlordCLIClient(object):
             args.passwd = getpass.getpass('Password: ')
 
         ret = self._server.Connect(host, args.port, ssh_pid, args.user,
-                                   args.passwd, orig_host)
+                                   args.passwd, orig_host,
+                                   args.check_hostname)
         if isinstance(ret, list):
           if ret[0].startswith('SSL'):
             cert_pem = ret[1]
