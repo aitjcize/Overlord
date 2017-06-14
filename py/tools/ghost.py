@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-#
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -423,7 +421,7 @@ class Ghost(object):
 
   def GetShopfloorIP(self):
     try:
-      import factory_common  # pylint: disable=W0612
+      import factory_common  # pylint: disable=unused-variable
       from cros.factory.test import shopfloor
 
       url = shopfloor.get_server_url()
@@ -463,7 +461,7 @@ class Ghost(object):
 
     # Try factory device id
     try:
-      import factory_common  # pylint: disable=W0612
+      import factory_common  # pylint: disable=unused-variable
       from cros.factory.test import event_log
       with open(event_log.DEVICE_ID_PATH) as f:
         return f.read().strip()
@@ -472,13 +470,11 @@ class Ghost(object):
 
     # Try factory device data
     try:
-      p = subprocess.Popen('factory device-data | grep mlb_serial_number | '
-                           'cut -d " " -f 2', stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, shell=True)
-      stdout, unused_stderr = p.communicate()
-      if stdout == '':
-        raise RuntimeError('empty mlb number')
-      return stdout.strip()
+      import factory_common  # pylint: disable=unused-variable
+      from cros.factory.test import state
+      mlb_serial_number = state.GetSerialNumber(state.KEY_MLB_SERIAL_NUMBER)
+      if mlb_serial_number:
+        return mlb_serial_number
     except Exception:
       pass
 
@@ -504,7 +500,7 @@ class Ghost(object):
     except Exception:
       pass
 
-    raise RuntimeError('can\'t generate machine ID')
+    raise RuntimeError("can't generate machine ID")
 
   def GetProcessWorkingDirectory(self, pid):
     if self._platform == 'Linux':
