@@ -910,11 +910,11 @@ class OverlordCLIClient(object):
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     sio = StringIO.StringIO()
-    ws = ShellWebSocketClient(self._state, sio,
-                              scheme + '%s:%d/api/agent/shell/%s?command=%s' %
-                              (self._state.host, self._state.port,
-                               self._selected_mid, urllib2.quote(command)),
-                              headers=headers)
+    ws = ShellWebSocketClient(
+        self._state, sio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
+            self._state.host, self._state.port,
+            urllib2.quote(self._selected_mid), urllib2.quote(command)),
+        headers=headers)
     ws.connect()
     ws.run()
     return sio.getvalue()
@@ -1098,19 +1098,21 @@ class OverlordCLIClient(object):
                                      self._state.password))
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
-    if len(command) == 0:
-      ws = TerminalWebSocketClient(self._state, self._selected_mid,
-                                   self._escape,
-                                   scheme + '%s:%d/api/agent/tty/%s' %
-                                   (self._state.host, self._state.port,
-                                    self._selected_mid), headers=headers)
-    else:
+    if command:
       cmd = ' '.join(command)
-      ws = ShellWebSocketClient(self._state, sys.stdout,
-                                scheme + '%s:%d/api/agent/shell/%s?command=%s' %
-                                (self._state.host, self._state.port,
-                                 self._selected_mid, urllib2.quote(cmd)),
-                                headers=headers)
+      ws = ShellWebSocketClient(
+          self._state, sys.stdout,
+          scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
+              self._state.host, self._state.port,
+              urllib2.quote(self._selected_mid), urllib2.quote(cmd)),
+          headers=headers)
+    else:
+      ws = TerminalWebSocketClient(
+          self._state, self._selected_mid, self._escape,
+          scheme + '%s:%d/api/agent/tty/%s' % (
+              self._state.host, self._state.port,
+              urllib2.quote(self._selected_mid)),
+          headers=headers)
     try:
       ws.connect()
       ws.run()
@@ -1146,8 +1148,8 @@ class OverlordCLIClient(object):
 
       mode = '0%o' % (0x1FF & os.stat(src).st_mode)
       url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
-             (self._state.host, self._state.port, self._selected_mid, dst,
-              mode))
+             (self._state.host, self._state.port,
+              urllib2.quote(self._selected_mid), dst, mode))
       try:
         UrlOpen(self._state, url + '&filename=%s' % src_base)
       except urllib2.HTTPError as e:
@@ -1223,8 +1225,8 @@ class OverlordCLIClient(object):
         return
 
       url = ('%s:%d/api/agent/download/%s?filename=%s' %
-             (self._state.host, self._state.port, self._selected_mid,
-              urllib2.quote(src)))
+             (self._state.host, self._state.port,
+              urllib2.quote(self._selected_mid), urllib2.quote(src)))
       try:
         h = UrlOpen(self._state, url)
       except urllib2.HTTPError as e:
@@ -1333,8 +1335,9 @@ class OverlordCLIClient(object):
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
           self._state, conn,
-          scheme + '%s:%d/api/agent/forward/%s?port=%d' %
-          (self._state.host, self._state.port, self._selected_mid, remote),
+          scheme + '%s:%d/api/agent/forward/%s?port=%d' % (
+              self._state.host, self._state.port,
+              urllib2.quote(self._selected_mid), remote),
           headers=headers)
       try:
         ws.connect()
