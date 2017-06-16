@@ -36,22 +36,15 @@ var LIGHT_CSS_MAP = {
 // which has display, lights, terminals, controls and logs.
 //
 // Usage:
-// A terminal description object would looks like the following in json:
+// A terminal description object that would be passed to app.addTerminal would
+// looks like the following in json:
 // {
-//   "name":"NUC",
-//   "mid":"ghost 1"
+//   "name": "NUC",
+//   "mid": "ghost 1",
 //   // @path attribute is optional, without @path, it means that we are
 //   // connecting to the fixture itself.
 //   "path": "some path"
 // }
-// Given @id as identifier, and @term as a terminal description object, to open
-// a terminal connection, you can use TerminalWindow:
-//   <TerminalWindow key={id} mid={term.mid} id={id} title={id}
-//       path={"/api/agent/tty/" + term.mid + extra}
-//       uploadPath={"/api/agent/upload/" + term.mid}
-//       app={this.props.app} progressBars={this.refs.uploadProgress}
-//       onControl={onControl} onClose={onClose} />
-//   where @extra = "?tty_device=" + term.path if term.path is defined.
 //
 // A client object would looks like the following in json:
 // {
@@ -85,14 +78,14 @@ var LIGHT_CSS_MAP = {
 //         },
 //         {
 //           "id": "dut-lid",
-//           "label": "DUT LID"
+//           "label": "DUT LID",
 //           "light": "light-toggle-off",
 //           // @cmd will be execute every @interval milliseconds, you can
 //           // output LIGHT[@id]='light-toggle-on' to change the light.
 //           "poll": {
 //             "cmd": "check_dut_exists -t lid",
 //             "interval": 20000
-//           },
+//           }
 //         }, ...
 //       ],
 //       // A list of terminals connected to this fixture, for example, there
@@ -104,9 +97,9 @@ var LIGHT_CSS_MAP = {
 //         },
 //         // @path_cmd will be used to get the path of device.
 //         {
-//           "name": "AP"
+//           "name": "AP",
 //           "path_cmd": "ls /dev/google/Ryu_debug-*/serial/AP 2>/dev/null",
-//         },
+//         }
 //       ],
 //       // A display section
 //       "display": {
@@ -118,7 +111,7 @@ var LIGHT_CSS_MAP = {
 //             // id: the name of data binding in the template
 //             "id": "version",
 //             // Will be called when the FixtureWidget is opened.
-//             "init_cmd": "get_version",
+//             "init_cmd": "get_version"
 //           },
 //           {
 //             "id": "status",
@@ -127,7 +120,7 @@ var LIGHT_CSS_MAP = {
 //             "poll": {
 //               "cmd": "get_status",
 //               "interval": 20000
-//             },
+//             }
 //           }, ...
 //         ]
 //       },
@@ -135,8 +128,8 @@ var LIGHT_CSS_MAP = {
 //       "controls": [
 //         // A command
 //         {
-//           "name": "Factory Restart"
-//           "command": "factory_restart",
+//           "name": "Factory Restart",
+//           "command": "factory_restart"
 //         },
 //         // A command that will be toggled between two state.
 //         {
@@ -147,7 +140,7 @@ var LIGHT_CSS_MAP = {
 //         },
 //         // A button that allow uploading a file, then execute a command
 //         {
-//           "name": "Update Tollkit",
+//           "name": "Update Toolkit",
 //           "type": "upload",
 //           "dest": "/tmp/install_factory_toolkit.run",
 //           // @command is optional, you can omit this if you don't need to
@@ -169,7 +162,7 @@ var LIGHT_CSS_MAP = {
 //           // of the command is the download filename.
 //           "filename": "/tmp/dmesg.log",
 //           // or (exclusively)
-//           "filename_cmd": "get_filename_cmd",
+//           "filename_cmd": "get_filename_cmd"
 //         },
 //         // A button that opens a link
 //         {
@@ -188,22 +181,22 @@ var LIGHT_CSS_MAP = {
 //           "name": "Fixture control"
 //           "group": [
 //             {
-//               "name": "whale close"
-//               "command": "whale close",
+//               "name": "whale close",
+//               "command": "whale close"
 //             },
 //             {
-//               "name": "whale open"
-//               "command": "whale open",
+//               "name": "whale open",
+//               "command": "whale open"
 //             },
 //             {
-//               "name": "io insertion"
-//               "command": "whale insert",
+//               "name": "io insertion",
+//               "command": "whale insert"
 //             },
 //             {
-//               "name": "charging"
-//               "command": "whale charge",
+//               "name": "charging",
+//               "command": "whale charge"
 //             }
-//           ],
+//           ]
 //         }
 //       ],
 //       // Path to the log files, FixtureWidget will keep polling the latest
@@ -218,7 +211,7 @@ var LIGHT_CSS_MAP = {
 //     "context": [
 //       "ui", "whale", ...
 //     ]
-//   },
+//   }
 // }
 var FixtureWidget = React.createClass({
   executeRemoteCmd: function (mid, cmd) {
