@@ -641,7 +641,7 @@ class Ghost(object):
 
         if self._sock in rd:
           buf = self._sock.Recv(_BUFSIZE)
-          if len(buf) == 0:
+          if not buf:
             raise RuntimeError('connection terminated')
           _ProcessBuffer(buf)
     except Exception as e:
@@ -689,7 +689,7 @@ class Ghost(object):
 
         if self._sock in rd:
           ret = self._sock.Recv(_BUFSIZE)
-          if len(ret) == 0:
+          if not ret:
             raise RuntimeError('connection terminated')
 
           try:
@@ -747,7 +747,7 @@ class Ghost(object):
       with open(self._file_op[1], 'rb') as f:
         while True:
           data = f.read(_BLOCK_SIZE)
-          if len(data) == 0:
+          if not data:
             break
           self._sock.Send(data)
     except Exception as e:
@@ -779,7 +779,7 @@ class Ghost(object):
           rd, unused_wd, unused_xd = select.select([self._sock], [], [])
           if self._sock in rd:
             buf = self._sock.Recv(_BLOCK_SIZE)
-            if len(buf) == 0:
+            if not buf:
               break
             f.write(buf)
     except socket.error as e:
@@ -809,13 +809,13 @@ class Ghost(object):
 
         if self._sock in rd:
           data = self._sock.Recv(_BUFSIZE)
-          if len(data) == 0:
+          if not data:
             raise RuntimeError('connection terminated')
           src_sock.send(data)
 
         if src_sock in rd:
           data = src_sock.recv(_BUFSIZE)
-          if len(data) == 0:
+          if not data:
             break
           self._sock.Send(data)
     except Exception as e:
@@ -991,7 +991,7 @@ class Ghost(object):
           data = self._sock.Recv(_BUFSIZE)
 
           # Socket is closed
-          if len(data) == 0:
+          if not data:
             break
 
           self.ParseMessage(data, self._register_status != SUCCESS)
@@ -1142,7 +1142,7 @@ class Ghost(object):
         except Queue.Empty:
           pass
         else:
-          if type(obj) is not str:
+          if not isinstance(obj, str):
             self._queue.put(obj)
           elif obj == 'pause':
             logging.info('LAN Discovery: paused')
@@ -1195,7 +1195,7 @@ class Ghost(object):
         except Queue.Empty:
           pass
         else:
-          if type(addr) == tuple and addr not in self._overlord_addrs:
+          if isinstance(addr, tuple) and addr not in self._overlord_addrs:
             logging.info('LAN Discovery: got overlord address %s:%d', *addr)
             self._overlord_addrs.append(addr)
 
