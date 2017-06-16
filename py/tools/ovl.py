@@ -1080,7 +1080,13 @@ class OverlordCLIClient(object):
         raise RuntimeError('select: selection out of range')
     else:
       if mid not in clients:
-        raise RuntimeError('select: client %s does not exist' % mid)
+        # Find a prefix match if no exact match found.
+        matched_mid = [x for x in clients if x.startswith(mid)]
+        if not matched_mid:
+          raise RuntimeError('select: client %s does not exist' % mid)
+        if len(matched_mid) > 1:
+          raise RuntimeError('select: multiple client matched %r' % mid)
+        mid = matched_mid[0]
 
     self._selected_mid = mid
     if store:
