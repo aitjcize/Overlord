@@ -98,6 +98,7 @@ var BaseApp = {
       return;
     }
 
+    // TODO(pihsun): Don't fetch the properties again if it's already in client.
     this.fetchProperties(client.mid, function (properties) {
       client.properties = properties;
 

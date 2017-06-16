@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
-#
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,7 +13,6 @@ import getpass
 import hashlib
 import httplib
 import json
-import jsonrpclib
 import logging
 import os
 import re
@@ -32,13 +29,15 @@ import termios
 import threading
 import time
 import tty
+import unicodedata  # required by pyinstaller, pylint: disable=unused-import
 import urllib2
 import urlparse
-import unicodedata  # required by pyinstaller, pylint: disable=W0611
 
-from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
+import jsonrpclib
 from jsonrpclib.config import Config
+from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
 from ws4py.client import WebSocketBaseClient
+import yaml
 
 
 _CERT_DIR = os.path.expanduser('~/.config/ovl')
@@ -443,8 +442,8 @@ class OverlordClientDaemon(object):
     if time.time() - self._state.last_list <= _LIST_CACHE_TIMEOUT:
       return self._state.listing
 
-    mids = [client['mid'] for client in self._GetJSON('/api/agents/list')]
-    self._state.listing = sorted(list(set(mids)))
+    client_list = self._GetJSON('/api/agents/list')
+    self._state.listing = {client['mid']: client for client in client_list}
     self._state.last_list = time.time()
     return self._state.listing
 
@@ -655,7 +654,7 @@ def Command(command, help_msg=None, args=None):
   def WrapFunc(func):
     def Wrapped(*args, **kwargs):
       return func(*args, **kwargs)
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     Wrapped.__arg_attr = {'command': command, 'help': help_msg, 'args': args}
     return Wrapped
   return WrapFunc
@@ -669,7 +668,8 @@ def ParseMethodSubCommands(cls):
   """
   for unused_key, method in cls.__dict__.iteritems():
     if hasattr(method, '__arg_attr'):
-      cls.SUBCOMMANDS.append(method.__arg_attr)  # pylint: disable=W0212
+      # pylint: disable=protected-access
+      cls.SUBCOMMANDS.append(method.__arg_attr)
   return cls
 
 
@@ -749,7 +749,7 @@ class OverlordCLIClient(object):
     if command == 'select':
       self.SelectClient(args)
     elif command == 'ls':
-      self.ListClients()
+      self.ListClients(args)
     elif command == 'shell':
       command = sys.argv[sys.argv.index('shell') + 1:]
       self.Shell(command)
@@ -1054,10 +1054,17 @@ class OverlordCLIClient(object):
     if self._state.ssh_pid is not None:
       KillGraceful(self._state.ssh_pid)
 
-  @Command('ls', 'list all clients')
-  def ListClients(self):
-    for client in self._server.Clients():
-      print(client)
+  @Command('ls', 'list all clients', [
+      Arg('-v', '--verbose', default=False, action='store_true',
+          help='Print properties of each client.')
+  ])
+  def ListClients(self, args):
+    if args.verbose:
+      for client in self._server.Clients().itervalues():
+        print(yaml.safe_dump(client, default_flow_style=False))
+    else:
+      for mid in self._server.Clients():
+        print(mid)
 
   @Command('select', 'select default client', [
       Arg('mid', metavar='mid', nargs='?', default=None)])

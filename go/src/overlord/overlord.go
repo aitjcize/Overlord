@@ -469,8 +469,9 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		ovl.agentsMu.Lock()
 		for _, agent := range ovl.agents {
 			data = append(data, map[string]interface{}{
-				"mid": agent.Mid,
-				"sid": agent.Sid,
+				"mid":        agent.Mid,
+				"sid":        agent.Sid,
+				"properties": agent.Properties,
 			})
 		}
 		ovl.agentsMu.Unlock()
