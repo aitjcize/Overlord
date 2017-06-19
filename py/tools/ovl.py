@@ -553,6 +553,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     t.start()
 
   def closed(self, code, reason=None):
+    del code, reason  # Unused.
     termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
     print('Connection to %s closed.' % self._mid)
 
@@ -581,7 +582,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
         while True:
           data = sys.stdin.read(1)
 
-          if len(data) == 0:
+          if not data:
             self.send(_STDIN_CLOSED * 2)
             break
           self.send(data, binary=True)
@@ -620,7 +621,7 @@ class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
             break
           if self._sock in rd:
             data = self._sock.recv(_BUFSIZ)
-            if len(data) == 0:
+            if not data:
               self.close()
               break
             self.send(data, binary=True)
@@ -634,6 +635,7 @@ class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
     t.start()
 
   def closed(self, code, reason=None):
+    del code, reason  # Unused.
     self._stop.set()
     sys.exit(0)
 
@@ -1243,7 +1245,7 @@ class OverlordCLIClient(object):
 
         while True:
           data = h.read(_BUFSIZ)
-          if len(data) == 0:
+          if not data:
             break
           downloaded_size += len(data)
           pbar.SetProgress(float(downloaded_size) * 100 / total_size,
@@ -1299,7 +1301,7 @@ class OverlordCLIClient(object):
   def Forward(self, args):
     if args.list_all:
       max_len = 10
-      if len(self._state.forwards):
+      if self._state.forwards:
         max_len = max([len(v[0]) for v in self._state.forwards.values()])
 
       print('%-*s   %-8s  %-8s' % (max_len, 'Client', 'Remote', 'Local'))
