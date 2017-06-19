@@ -442,8 +442,7 @@ class OverlordClientDaemon(object):
     if time.time() - self._state.last_list <= _LIST_CACHE_TIMEOUT:
       return self._state.listing
 
-    client_list = self._GetJSON('/api/agents/list')
-    self._state.listing = {client['mid']: client for client in client_list}
+    self._state.listing = self._GetJSON('/api/agents/list')
     self._state.last_list = time.time()
     return self._state.listing
 
@@ -901,7 +900,8 @@ class OverlordCLIClient(object):
         raise RuntimeError('No client is selected')
       self._selected_mid = self._state.selected_mid
 
-    if self._selected_mid not in self._server.Clients():
+    if not any(client['mid'] == self._selected_mid
+               for client in self._server.Clients()):
       raise RuntimeError('client %s disappeared' % self._selected_mid)
 
   def CheckOutput(self, command):
@@ -1054,46 +1054,73 @@ class OverlordCLIClient(object):
     if self._state.ssh_pid is not None:
       KillGraceful(self._state.ssh_pid)
 
-  @Command('ls', 'list all clients', [
+  def _FilterClients(self, clients, prop_filters, mid=None):
+    def _ClientPropertiesMatch(client, key, regex):
+      try:
+        return bool(re.search(regex, client['properties'][key]))
+      except KeyError:
+        return False
+
+    for prop_filter in prop_filters:
+      key, sep, regex = prop_filter.partition('=')
+      if not sep:
+        # The filter doesn't contains =.
+        raise ValueError('Invalid filter condition %r' % filter)
+      clients = [c for c in clients if _ClientPropertiesMatch(c, key, regex)]
+
+    if mid is not None:
+      client = next((c for c in clients if c['mid'] == mid), None)
+      if client:
+        return [client]
+      clients = [c for c in clients if c['mid'].startswith(mid)]
+    return clients
+
+  @Command('ls', 'list clients', [
+      Arg('-f', '--filter', default=[], dest='filters', action='append',
+          help=('Conditions to filter clients by properties. '
+                'Should be in form "key=regex", where regex is the regular '
+                'expression that should be found in the value. '
+                'Multiple --filter arguments would be ANDed.')),
       Arg('-v', '--verbose', default=False, action='store_true',
           help='Print properties of each client.')
   ])
   def ListClients(self, args):
-    if args.verbose:
-      for client in self._server.Clients().itervalues():
+    clients = self._FilterClients(self._server.Clients(), args.filters)
+    for client in clients:
+      if args.verbose:
         print(yaml.safe_dump(client, default_flow_style=False))
-    else:
-      for mid in self._server.Clients():
-        print(mid)
+      else:
+        print(client['mid'])
 
   @Command('select', 'select default client', [
+      Arg('-f', '--filter', default=[], dest='filters', action='append',
+          help=('Conditions to filter clients by properties. '
+                'Should be in form "key=regex", where regex is the regular '
+                'expression that should be found in the value. '
+                'Multiple --filter arguments would be ANDed.')),
       Arg('mid', metavar='mid', nargs='?', default=None)])
   def SelectClient(self, args=None, store=True):
-    clients = self._server.Clients()
-
     mid = args.mid if args is not None else None
-    if mid is None:
+    clients = self._FilterClients(self._server.Clients(), args.filters, mid=mid)
+
+    if not clients:
+      raise RuntimeError('select: client not found')
+    elif len(clients) == 1:
+      mid = clients[0]['mid']
+    else:
+      # This case would not happen when args.mid is specified.
       print('Select from the following clients:')
       for i, client in enumerate(clients):
-        print('    %d. %s' % (i + 1, client))
+        print('    %d. %s' % (i + 1, client['mid']))
 
       print('\nSelection: ', end='')
       try:
         choice = int(raw_input()) - 1
-        mid = clients[choice]
+        mid = clients[choice]['mid']
       except ValueError:
         raise RuntimeError('select: invalid selection')
       except IndexError:
         raise RuntimeError('select: selection out of range')
-    else:
-      if mid not in clients:
-        # Find a prefix match if no exact match found.
-        matched_mid = [x for x in clients if x.startswith(mid)]
-        if not matched_mid:
-          raise RuntimeError('select: client %s does not exist' % mid)
-        if len(matched_mid) > 1:
-          raise RuntimeError('select: multiple client matched %r' % mid)
-        mid = matched_mid[0]
 
     self._selected_mid = mid
     if store:
