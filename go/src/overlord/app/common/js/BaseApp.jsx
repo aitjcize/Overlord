@@ -46,12 +46,19 @@ var BaseApp = {
     }
     return this.state.midPattern.test(client.mid);
   },
+  _clientDisplayFilter: function (client) {
+    if (typeof(this.state.displayPattern) == "undefined") {
+      return true;
+    }
+    return this.state.displayPattern.test(displayClient(client));
+  },
   getInitialState: function () {
     this.onNewClientHandlers = [];
     return {
       clients: [],
       midPattern: undefined,
-      clientFilters: [this._clientMidFilter]
+      displayPattern: undefined,
+      clientFilters: [this._clientMidFilter, this._clientDisplayFilter]
     };
   },
   componentDidMount: function () {
@@ -177,6 +184,12 @@ var BaseApp = {
   setMidFilterPattern: function (pattern) {
     if (typeof(pattern) != "undefined") {
       this.setState({midPattern: new RegExp(pattern, "i")});
+    }
+  },
+  // See @this._clientDisplayFilter.
+  setDisplayFilterPattern: function (pattern) {
+    if (typeof(pattern) != "undefined") {
+      this.setState({displayPattern: new RegExp(pattern, "i")});
     }
   },
   isClientInList: function (target_list, client) {

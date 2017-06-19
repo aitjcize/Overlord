@@ -171,7 +171,7 @@ var ClientBox = React.createClass({
 
 var FilterInput = React.createClass({
   onKeyUp: function (event) {
-    this.props.app.setMidFilterPattern(this.refs.filter.value);
+    this.props.app.setDisplayFilterPattern(this.refs.filter.value);
   },
   render: function () {
     return (
@@ -191,7 +191,7 @@ var ClientList = React.createClass({
           this.props.data.map(function (item) {
             return (
               <ClientInfo key={item.mid} data={item} app={this.props.app}>
-                {abbr(item.mid, 36)}
+                {displayClient(item)}
               </ClientInfo>
               );
           }.bind(this))
@@ -212,7 +212,7 @@ var RecentList = React.createClass({
               this.props.data.map(function (item) {
                 return (
                   <ClientInfo key={item.mid} data={item} app={this.props.app}>
-                    {abbr(item.mid, 36)}
+                    {displayClient(item)}
                   </ClientInfo>
                   );
               }.bind(this))

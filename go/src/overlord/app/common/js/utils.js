@@ -55,3 +55,12 @@ function getRemoteCmdOutput(mid, cmd) {
   };
   return deferred.promise();
 }
+
+function displayClient(client) {
+  var prefix = '';
+  if (typeof(client.properties) != 'undefined' &&
+      typeof(client.properties.active_test_list) != 'undefined') {
+    prefix = '[' + client.properties.active_test_list + '] ';
+  }
+  return prefix + client.mid;
+}

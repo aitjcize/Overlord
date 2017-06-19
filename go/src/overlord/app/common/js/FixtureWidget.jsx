@@ -281,17 +281,17 @@ var FixtureWidget = React.createClass({
     var display = ui.display && (
           <Display ref="display" client={client} fixture={this} />
         ) || "";
-    var lights = ui.lights && (
+    var lights = ui.lights && ui.lights.length > 0 && (
           <Lights ref="lights" client={client} fixture={this} />
         ) || "";
-    var terminals = ui.terminals && (
+    var terminals = ui.terminals && ui.terminals.length > 0 && (
           <Terminals client={client} app={this.props.app} fixture={this} />
         ) || "";
-    var controls = ui.controls && (
+    var controls = ui.controls && ui.controls.length > 0 && (
           <Controls ref="controls" client={client} fixture={this}
            progressBars={this.props.progressBars} />
         ) || "";
-    var auxlogs = ui.logs && (
+    var auxlogs = ui.logs && ui.logs.length > 0 && (
           <AuxLogs client={client} fixture={this} />
         ) || "";
     return (
