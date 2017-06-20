@@ -5,7 +5,7 @@
 
 """This is a tool for Overlord fixtures, the script will keep updating light
 status by sending corresponding commands. The commands are read from a
-configuration file, default is "/usr/local/factory/properties.json". The
+configuration file, default is "/run/factory/goofy_ghost.json". The
 configuration file should specify a list of commands to execute and the polling
 interval for each command.
 """
@@ -13,10 +13,10 @@ interval for each command.
 import argparse
 import json
 import logging
+from Queue import PriorityQueue
 import subprocess
 import sys
 import time
-from Queue import PriorityQueue
 
 
 def main():
@@ -24,9 +24,9 @@ def main():
   parser.add_argument(
       '-c',
       '--config',
-      default='/usr/local/factory/properties.json',
+      default='/run/factory/goofy_ghost.json',
       help=('Specify path to the config file, '
-            'default file: /usr/local/factory/properties.json'))
+            'default file: /run/factory/goofy_ghost.json'))
 
   args = parser.parse_args()
 
