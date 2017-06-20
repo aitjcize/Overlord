@@ -311,9 +311,6 @@ func (ovl *Overlord) ServSocket(port int) {
 		}
 	}
 
-	// Initialize socket IO server
-	ovl.InitSocketIOServer()
-
 	ln, err = net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Unable to listen at %s: %s\n", addr, err)
@@ -429,8 +426,8 @@ func (a byMid) Less(i, j int) bool {
 	return a[i]["mid"].(string) < a[j]["mid"].(string)
 }
 
-// ServHTTP is the Web server main routine.
-func (ovl *Overlord) ServHTTP(port int) {
+// RegisterHTTPHandlers register handlers for http routes.
+func (ovl *Overlord) RegisterHTTPHandlers() {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  bufferSize,
 		WriteBufferSize: bufferSize,
@@ -439,8 +436,6 @@ func (ovl *Overlord) ServHTTP(port int) {
 			return true
 		},
 	}
-
-	appDir := ovl.GetAppDir()
 
 	// Helper function for writing error message to WebSocket
 	WebSocketSendError := func(ws *websocket.Conn, err string) {
@@ -898,11 +893,16 @@ func (ovl *Overlord) ServHTTP(port int) {
 		}
 	}
 
+	// Initialize socket IO server
+	ovl.InitSocketIOServer()
+
+	appDir := ovl.GetAppDir()
+
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
 		ovl.noAuth)
 
-	// Register the request handlers and start the WebServer.
+	// Register the request handlers.
 	r := mux.NewRouter()
 
 	r.HandleFunc("/api/apps/list", AppsListHandler)
@@ -952,8 +952,12 @@ func (ovl *Overlord) ServHTTP(port int) {
 		http.Handle(prefix, http.StripPrefix(prefix,
 			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
 	}
+}
 
+// ServHTTP is the Web server main routine.
+func (ovl *Overlord) ServHTTP(port int) {
 	webServerAddr := fmt.Sprintf("%s:%d", webServerHost, port)
+	var err error
 	if ovl.certs != nil {
 		err = http.ListenAndServeTLS(webServerAddr, ovl.certs.Cert,
 			ovl.certs.Key, nil)
@@ -1030,6 +1034,7 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 
 // Serv is the main routine for starting all the overlord sub-server.
 func (ovl *Overlord) Serv() {
+	ovl.RegisterHTTPHandlers()
 	go ovl.ServSocket(OverlordPort)
 	go ovl.ServHTTP(OverlordHTTPPort)
 	go ovl.StartUDPBroadcast(OverlordLDPort)
