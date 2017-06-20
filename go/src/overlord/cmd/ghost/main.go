@@ -50,13 +50,13 @@ func main() {
 		finalMid = *mid
 	}
 
-	tlsMode := overlord.TlsDetect
+	tlsMode := overlord.TLSDetect
 	if *tlsModeFlag == "detect" {
-		tlsMode = overlord.TlsDetect
+		tlsMode = overlord.TLSDetect
 	} else if *tlsModeFlag == "y" {
-		tlsMode = overlord.TlsForceEnable
+		tlsMode = overlord.TLSForceEnable
 	} else if *tlsModeFlag == "n" {
-		tlsMode = overlord.TlsForceDisable
+		tlsMode = overlord.TLSForceDisable
 	}
 
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,

@@ -52,9 +52,9 @@ const (
 
 // TLS modes
 const (
-	TlsDetect = iota
-	TlsForceDisable
-	TlsForceEnable
+	TLSDetect = iota
+	TLSForceDisable
+	TLSForceEnable
 )
 
 // Terminal resize control
@@ -213,7 +213,7 @@ type Ghost struct {
 	downloadQueue   chan downloadInfo      // Download queue
 	uploadContext   fileUploadContext      // File upload context
 	port            int                    // Port number to forward
-	tlsMode         int                    // Tls mode
+	tlsMode         int                    // TLS mode
 }
 
 // NewGhost creates a Ghost object.
@@ -296,8 +296,8 @@ func (ghost *Ghost) SetModeForwardPort(port int) *Ghost {
 	return ghost
 }
 
-// SetTlsMode sets the mode of tls detection.
-func (ghost *Ghost) SetTlsMode(mode int) *Ghost {
+// SetTLSMode sets the mode of tls detection.
+func (ghost *Ghost) SetTLSMode(mode int) *Ghost {
 	ghost.tlsMode = mode
 	return ghost
 }
@@ -1166,14 +1166,14 @@ func (ghost *Ghost) Register() error {
 			var enabled bool
 
 			switch ghost.tlsMode {
-			case TlsDetect:
+			case TLSDetect:
 				enabled, err = ghost.tlsEnabled(addr)
 				if err != nil {
 					continue
 				}
-			case TlsForceEnable:
+			case TLSForceEnable:
 				enabled = true
-			case TlsForceDisable:
+			case TLSForceDisable:
 				enabled = false
 			}
 
@@ -1570,7 +1570,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 
 	g := NewGhost(addrs, tlsSettings, ModeControl, mid)
-	g.SetPropFile(propFile).SetTlsMode(tlsMode)
+	g.SetPropFile(propFile).SetTLSMode(tlsMode)
 	go g.Start(!noLanDisc, !noRPCServer)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))

@@ -56,11 +56,13 @@ func (p *PollableProcess) Poll() (uint32, error) {
 	return 0, errors.New("Wait4 failed")
 }
 
+// GetenvInt parse an integer from environment variable, and return default
+// value when error.
 func GetenvInt(key string, defaultValue int) int {
 	env := os.Getenv(key)
-	if value, err := strconv.Atoi(env); err != nil {
+	value, err := strconv.Atoi(env)
+	if err != nil {
 		return defaultValue
-	} else {
-		return value
 	}
+	return value
 }
