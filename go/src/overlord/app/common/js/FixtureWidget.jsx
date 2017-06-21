@@ -256,7 +256,8 @@ var FixtureWidget = React.createClass({
   },
   componentDidMount: function () {
     var client = this.props.client;
-    var update_ui_command = client.properties.ui.update_ui_command;
+    var update_ui_command =
+        client.properties.ui.update_ui_command || 'update_ui_status';
     setTimeout(function() {
       this.executeRemoteCmd(client.mid, update_ui_command);
     }.bind(this), 1000);
