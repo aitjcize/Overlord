@@ -172,6 +172,7 @@
   width: calc(48em + 4px);
   overflow-x: hidden;
   overflow-y: auto;
+  white-space: pre-wrap;
   padding: 0px !important;
 }
 

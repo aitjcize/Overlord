@@ -572,15 +572,15 @@ var Controls = React.createClass({
 var MainLog = React.createClass({
   appendLog: function (text) {
     var odiv = this.odiv;
-    var innerHTML = $(odiv).html();
+    var innerText = $(odiv).text();
 
     text = this.props.fixture.extractUIMessages(text);
-    innerHTML += text.replace(/\n/g, "<br />");
-    if (innerHTML.length > LOG_BUF_SIZE) {
-      innerHTML = innerHTML.substr(innerHTML.length -
+    innerText += text;
+    if (innerText.length > LOG_BUF_SIZE) {
+      innerText = innerText.substr(innerText.length -
                                    LOG_BUF_SIZE, LOG_BUF_SIZE);
     }
-    $(odiv).html(innerHTML);
+    $(odiv).text(innerText);
     odiv.scrollTop = odiv.scrollHeight;
   },
   componentDidMount: function () {
@@ -626,14 +626,14 @@ var AuxLog = React.createClass({
       sock.onmessage = function (msg) {
         if (msg.data instanceof Blob) {
           ReadBlobAsText(msg.data, function (text) {
-            var innerHTML = $(odiv).html();
+            var innerText = $(odiv).text();
             text = this.props.fixture.extractUIMessages(text);
-            innerHTML += text.replace(/\n/g, "<br />");
-            if (innerHTML.length > LOG_BUF_SIZE) {
-              innerHTML = innerHTML.substr(innerHTML.length -
+            innerText += text;
+            if (innerText.length > LOG_BUF_SIZE) {
+              innerText = innerText.substr(innerText.length -
                                            LOG_BUF_SIZE, LOG_BUF_SIZE);
             }
-            $(odiv).html(innerHTML);
+            $(odiv).text(innerText);
             odiv.scrollTop = odiv.scrollHeight;
           }.bind(this));
         }
