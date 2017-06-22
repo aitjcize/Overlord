@@ -1101,7 +1101,8 @@ class OverlordCLIClient(object):
       Arg('mid', metavar='mid', nargs='?', default=None)])
   def SelectClient(self, args=None, store=True):
     mid = args.mid if args is not None else None
-    clients = self._FilterClients(self._server.Clients(), args.filters, mid=mid)
+    filters = args.filters if args is not None else []
+    clients = self._FilterClients(self._server.Clients(), filters, mid=mid)
 
     if not clients:
       raise RuntimeError('select: client not found')
