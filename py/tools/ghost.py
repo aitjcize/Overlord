@@ -437,9 +437,8 @@ class Ghost(object):
     There are many ways to generate a machine ID:
     Linux:
       1. factory device_id
-      2. factory device-data
-      3. /sys/class/dmi/id/product_uuid (only available on intel machines)
-      4. MAC address
+      2. /sys/class/dmi/id/product_uuid (only available on intel machines)
+      3. MAC address
       We follow the listed order to generate machine ID, and fallback to the
       next alternative if the previous doesn't work.
 
@@ -465,16 +464,6 @@ class Ghost(object):
       from cros.factory.test import event_log
       with open(event_log.DEVICE_ID_PATH) as f:
         return f.read().strip()
-    except Exception:
-      pass
-
-    # Try factory device data
-    try:
-      import factory_common  # pylint: disable=unused-variable
-      from cros.factory.test import state
-      mlb_serial_number = state.GetSerialNumber(state.KEY_MLB_SERIAL_NUMBER)
-      if mlb_serial_number:
-        return mlb_serial_number
     except Exception:
       pass
 
