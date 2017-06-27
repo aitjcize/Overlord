@@ -18,7 +18,7 @@ ifeq ($(STATIC), true)
 	LDFLAGS=-a -tags netgo -installsuffix netgo
 endif
 
-all: ghost overlordd
+all: ghost overlordd overlord_lan_disc
 
 deps:
 	mkdir -p $(BINDIR)
@@ -32,11 +32,15 @@ overlordd: deps
 	rm -rf $(BINDIR)/app
 	ln -s $(CURDIR)/app $(BINDIR)
 
+overlord_lan_disc: deps
+	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
+		$(OVERLORD)/cmd/$@)
+
 ghost: deps
 	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
 		$(OVERLORD)/cmd/$@)
 
-package: overlordd ghost
+package: overlordd overlord_lan_disc ghost
 	rm -rf $(PACKAGEDIR)
 	mkdir $(PACKAGEDIR)
 	cp -r app $(PACKAGEDIR)

@@ -97,6 +97,7 @@ type TLSCerts struct {
 // Overlord type is the main context for storing the overlord server state.
 type Overlord struct {
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
+	noLanDisc        bool                              // Disable LAN discovery broadcasting
 	noAuth           bool                              // Disable HTTP basic authentication
 	certs            *TLSCerts                         // TLS certificate
 	disableLinkTLS   bool                              // Disable TLS between ghost and overlord
@@ -115,8 +116,8 @@ type Overlord struct {
 }
 
 // NewOverlord creates an Overlord object.
-func NewOverlord(lanDiscInterface string, noAuth bool, certsString string,
-	disableLinkTLS bool) *Overlord {
+func NewOverlord(lanDiscInterface string, noLanDisc bool, noAuth bool,
+	certsString string, disableLinkTLS bool) *Overlord {
 	var certs *TLSCerts
 	if certsString != "" {
 		parts := strings.Split(certsString, ",")
@@ -128,6 +129,7 @@ func NewOverlord(lanDiscInterface string, noAuth bool, certsString string,
 	}
 	return &Overlord{
 		lanDiscInterface: lanDiscInterface,
+		noLanDisc:        noLanDisc,
 		noAuth:           noAuth,
 		certs:            certs,
 		disableLinkTLS:   disableLinkTLS,
@@ -1038,7 +1040,9 @@ func (ovl *Overlord) Serv() {
 	ovl.RegisterHTTPHandlers()
 	go ovl.ServSocket(OverlordPort)
 	go ovl.ServHTTP(OverlordHTTPPort)
-	go ovl.StartUDPBroadcast(OverlordLDPort)
+	if !ovl.noLanDisc {
+		go ovl.StartUDPBroadcast(OverlordLDPort)
+	}
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
 
@@ -1052,8 +1056,9 @@ func (ovl *Overlord) Serv() {
 }
 
 // StartOverlord starts the overlord server.
-func StartOverlord(lanDiscInterface string, noAuth bool, certsString string,
-	disableLinkTLS bool) {
-	ovl := NewOverlord(lanDiscInterface, noAuth, certsString, disableLinkTLS)
+func StartOverlord(lanDiscInterface string, noLanDisc bool, noAuth bool,
+	certsString string, disableLinkTLS bool) {
+	ovl := NewOverlord(lanDiscInterface, noLanDisc, noAuth, certsString,
+		disableLinkTLS)
 	ovl.Serv()
 }
