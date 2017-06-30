@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
+
 import argparse
 import contextlib
 import ctypes
@@ -1088,7 +1090,11 @@ class Ghost(object):
     self._reset.set()
 
   def GetStatus(self):
-    return self._register_status
+    status = self._register_status
+    if self._register_status == SUCCESS:
+      ip, port = self._sock.sock.getpeername()
+      status += ' %s:%d' % (ip, port)
+    return status
 
   def AddToDownloadQueue(self, ttyname, filename):
     self._download_queue.put((ttyname, filename))
@@ -1279,9 +1285,16 @@ def main():
   parser.add_argument('--reset', dest='reset', default=False,
                       action='store_true',
                       help='reset ghost and reload all configs')
+  parser.add_argument('--status', dest='status', default=False,
+                      action='store_true',
+                      help='show status of the client')
   parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,
                       nargs='*', help='overlord server address')
   args = parser.parse_args()
+
+  if args.status:
+    print(GhostRPCServer().GetStatus())
+    sys.exit()
 
   if args.fork:
     ForkToBackground()

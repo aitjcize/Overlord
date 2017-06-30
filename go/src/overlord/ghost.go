@@ -93,6 +93,9 @@ func (rpcStub *ghostRPCStub) Reconnect(args *EmptyArgs, reply *EmptyReply) error
 
 func (rpcStub *ghostRPCStub) GetStatus(args *EmptyArgs, reply *string) error {
 	*reply = rpcStub.ghost.RegisterStatus
+	if rpcStub.ghost.RegisterStatus == Success {
+		*reply = fmt.Sprintf("%s %s", *reply, rpcStub.ghost.connectedAddr)
+	}
 	return nil
 }
 
@@ -1531,8 +1534,25 @@ fail:
 // StartGhost starts the Ghost client.
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	tlsCertFile string, verify bool, propFile string, download string,
-	reset bool, tlsMode int) {
+	reset bool, status bool, tlsMode int) {
 	var addrs []string
+
+	if status {
+		client, err := ghostRPCStubServer()
+		if err != nil {
+			log.Printf("error: %s\n", err)
+			os.Exit(1)
+		}
+
+		var reply string
+		err = client.Call("rpc.GetStatus", &EmptyArgs{}, &reply)
+		if err != nil {
+			log.Printf("GetStatus: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(reply)
+		os.Exit(0)
+	}
 
 	if reset {
 		client, err := ghostRPCStubServer()

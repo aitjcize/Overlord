@@ -26,6 +26,7 @@ var tlsModeFlag = flag.String("tls", "detect",
 	"specify 'y' or 'n' to force enable/disable TLS")
 var download = flag.String("download", "", "file to download")
 var reset = flag.Bool("reset", false, "reset ghost and reload all configs")
+var status = flag.Bool("status", false, "show status of the client")
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
@@ -60,5 +61,5 @@ func main() {
 	}
 
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,
-		!*tlsNoVerify, *propFile, *download, *reset, tlsMode)
+		!*tlsNoVerify, *propFile, *download, *reset, *status, tlsMode)
 }
