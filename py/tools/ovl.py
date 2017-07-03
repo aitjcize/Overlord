@@ -321,6 +321,8 @@ class OverlordClientDaemon(object):
 
     pid = os.fork()
     if pid == 0:
+      for fd in range(3):
+        os.close(fd)
       self._server.serve_forever()
 
   @staticmethod
