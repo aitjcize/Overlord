@@ -24,6 +24,6 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	ovl := overlord.NewOverlord(*lanDiscInterface, false, false, "", false)
+	ovl := overlord.NewOverlord(*lanDiscInterface, true, true, "", true)
 	ovl.StartUDPBroadcast(overlord.OverlordLDPort)
 }

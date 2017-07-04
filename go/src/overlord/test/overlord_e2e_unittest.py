@@ -61,7 +61,7 @@ class TestOverlord(unittest.TestCase):
     env['GHOST_RPC_PORT'] = str(net_utils.FindUnusedPort())
 
     # Launch overlord
-    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-noauth'], env=env)
+    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-no-auth'], env=env)
 
     # Launch go implementation of ghost
     self.goghost = subprocess.Popen(['%s/ghost' % bindir,

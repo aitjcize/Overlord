@@ -59,7 +59,7 @@ There are some options available for the overlordd command, use `overlord
 By default, overlordd is started with HTTP basic auth enabled. The default
 account / password is `overlord/cros`, **please follow the later section in
 this document to change the password for production environment**. To disable
-HTTP basic auth, simply add the `-noauth` option when launching overlordd.
+HTTP basic auth, simply add the `-no-auth` option when launching overlordd.
 **This is strongly discouraged in production environment**, as it expose your
 server for anyone to access it.
 
