@@ -973,7 +973,7 @@ func (ovl *Overlord) ServHTTP(port int) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", webServerHost, port)
-	log.Printf("HTTP server started, listening at %s, tls: %s",
+	log.Printf("HTTP server started, listening at %s, TLS: %s",
 		addr, tlsStatus)
 
 	if ovl.certs != nil {
