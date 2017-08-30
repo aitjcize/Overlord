@@ -421,12 +421,12 @@ class Ghost(object):
       logging.warning('GetGateWayIP: unsupported platform')
       return []
 
-  def GetShopfloorIP(self):
+  def GetFactoryServerIP(self):
     try:
       import factory_common  # pylint: disable=unused-variable
-      from cros.factory.test import shopfloor
+      from cros.factory.test import server_proxy
 
-      url = shopfloor.get_server_url()
+      url = server_proxy.GetServerURL()
       match = re.match(r'^https?://(.*):.*$', url)
       if match:
         return [match.group(1)]
@@ -1162,7 +1162,7 @@ class Ghost(object):
     t.start()
 
   def ScanServer(self):
-    for meth in [self.GetGateWayIP, self.GetShopfloorIP]:
+    for meth in [self.GetGateWayIP, self.GetFactoryServerIP]:
       for addr in [(x, _OVERLORD_PORT) for x in meth()]:
         if addr not in self._overlord_addrs:
           self._overlord_addrs.append(addr)
