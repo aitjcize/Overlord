@@ -101,6 +101,7 @@ type Overlord struct {
 	auth             bool                              // Enable HTTP basic authentication
 	certs            *TLSCerts                         // TLS certificate
 	linkTLS          bool                              // Enable TLS between ghost and overlord
+	htpasswdPath     string                            // Path to .htpasswd file
 	agents           map[string]*ConnServer            // Normal ghost agents
 	logcats          map[string]map[string]*ConnServer // logcat clients
 	wsctxs           map[string]*webSocketContext      // (sid, webSocketContext) mapping
@@ -117,7 +118,7 @@ type Overlord struct {
 
 // NewOverlord creates an Overlord object.
 func NewOverlord(lanDiscInterface string, lanDisc bool, auth bool,
-	certsString string, linkTLS bool) *Overlord {
+	certsString string, linkTLS bool, htpasswdPath string) *Overlord {
 	var certs *TLSCerts
 	if certsString != "" {
 		parts := strings.Split(certsString, ",")
@@ -127,12 +128,24 @@ func NewOverlord(lanDiscInterface string, lanDisc bool, auth bool,
 			certs = &TLSCerts{parts[0], parts[1]}
 		}
 	}
+	if !filepath.IsAbs(htpasswdPath) {
+		execPath, err := GetExecutablePath()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		execDir := filepath.Dir(execPath)
+		htpasswdPath, err = filepath.Abs(filepath.Join(execDir, htpasswdPath))
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
 	return &Overlord{
 		lanDiscInterface: lanDiscInterface,
 		lanDisc:          lanDisc,
 		auth:             auth,
 		certs:            certs,
 		linkTLS:          linkTLS,
+		htpasswdPath:     htpasswdPath,
 		agents:           make(map[string]*ConnServer),
 		logcats:          make(map[string]map[string]*ConnServer),
 		wsctxs:           make(map[string]*webSocketContext),
@@ -908,8 +921,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	appDir := ovl.GetAppDir()
 
 	// HTTP basic auth
-	auth := NewBasicAuth("Overlord", filepath.Join(appDir, "overlord.htpasswd"),
-		!ovl.auth)
+	auth := NewBasicAuth("Overlord", ovl.htpasswdPath, !ovl.auth)
 
 	// Register the request handlers.
 	r := mux.NewRouter()
@@ -1075,7 +1087,8 @@ func (ovl *Overlord) Serv() {
 
 // StartOverlord starts the overlord server.
 func StartOverlord(lanDiscInterface string, lanDisc bool, auth bool,
-	certsString string, linkTLS bool) {
-	ovl := NewOverlord(lanDiscInterface, lanDisc, auth, certsString, linkTLS)
+	certsString string, linkTLS bool, htpasswdPath string) {
+	ovl := NewOverlord(lanDiscInterface, lanDisc, auth, certsString, linkTLS,
+		htpasswdPath)
 	ovl.Serv()
 }
