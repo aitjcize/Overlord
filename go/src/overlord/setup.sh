@@ -9,10 +9,10 @@ set -e
 # credential and SSL certificate for Overlord.
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-APP_DIR="${SCRIPT_DIR}/app"
+CONFIG_DIR="${SCRIPT_DIR}/config"
 
 setup_login() {
-  htpasswd_path="${APP_DIR}/overlord.htpasswd"
+  htpasswd_path="${CONFIG_DIR}/overlord.htpasswd"
 
   echo "Setting up Overlord login credentials."
   echo "This username / password would be used to login to overlord" \
@@ -28,8 +28,8 @@ setup_login() {
 }
 
 setup_ssl() {
-  key_path="${APP_DIR}/key.pem"
-  cert_path="${APP_DIR}/cert.pem"
+  key_path="${CONFIG_DIR}/key.pem"
+  cert_path="${CONFIG_DIR}/cert.pem"
 
   echo "Setting up Overlord SSL certificates."
   echo
