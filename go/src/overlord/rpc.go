@@ -170,18 +170,18 @@ func (rpc *RPCCore) handleResponse(res *Response) error {
 // send the content from the socket, and the second channel send an error
 // object if there is one.
 func (rpc *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
-	readChan := make(chan []byte)
+	readChan := make(chan []byte, 1)
 	readErrChan := make(chan error, 1)
 
 	go func() {
 		for {
 			buf := make([]byte, bufferSize)
 			n, err := rpc.Conn.Read(buf)
-			readChan <- buf[:n]
 			if err != nil {
 				readErrChan <- err
 				return
 			}
+			readChan <- buf[:n]
 		}
 	}()
 
