@@ -463,8 +463,8 @@ class Ghost(object):
     # Try factory device id
     try:
       import factory_common  # pylint: disable=unused-variable
-      from cros.factory.test import testlog_goofy
-      return testlog_goofy.GetDeviceID()
+      from cros.factory.test import session
+      return session.GetDeviceID()
     except Exception:
       pass
 
