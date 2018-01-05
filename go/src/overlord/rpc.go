@@ -42,7 +42,7 @@ type Request struct {
 // params is map between string and any other JSON-serializable data structure.
 func NewRequest(name string, params map[string]interface{}) *Request {
 	req := &Request{
-		Rid:     uuid.NewV4().String(),
+		Rid:     uuid.Must(uuid.NewV4()).String(),
 		Timeout: requestTimeoutSeconds,
 		Name:    name,
 	}

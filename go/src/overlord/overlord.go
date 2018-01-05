@@ -83,7 +83,7 @@ type webSocketContext struct {
 // newWebsocketContext create  webSocketContext object.
 func newWebsocketContext(conn *websocket.Conn) *webSocketContext {
 	return &webSocketContext{
-		Sid:  uuid.NewV4().String(),
+		Sid:  uuid.Must(uuid.NewV4()).String(),
 		Conn: conn,
 	}
 }
@@ -711,7 +711,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			return
 		}
 
-		sid := uuid.NewV4().String()
+		sid := uuid.Must(uuid.NewV4()).String()
 		agent.Command <- SpawnFileCmd{
 			Sid: sid, Action: "download", Filename: filename[0]}
 
@@ -793,7 +793,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		if terminalSids, ok = r.URL.Query()["terminal_sid"]; !ok {
 			terminalSids = []string{""}
 		}
-		sid := uuid.NewV4().String()
+		sid := uuid.Must(uuid.NewV4()).String()
 
 		// Upload destination
 		var dsts []string
