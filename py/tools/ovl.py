@@ -9,6 +9,7 @@ import argparse
 import ast
 import base64
 import fcntl
+import functools
 import getpass
 import hashlib
 import httplib
@@ -151,6 +152,7 @@ def KillGraceful(pid, wait_secs=1):
 def AutoRetry(action_name, retries):
   """Decorator for retry function call."""
   def Wrap(func):
+    @functools.wraps(func)
     def Loop(*args, **kwargs):
       for unused_i in range(retries):
         try:
@@ -653,6 +655,7 @@ def Command(command, help_msg=None, args=None):
   if args is None:
     args = []
   def WrapFunc(func):
+    @functools.wraps(func)
     def Wrapped(*args, **kwargs):
       return func(*args, **kwargs)
     # pylint: disable=protected-access
