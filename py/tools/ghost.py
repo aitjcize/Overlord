@@ -355,7 +355,7 @@ class Ghost(object):
         with open(self._prop_file, 'r') as f:
           self._properties = json.loads(f.read())
     except Exception as e:
-      logging.error('LoadProperties: ' + str(e))
+      logging.error('LoadProperties: %s', e)
 
   def CloseSockets(self):
     # Close sockets opened by parent process, since we don't use it anymore.
