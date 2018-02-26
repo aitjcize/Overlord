@@ -400,6 +400,7 @@ class Ghost(object):
       ret = re.search('gateway: (.*)', output)
       if ret:
         return [ret.group(1)]
+      return []
     elif self._platform == 'Linux':
       with open('/proc/net/route', 'r') as f:
         lines = f.readlines()
@@ -836,7 +837,8 @@ class Ghost(object):
       with open(filepath, 'r') as _:
         pass
     except Exception as e:
-      return self.SendResponse(msg, str(e))
+      self.SendResponse(msg, str(e))
+      return
 
     self.SpawnGhost(self.FILE, params['sid'],
                     file_op=('download', filepath))
@@ -880,7 +882,8 @@ class Ghost(object):
       with open(dest_path, 'w') as _:
         pass
     except Exception as e:
-      return self.SendResponse(msg, str(e))
+      self.SendResponse(msg, str(e))
+      return
 
     # If not check_only, spawn FILE mode ghost agent to handle upload
     if not params.get('check_only', False):
