@@ -7,11 +7,12 @@ package overlord
 import (
 	"encoding/json"
 	"errors"
-	"github.com/satori/go.uuid"
 	"log"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/satori/go.uuid"
 )
 
 const (

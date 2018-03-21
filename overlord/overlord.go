@@ -9,10 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/googollee/go-socket.io"
-	"github.com/gorilla/mux"
-	"github.com/gorilla/websocket"
-	"github.com/satori/go.uuid"
 	"io"
 	"io/ioutil"
 	"log"
@@ -26,6 +22,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/googollee/go-socket.io"
+	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
+	"github.com/satori/go.uuid"
 )
 
 const (

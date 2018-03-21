@@ -13,9 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/kr/pty"
-	"github.com/pkg/term/termios"
-	"github.com/satori/go.uuid"
 	"io"
 	"io/ioutil"
 	"log"
@@ -32,6 +29,10 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/kr/pty"
+	"github.com/pkg/term/termios"
+	"github.com/satori/go.uuid"
 )
 
 var ghostRPCStubPort = GetenvInt("GHOST_RPC_PORT", 4499)
