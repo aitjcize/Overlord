@@ -221,7 +221,7 @@ upgrade and apply it. To force an upgrade for already connected clients, simply
 send a GET request to the server:
 
 ```bash
-$ curl -k -u username1:password1 'https://localhost:9000/api/agents/upgrade'
+$ curl -k -u username1:password1 'https://127.0.0.1:9000/api/agents/upgrade'
 ```
 
 (Note: use `http` if you don't have SSL enabled)

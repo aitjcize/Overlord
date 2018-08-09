@@ -1113,7 +1113,7 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 		log.Println("SpawnPortModeForwardServer: terminated")
 	}()
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", ghost.port),
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", ghost.port),
 		connectTimeout)
 	if err != nil {
 		return err
@@ -1424,7 +1424,7 @@ func (ghost *Ghost) StartRPCServer() {
 	ghost.server.RegisterName("rpc", &ghostRPCStub{ghost})
 
 	http.Handle("/", ghost)
-	err := http.ListenAndServe(fmt.Sprintf("localhost:%d", ghostRPCStubPort), nil)
+	err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", ghostRPCStubPort), nil)
 	if err != nil {
 		log.Fatalf("Unable to listen at port %d: %s\n", ghostRPCStubPort, err)
 	}
@@ -1474,12 +1474,12 @@ func (ghost *Ghost) Start(lanDisc bool, RPCServer bool) {
 
 // Returns a ghostRPCStub client object which can be used to call ghostRPCStub methods.
 func ghostRPCStubServer() (*rpc.Client, error) {
-	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", ghostRPCStubPort))
+	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", ghostRPCStubPort))
 	if err != nil {
 		return nil, err
 	}
 
-	io.WriteString(conn, "GET / HTTP/1.1\nHost: localhost\n\n")
+	io.WriteString(conn, "GET / HTTP/1.1\nHost: 127.0.0.1\n\n")
 	_, err = http.ReadResponse(bufio.NewReader(conn), nil)
 	if err == nil {
 		return jsonrpc.NewClient(conn), nil
@@ -1577,7 +1577,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	if len(args) >= 1 {
 		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OverlordPort))
 	}
-	addrs = append(addrs, fmt.Sprintf("localhost:%d", OverlordPort))
+	addrs = append(addrs, fmt.Sprintf("127.0.0.1:%d", OverlordPort))
 
 	tlsSettings := newTLSSettings(tlsCertFile, verify)
 
