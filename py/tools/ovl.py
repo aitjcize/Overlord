@@ -979,7 +979,7 @@ class OverlordCLIClient(object):
     password_provided = args.passwd is not None
     prompt = False
 
-    for unused_i in range(3):
+    for unused_i in range(3):  # pylint: disable=too-many-nested-blocks
       try:
         if prompt:
           if not username_provided:
