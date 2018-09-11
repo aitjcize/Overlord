@@ -181,7 +181,7 @@ class Ghost(object):
       LOGCAT: 'Logcat',
       FILE: 'File',
       FORWARD: 'Forward'
-      }
+  }
 
   RANDOM_MID = '##random_mid##'
 
@@ -690,7 +690,7 @@ class Ghost(object):
           except ValueError:
             p.stdin.write(ret)
         p.poll()
-        if p.returncode != None:
+        if p.returncode is not None:
           break
     except Exception as e:
       logging.error('SpawnShellServer: %s', e)
@@ -863,7 +863,7 @@ class Ghost(object):
       target_dir = os.getenv('HOME', '/tmp')
 
       # Terminal session ID found, upload to it's current working directory
-      if params.has_key('terminal_sid'):
+      if 'terminal_sid' in params:
         pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
         if pid:
           try:
@@ -1070,7 +1070,7 @@ class Ghost(object):
             Ghost.SHELL: self.SpawnShellServer,
             Ghost.FILE: self.InitiateFileOperation,
             Ghost.FORWARD: self.SpawnPortForwardServer,
-            }[self._mode]
+        }[self._mode]
 
         # Machine ID may change if MAC address is used (USB-ethernet dongle
         # plugged/unplugged)

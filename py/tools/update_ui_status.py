@@ -62,7 +62,7 @@ def main():
     try:
       while True:
         (when, poll) = queue.get_nowait()
-        if time.time() < when: # not now
+        if time.time() < when:  # not now
           queue.put((when, poll))
           sleep_time = when - time.time()
           if sleep_time > 0:

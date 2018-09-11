@@ -117,7 +117,8 @@ class TestOverlord(unittest.TestCase):
 
     # Test /api/agent/properties/mid
     for client in self._GetJSON('/api/agents/list'):
-      assert self._GetJSON('/api/agent/properties/%s' % client['mid']) != None
+      assert self._GetJSON(
+          '/api/agent/properties/%s' % client['mid']) is not None
 
   def testShellCommand(self):
     class TestClient(WebSocketBaseClient):

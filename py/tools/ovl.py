@@ -1255,7 +1255,7 @@ class OverlordCLIClient(object):
     self.CheckClient()
 
     @AutoRetry('pull', _RETRY_TIMES)
-    def _pull(src, dst, ftype, perm=0644, link=None):
+    def _pull(src, dst, ftype, perm=0o644, link=None):
       try:
         os.makedirs(os.path.dirname(dst))
       except Exception:
