@@ -76,7 +76,7 @@ type Response struct {
 
 // NewResponse creates a new Response object.
 // rid is the request ID of the request this response is intended for.
-// response is the reponse status text.
+// response is the response status text.
 // params is map between string and any other JSON-serializable data structure.
 func NewResponse(rid, response string, params map[string]interface{}) *Response {
 	res := &Response{

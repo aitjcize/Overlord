@@ -842,7 +842,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 
 		client, err := ghostRPCStubServer()
 
-		// Ghost could be launched without RPC server, ignore registraion
+		// Ghost could be launched without RPC server, ignore registration
 		if err == nil {
 			err = client.Call("rpc.RegisterTTY", []string{ghost.sid, ttyName},
 				&EmptyReply{})
@@ -1380,7 +1380,7 @@ func (ghost *Ghost) StartLanDiscovery() {
 			continue
 		}
 
-		// LAN discovery packet format: "OVERLOARD [host]:port"
+		// LAN discovery packet format: "OVERLORD [host]:port"
 		data := strings.Split(string(buf[:n]), " ")
 		if data[0] != "OVERLORD" {
 			continue
@@ -1430,7 +1430,7 @@ func (ghost *Ghost) StartRPCServer() {
 	}
 }
 
-// ScanGateway scans currenty netowrk gateway and add it into addrs if not
+// ScanGateway scans current network gateway and add it into addrs if not
 // already exist.
 func (ghost *Ghost) ScanGateway() {
 	if gateways, err := GetGateWayIP(); err == nil {

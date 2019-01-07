@@ -7,15 +7,16 @@ package overlord
 import (
 	"encoding/json"
 	"errors"
-	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-// RegistrationFailedError indicats an registration fail error.
+// RegistrationFailedError indicates an registration fail error.
 type RegistrationFailedError error
 
 const (

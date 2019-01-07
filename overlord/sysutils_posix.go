@@ -11,7 +11,7 @@ import (
 	"errors"
 )
 
-// Ttyname retuns the TTY name of a given file descriptor.
+// Ttyname returns the TTY name of a given file descriptor.
 func Ttyname(fd uintptr) (string, error) {
 	var ttyname *C.char
 	ttyname = C.ttyname(C.int(fd))

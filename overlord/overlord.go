@@ -74,7 +74,7 @@ type ConnectLogcatCmd struct {
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
 // will request a new terminal connection with the given session ID.
-// This way, the ConnServer can retreive the connresponding webSocketContext
+// This way, the ConnServer can retrieve the connresponding webSocketContext
 // with it's the given session ID and get the WebSocket.
 type webSocketContext struct {
 	Sid  string          // Session ID
@@ -374,12 +374,12 @@ func (ovl *Overlord) InitSocketIOServer() {
 		log.Println("error:", err)
 	})
 
-	// Client initiated subscribtion
+	// Client initiated subscription
 	server.On("subscribe", func(so socketio.Socket, name string) {
 		so.Join(name)
 	})
 
-	// Client initiated unsubscribtion
+	// Client initiated unsubscription
 	server.On("unsubscribe", func(so socketio.Socket, name string) {
 		so.Leave(name)
 	})
