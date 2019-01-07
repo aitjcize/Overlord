@@ -196,7 +196,7 @@ func (rpc *RPCCore) ParseMessage(msgJSON string) (Message, error) {
 
 	err := json.Unmarshal([]byte(msgJSON), &req)
 	if err != nil || len(req.Name) == 0 {
-		err := json.Unmarshal([]byte(msgJSON), &res)
+		err = json.Unmarshal([]byte(msgJSON), &res)
 		if err != nil {
 			err = errors.New("mal-formed JSON request, ignored")
 		} else {
