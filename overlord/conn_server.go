@@ -141,7 +141,6 @@ func (c *ConnServer) forwardWSInput() {
 			return
 		}
 	}
-	return
 }
 
 // ModeForward the stream output to WebSocket.

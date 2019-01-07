@@ -955,8 +955,6 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 // SpawnShellServer spawns a Shell server and forward input/output from/to the TCP socket.
@@ -1060,8 +1058,6 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 // InitiatefileOperation initiates a file operation.
@@ -1091,10 +1087,8 @@ func (ghost *Ghost) InitiatefileOperation(res *Response) error {
 		}
 		go ghost.StartUploadServer()
 		return nil
-	} else {
-		return errors.New("InitiatefileOperation: unknown file operation, ignored")
 	}
-	return nil
+	return errors.New("InitiatefileOperation: unknown file operation, ignored")
 }
 
 // SpawnPortModeForwardServer spawns a port forwarding server and forward I/O to
@@ -1148,8 +1142,6 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 // Register existent to Overlord.
