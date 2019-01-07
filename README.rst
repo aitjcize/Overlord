@@ -2,6 +2,9 @@ Overlord
 ========
 Overlord is a general purpose device monitoring and proxying framework.
 
+.. image:: https://goreportcard.com/badge/github.com/aitjcize/Overlord
+   :target: https://goreportcard.com/report/github.com/aitjcize/Overlord
+
 Overlord provides a web interface which allows you to access device you have control of directly on the web.  Features include:
 
 1. shell access
