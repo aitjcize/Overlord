@@ -23,22 +23,24 @@ all: ghost overlordd overlord_lan_disc
 deps:
 	mkdir -p $(BINDIR)
 	if $(DEPS); then \
-		GOPATH=$(GOPATH) $(GO) get $(OVERLORD); \
+		GO111MODULE=on GOPATH=$(GOPATH) $(GO) get $(OVERLORD); \
 	fi
 
 overlordd: deps
-	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
+	(GO111MODULE=on GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
 		$(OVERLORD)/cmd/$@)
-	rm -rf $(BINDIR)/app
-	ln -s $(CURDIR)/app $(BINDIR)
+	mv -f $@ $(BINDIR)
+	ln -sf $(CURDIR)/app $(BINDIR)
 
 overlord_lan_disc: deps
-	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
+	(GO111MODULE=on GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
 		$(OVERLORD)/cmd/$@)
+	mv -f $@ $(BINDIR)
 
 ghost: deps
-	(cd $(BINDIR) && GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
+	(GO111MODULE=on GOPATH=$(GOPATH) $(GO) build $(LDFLAGS) \
 		$(OVERLORD)/cmd/$@)
+	mv -f $@ $(BINDIR)
 
 package: overlordd overlord_lan_disc ghost
 	rm -rf $(PACKAGEDIR)
