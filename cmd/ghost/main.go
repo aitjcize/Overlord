@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	"../../overlord"
+	"github.com/aitjcize/Overlord/overlord"
 )
 
 var mid = flag.String("mid", "", "machine ID to set")

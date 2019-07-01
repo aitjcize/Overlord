@@ -24,12 +24,12 @@ deps:
 	fi
 
 overlordd: deps
-	cd $(CURDIR)/cmd/$@ && GOBIN=$(BIN) $(GO) install $(LDFLAGS) .
+	GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 	rm -f $(BIN)/app
 	ln -s $(CURDIR)/overlord/app $(BIN)
 
 ghost: deps
-	cd $(CURDIR)/cmd/$@ && GOBIN=$(BIN) $(GO) install $(LDFLAGS) .
+	GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
 py-bin:
 	mkdir -p $(BUILD)

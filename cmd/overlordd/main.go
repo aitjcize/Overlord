@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"os"
 
-	"../../overlord"
+	"github.com/aitjcize/Overlord/overlord"
 )
 
 var lanDiscInterface = flag.String("lan-disc-iface", "",

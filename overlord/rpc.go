@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -43,7 +43,7 @@ type Request struct {
 // params is map between string and any other JSON-serializable data structure.
 func NewRequest(name string, params map[string]interface{}) *Request {
 	req := &Request{
-		Rid:     uuid.Must(uuid.NewV4()).String(),
+		Rid:     uuid.NewV4().String(),
 		Timeout: requestTimeoutSeconds,
 		Name:    name,
 	}
