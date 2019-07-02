@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -202,8 +203,8 @@ type Ghost struct {
 	mid             string                 // Machine ID
 	sid             string                 // Session ID
 	terminalSid     string                 // Associated terminal session ID
-	ttyName2Sid     map[string]string      // Mapping between ttyName and Sid
-	terminalSid2Pid map[string]int         // Mapping between terminalSid and pid
+	ttyName2Sid     sync.Map               // Mapping between ttyName and Sid
+	terminalSid2Pid sync.Map               // Mapping between terminalSid and pid
 	propFile        string                 // Properties file filename
 	properties      map[string]interface{} // Client properties
 	RegisterStatus  string                 // Register status from server response
@@ -239,21 +240,19 @@ func NewGhost(addrs []string, tls *tlsSettings, mode int, mid string) *Ghost {
 		}
 	}
 	return &Ghost{
-		RPCCore:         NewRPCCore(nil),
-		addrs:           addrs,
-		tls:             tls,
-		mode:            mode,
-		mid:             finalMid,
-		sid:             uuid.NewV4().String(),
-		ttyName2Sid:     make(map[string]string),
-		terminalSid2Pid: make(map[string]int),
-		properties:      make(map[string]interface{}),
-		RegisterStatus:  statusDisconnected,
-		reset:           false,
-		quit:            false,
-		pauseLanDisc:    false,
-		downloadQueue:   make(chan downloadInfo),
-		uploadContext:   fileUploadContext{Data: make(chan []byte)},
+		RPCCore:        NewRPCCore(nil),
+		addrs:          addrs,
+		tls:            tls,
+		mode:           mode,
+		mid:            finalMid,
+		sid:            uuid.NewV4().String(),
+		properties:     make(map[string]interface{}),
+		RegisterStatus: statusDisconnected,
+		reset:          false,
+		quit:           false,
+		pauseLanDisc:   false,
+		downloadQueue:  make(chan downloadInfo),
+		uploadContext:  fileUploadContext{Data: make(chan []byte)},
 	}
 }
 
@@ -583,8 +582,8 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 		}
 	} else {
 		if params.TerminalSid != "" {
-			if pid, ok := ghost.terminalSid2Pid[params.TerminalSid]; ok {
-				cwd, err := GetProcessWorkingDirectory(pid)
+			if pid, ok := ghost.terminalSid2Pid.Load(params.TerminalSid); ok {
+				cwd, err := GetProcessWorkingDirectory(pid.(int))
 				if err == nil {
 					targetDir = cwd
 				}
@@ -1240,8 +1239,15 @@ func (ghost *Ghost) Register() error {
 func (ghost *Ghost) InitiateDownload(info downloadInfo) {
 	go func() {
 		addrs := []string{ghost.connectedAddr}
+
+		val, ok := ghost.ttyName2Sid.Load(info.Ttyname)
+		if !ok {
+			log.Printf("Failed to get SID")
+			return
+		}
+
 		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetTerminalSid(
-			ghost.ttyName2Sid[info.Ttyname]).SetFileOp("download", info.Filename, 0)
+			val.(string)).SetFileOp("download", info.Filename, 0)
 		g.Start(false, false)
 	}()
 }
@@ -1317,7 +1323,7 @@ func (ghost *Ghost) Listen() error {
 
 // RegisterTTY register the TTY to a session.
 func (ghost *Ghost) RegisterTTY(sesssionID, ttyName string) {
-	ghost.ttyName2Sid[ttyName] = sesssionID
+	ghost.ttyName2Sid.Store(ttyName, sesssionID)
 }
 
 // RegisterSession register the PID to a session.
@@ -1326,7 +1332,7 @@ func (ghost *Ghost) RegisterSession(sesssionID, pidStr string) {
 	if err != nil {
 		panic(err)
 	}
-	ghost.terminalSid2Pid[sesssionID] = pid
+	ghost.terminalSid2Pid.Store(sesssionID, pid)
 }
 
 // AddToDownloadQueue adds a downloadInfo to the download queue
