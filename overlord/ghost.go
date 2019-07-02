@@ -42,6 +42,7 @@ const (
 	pingInterval         = 10 * time.Second
 	readTimeout          = 3 * time.Second
 	connectTimeout       = 3 * time.Second
+	httpRequestTimeout   = 30 * time.Second
 	retryIntervalSeconds = 2
 	blockSize            = 4096
 )
@@ -400,9 +401,9 @@ func (ghost *Ghost) Upgrade() error {
 
 	if httpsEnabled {
 		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
-		client = http.Client{Transport: tr, Timeout: connectTimeout}
+		client = http.Client{Transport: tr, Timeout: httpRequestTimeout}
 	} else {
-		client = http.Client{Timeout: connectTimeout}
+		client = http.Client{Timeout: httpRequestTimeout}
 	}
 
 	// Download the sha1sum for ghost for verification
@@ -432,7 +433,7 @@ func (ghost *Ghost) Upgrade() error {
 
 	_, err = buffer.ReadFrom(resp2.Body)
 	if err != nil {
-		return errors.New("Upgrade: failed to write upgrade onto disk, abort")
+		return errors.New("Upgrade: failed to download upgrade, abort")
 	}
 
 	// Compare SHA1 sum
