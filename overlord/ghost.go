@@ -31,7 +31,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 	"github.com/pkg/term/termios"
 	uuid "github.com/satori/go.uuid"
 )
