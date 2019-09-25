@@ -959,7 +959,7 @@ class Ghost(object):
     If any timed-out requests are discovered, their handler is called with the
     special response value of None.
     """
-    for rid in self._requests.keys()[:]:
+    for rid in list(self._requests):
       request_time, timeout, handler = self._requests[rid]
       if self.Timestamp() - request_time > timeout:
         if callable(handler):
