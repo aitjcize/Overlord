@@ -13,7 +13,7 @@ import fcntl
 import functools
 import getpass
 import hashlib
-import httplib
+import http.client
 import json
 import logging
 import os
@@ -798,9 +798,9 @@ class OverlordCLIClient(object):
 
     content_length = len(part_header) + size + len(end_part)
     if parse.scheme == 'http':
-      h = httplib.HTTP(parse.netloc)
+      h = http.client.HTTP(parse.netloc)
     else:
-      h = httplib.HTTPS(parse.netloc, context=self._state.ssl_context)
+      h = http.client.HTTPS(parse.netloc, context=self._state.ssl_context)
 
     post_path = url[url.index(parse.netloc) + len(parse.netloc):]
     h.putrequest('POST', post_path)
