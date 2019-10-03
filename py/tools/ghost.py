@@ -428,7 +428,6 @@ class Ghost(object):
 
   def GetFactoryServerIP(self):
     try:
-      import factory_common  # pylint: disable=unused-variable
       from cros.factory.test import server_proxy
 
       url = server_proxy.GetServerURL()
@@ -467,7 +466,6 @@ class Ghost(object):
 
     # Try factory device id
     try:
-      import factory_common  # pylint: disable=unused-variable
       from cros.factory.test import session
       return session.GetDeviceID()
     except Exception:

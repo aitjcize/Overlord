@@ -13,7 +13,6 @@ import urllib
 
 from ws4py.client import WebSocketBaseClient
 
-import factory_common  # pylint: disable=unused-import
 from cros.factory.utils import net_utils
 from cros.factory.utils import sync_utils
 
