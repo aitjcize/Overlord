@@ -37,6 +37,7 @@ import urlparse
 import jsonrpclib
 from jsonrpclib.config import Config
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
+from six.moves import input
 from ws4py.client import WebSocketBaseClient
 import yaml
 
@@ -983,7 +984,7 @@ class OverlordCLIClient(object):
       try:
         if prompt:
           if not username_provided:
-            args.user = raw_input('Username: ')
+            args.user = input('Username: ')
           if not password_provided:
             args.passwd = getpass.getpass('Password: ')
 
@@ -1001,7 +1002,7 @@ class OverlordCLIClient(object):
             return
           elif ret[0] == 'SSLVerifyFailed':
             print(_TLS_CERT_FAILED_WARNING % (fp_text), end='')
-            response = raw_input()
+            response = input()
             if response.lower() in ['y', 'ye', 'yes']:
               self._SaveTLSCertificate(host, cert_pem)
               print('TLS host Certificate trusted, you will not be prompted '
@@ -1121,7 +1122,7 @@ class OverlordCLIClient(object):
 
       print('\nSelection: ', end='')
       try:
-        choice = int(raw_input()) - 1
+        choice = int(input()) - 1
         mid = clients[choice]['mid']
       except ValueError:
         raise RuntimeError('select: invalid selection')
