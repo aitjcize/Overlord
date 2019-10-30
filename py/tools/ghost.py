@@ -1202,13 +1202,13 @@ class Ghost(object):
         # Don't show stack trace for RuntimeError, which we use in this file for
         # plausible and expected errors (such as can't connect to server).
         except RuntimeError as e:
-          logging.info('%s, retrying in %ds', e.message, _RETRY_INTERVAL)
+          logging.info('%s, retrying in %ds', str(e), _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
         except Exception as e:
           unused_x, unused_y, exc_traceback = sys.exc_info()
           traceback.print_tb(exc_traceback)
           logging.info('%s: %s, retrying in %ds',
-                       e.__class__.__name__, e.message, _RETRY_INTERVAL)
+                       e.__class__.__name__, str(e), _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
 
         self.Reset()
