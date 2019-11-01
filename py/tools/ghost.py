@@ -978,7 +978,7 @@ class Ghost(object):
     try:
       while True:
         rds, unused_wd, unused_xd = select.select([self._sock], [], [],
-                                                  _PING_INTERVAL / 2)
+                                                  _PING_INTERVAL // 2)
 
         if self._sock in rds:
           data = self._sock.Recv(_BUFSIZE)

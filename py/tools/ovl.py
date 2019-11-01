@@ -3,6 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import division
 from __future__ import print_function
 
 import argparse
@@ -219,13 +220,13 @@ class ProgressBar(object):
       value = size_in_bytes
     elif size_in_bytes < 1024 ** 2:
       unit = 'KiB'
-      value = size_in_bytes / 1024.0
+      value = size_in_bytes / 1024
     elif size_in_bytes < 1024 ** 3:
       unit = 'MiB'
-      value = size_in_bytes / (1024.0 ** 2)
+      value = size_in_bytes / (1024 ** 2)
     elif size_in_bytes < 1024 ** 4:
       unit = 'GiB'
-      value = size_in_bytes / (1024.0 ** 3)
+      value = size_in_bytes / (1024 ** 3)
     return ' %6.1f %3s' % (value, unit)
 
   def _SpeedToHuman(self, speed_in_bs):
@@ -234,17 +235,17 @@ class ProgressBar(object):
       value = speed_in_bs
     elif speed_in_bs < 1024 ** 2:
       unit = 'K'
-      value = speed_in_bs / 1024.0
+      value = speed_in_bs / 1024
     elif speed_in_bs < 1024 ** 3:
       unit = 'M'
-      value = speed_in_bs / (1024.0 ** 2)
+      value = speed_in_bs / (1024 ** 2)
     elif speed_in_bs < 1024 ** 4:
       unit = 'G'
-      value = speed_in_bs / (1024.0 ** 3)
+      value = speed_in_bs / (1024 ** 3)
     return ' %6.1f%s/s' % (value, unit)
 
   def _DurationToClock(self, duration):
-    return ' %02d:%02d' % (duration / 60, duration % 60)
+    return ' %02d:%02d' % (duration // 60, duration % 60)
 
   def SetProgress(self, percentage, size=None):
     current_width = GetTerminalSize()[1]
@@ -255,7 +256,7 @@ class ProgressBar(object):
       self._size = size
 
     elapse_time = time.time() - self._start_time
-    speed = self._size / float(elapse_time)
+    speed = self._size / elapse_time
 
     size_str = self._SizeToHuman(self._size)
     speed_str = self._SpeedToHuman(speed)
@@ -820,7 +821,7 @@ class OverlordCLIClient(object):
           break
         count += len(data)
         if progress:
-          progress(int(count * 100.0 / size), count)
+          progress(count * 100 // size, count)
         h.send(data)
 
     h.send(end_part)
@@ -1296,7 +1297,7 @@ class OverlordCLIClient(object):
           if not data:
             break
           downloaded_size += len(data)
-          pbar.SetProgress(float(downloaded_size) * 100 / total_size,
+          pbar.SetProgress(downloaded_size * 100 / total_size,
                            downloaded_size)
           f.write(data)
       pbar.End()
