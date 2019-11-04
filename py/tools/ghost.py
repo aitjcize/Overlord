@@ -6,6 +6,8 @@
 from __future__ import print_function
 
 import argparse
+import binascii
+import codecs
 import contextlib
 import ctypes
 import ctypes.util
@@ -34,7 +36,7 @@ import uuid
 
 import jsonrpclib
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
-
+from six import PY2
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', 4499))
 
@@ -412,9 +414,13 @@ class Ghost(object):
           continue
 
         try:
-          h = parts[2].decode('hex')
-          ips.append('%d.%d.%d.%d' % tuple(ord(x) for x in reversed(h)))
-        except TypeError:
+          h = codecs.decode(parts[2], 'hex')
+          # TODO(kerker) Remove when py3 upgrade complete
+          if PY2:
+            ips.append('%d.%d.%d.%d' % tuple(ord(x) for x in reversed(h)))
+          else:
+            ips.append('.'.join([str(x) for x in reversed(h)]))
+        except (TypeError, binascii.Error):
           pass
 
       return ips
