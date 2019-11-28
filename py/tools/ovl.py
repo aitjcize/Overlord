@@ -14,6 +14,7 @@ import functools
 import getpass
 import hashlib
 import http.client
+from io import StringIO
 import json
 import logging
 import os
@@ -22,7 +23,6 @@ import select
 import signal
 import socket
 import ssl
-import StringIO
 import struct
 import subprocess
 import sys
@@ -919,7 +919,7 @@ class OverlordCLIClient(object):
                                      self._state.password))
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
-    sio = StringIO.StringIO()
+    sio = StringIO()
     ws = ShellWebSocketClient(
         self._state, sio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
             self._state.host, self._state.port,
