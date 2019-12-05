@@ -112,7 +112,7 @@ def GetVersionDigest():
   if getattr(sys, 'frozen', False):
     filename = sys.executable
 
-  with open(filename, 'r') as f:
+  with open(filename, 'rb') as f:
     return hashlib.sha1(f.read()).hexdigest()
 
 

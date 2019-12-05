@@ -255,7 +255,7 @@ class Ghost(object):
                     signal.SIG_IGN if status else signal.SIG_DFL)
 
   def GetFileSha1(self, filename):
-    with open(filename, 'r') as f:
+    with open(filename, 'rb') as f:
       return hashlib.sha1(f.read()).hexdigest()
 
   def TLSEnabled(self, host, port):
