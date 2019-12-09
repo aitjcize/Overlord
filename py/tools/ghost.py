@@ -47,7 +47,7 @@ _OVERLORD_HTTP_PORT = int(os.getenv('OVERLORD_HTTP_PORT', 9000))
 
 _BUFSIZE = 8192
 _RETRY_INTERVAL = 2
-_SEPARATOR = '\r\n'
+_SEPARATOR = b'\r\n'
 _PING_TIMEOUT = 3
 _PING_INTERVAL = 5
 _REQUEST_TIMEOUT_SECS = 60
@@ -83,7 +83,7 @@ class BufferedSocket(object):
   """
   def __init__(self, sock):
     self.sock = sock
-    self._buf = ''
+    self._buf = b''
 
   def fileno(self):
     return self.sock.fileno()
@@ -95,7 +95,7 @@ class BufferedSocket(object):
         self._buf = self._buf[bufsize:]
         return ret
       ret = self._buf
-      self._buf = ''
+      self._buf = b''
       return ret + self.sock.recv(bufsize - len(ret), flags)
     return self.sock.recv(bufsize, flags)
 
@@ -108,7 +108,7 @@ class BufferedSocket(object):
   def RecvBuf(self):
     """Only recive from buffer."""
     ret = self._buf
-    self._buf = ''
+    self._buf = b''
     return ret
 
   def Close(self):
@@ -527,7 +527,7 @@ class Ghost(object):
 
   def SendMessage(self, msg):
     """Serialize the message and send it through the socket."""
-    self._sock.Send(json.dumps(msg) + _SEPARATOR)
+    self._sock.Send(json.dumps(msg).encode('utf-8') + _SEPARATOR)
 
   def SendRequest(self, name, args, handler=None,
                   timeout=_REQUEST_TIMEOUT_SECS):

@@ -125,7 +125,7 @@ class TestOverlord(unittest.TestCase):
     class TestClient(WebSocketBaseClient):
       def __init__(self, *args, **kwargs):
         super(TestClient, self).__init__(*args, **kwargs)
-        self.message = ''
+        self.message = b''
 
       def handshake_ok(self):
         pass
@@ -154,7 +154,7 @@ class TestOverlord(unittest.TestCase):
         self.state = self.NONE
         self.answer = 0
         self.test_run = False
-        self.buffer = ''
+        self.buffer = b''
 
       def handshake_ok(self):
         pass
@@ -169,22 +169,22 @@ class TestOverlord(unittest.TestCase):
           return
 
         self.buffer += message.data
-        if '\r\n' not in self.buffer:
+        if b'\r\n' not in self.buffer:
           return
 
         self.test_run = True
-        msg_text, self.buffer = self.buffer.split('\r\n', 1)
+        msg_text, self.buffer = self.buffer.split(b'\r\n', 1)
         if self.state == self.NONE:
-          if msg_text.startswith('TEST-SHELL-CHALLENGE'):
+          if msg_text.startswith(b'TEST-SHELL-CHALLENGE'):
             self.state = self.PROMPT
             challenge_number = int(msg_text.split()[1])
             self.answer = challenge_number + _INCREMENT
             self.send('%d\n' % self.answer)
         elif self.state == self.PROMPT:
           msg_text = msg_text.strip()
-          if msg_text == 'SUCCESS':
+          if msg_text == b'SUCCESS':
             raise CloseWebSocket
-          elif msg_text == 'FAILED':
+          elif msg_text == b'FAILED':
             raise TestError('Challange failed')
           elif msg_text and int(msg_text) == self.answer:
             pass
