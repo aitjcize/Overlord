@@ -556,7 +556,7 @@ class Ghost(object):
       winsize = struct.pack('HHHH', params[0], params[1], 0, 0)
       fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
     else:
-      logging.warn('Invalid request command "%s"', command)
+      logging.warning('Invalid request command "%s"', command)
 
   def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
