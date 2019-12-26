@@ -339,7 +339,7 @@ class Ghost(object):
       return
 
     try:
-      with open(scriptpath, 'w') as f:
+      with open(scriptpath, 'wb') as f:
         f.write(data)
     except Exception:
       logging.error('Upgrade: failed to write upgrade onto disk, abort')
