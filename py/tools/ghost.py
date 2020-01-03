@@ -93,12 +93,10 @@ class BufferedSocket(object):
         ret = self._buf[:bufsize]
         self._buf = self._buf[bufsize:]
         return ret
-      else:
-        ret = self._buf
-        self._buf = ''
-        return ret + self.sock.recv(bufsize - len(ret), flags)
-    else:
-      return self.sock.recv(bufsize, flags)
+      ret = self._buf
+      self._buf = ''
+      return ret + self.sock.recv(bufsize - len(ret), flags)
+    return self.sock.recv(bufsize, flags)
 
   def UnRecv(self, buf):
     self._buf = buf + self._buf

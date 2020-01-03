@@ -431,9 +431,8 @@ class OverlordClientDaemon(object):
         if self._state.ssl_self_signed:
           return ('SSLCertificateChanged', ssl.get_server_certificate(
               (self._state.host, self._state.port)))
-        else:
-          return ('SSLVerifyFailed', ssl.get_server_certificate(
-              (self._state.host, self._state.port)))
+        return ('SSLVerifyFailed', ssl.get_server_certificate(
+            (self._state.host, self._state.port)))
 
     try:
       self._state.ssl = tls_enabled
