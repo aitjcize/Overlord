@@ -562,9 +562,9 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
     print('Connection to %s closed.' % self._mid)
 
-  def received_message(self, msg):
-    if msg.is_binary:
-      sys.stdout.write(msg.data)
+  def received_message(self, message):
+    if message.is_binary:
+      sys.stdout.write(message.data)
       sys.stdout.flush()
 
 
@@ -601,9 +601,9 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
   def closed(self, code, reason=None):
     pass
 
-  def received_message(self, msg):
-    if msg.is_binary:
-      self.output.write(msg.data)
+  def received_message(self, message):
+    if message.is_binary:
+      self.output.write(message.data)
       self.output.flush()
 
 
@@ -644,9 +644,9 @@ class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
     self._stop.set()
     sys.exit(0)
 
-  def received_message(self, msg):
-    if msg.is_binary:
-      self._sock.send(msg.data)
+  def received_message(self, message):
+    if message.is_binary:
+      self._sock.send(message.data)
 
 
 def Arg(*args, **kwargs):

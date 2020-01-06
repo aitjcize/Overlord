@@ -129,8 +129,8 @@ class TestOverlord(unittest.TestCase):
       def handshake_ok(self):
         pass
 
-      def received_message(self, msg):
-        self.message += msg.data
+      def received_message(self, message):
+        self.message += message.data
 
     clients = self._GetJSON('/api/agents/list')
     self.assertTrue(clients)
@@ -162,12 +162,12 @@ class TestOverlord(unittest.TestCase):
         if not self.test_run:
           raise RuntimeError('test exit before being run: %s' % reason)
 
-      def received_message(self, msg):
-        if msg.is_text:
+      def received_message(self, message):
+        if message.is_text:
           # Ignore control messages.
           return
 
-        self.buffer += msg.data
+        self.buffer += message.data
         if '\r\n' not in self.buffer:
           return
 
