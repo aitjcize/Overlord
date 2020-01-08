@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import platform
-import Queue
+import queue
 import re
 import select
 import signal
@@ -237,14 +237,14 @@ class Ghost(object):
 
     # RPC
     self._requests = {}
-    self._queue = Queue.Queue()
+    self._queue = queue.Queue()
 
     # Protocol specific
     self._last_ping = 0
     self._tty_device = tty_device
     self._shell_command = command
     self._file_op = file_op
-    self._download_queue = Queue.Queue()
+    self._download_queue = queue.Queue()
     self._port = port
 
   def SetIgnoreChild(self, status):
@@ -1138,7 +1138,7 @@ class Ghost(object):
 
         try:
           obj = self._queue.get(False)
-        except Queue.Empty:
+        except queue.Empty:
           pass
         else:
           if not isinstance(obj, str):
@@ -1191,7 +1191,7 @@ class Ghost(object):
       while True:
         try:
           addr = self._queue.get(False)
-        except Queue.Empty:
+        except queue.Empty:
           pass
         else:
           if isinstance(addr, tuple) and addr not in self._overlord_addrs:

@@ -13,7 +13,7 @@ interval for each command.
 import argparse
 import json
 import logging
-from Queue import PriorityQueue
+from queue import PriorityQueue
 import subprocess
 import sys
 import time
