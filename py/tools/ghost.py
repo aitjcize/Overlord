@@ -31,12 +31,13 @@ import threading
 import time
 import traceback
 import tty
-import urllib2
+import urllib.request
 import uuid
 
 import jsonrpclib
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
 from six import PY2
+
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', 4499))
 
@@ -301,8 +302,8 @@ class Ghost(object):
     # Download sha1sum for ghost.py for verification
     try:
       with contextlib.closing(
-          urllib2.urlopen(url + '.sha1', timeout=_CONNECT_TIMEOUT,
-                          context=self._tls_settings.Context())) as f:
+          urllib.request.urlopen(url + '.sha1', timeout=_CONNECT_TIMEOUT,
+                                 context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
         sha1sum = f.read().strip()
@@ -320,8 +321,8 @@ class Ghost(object):
     # Download upgrade version of ghost.py
     try:
       with contextlib.closing(
-          urllib2.urlopen(url, timeout=_CONNECT_TIMEOUT,
-                          context=self._tls_settings.Context())) as f:
+          urllib.request.urlopen(url, timeout=_CONNECT_TIMEOUT,
+                                 context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
         data = f.read()

@@ -9,7 +9,8 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-import urllib
+import urllib.parse
+import urllib.request
 
 from ws4py.client import WebSocketBaseClient
 
@@ -97,7 +98,8 @@ class TestOverlord(unittest.TestCase):
     self.pyghost.kill()
 
   def _GetJSON(self, path):
-    return json.loads(urllib.urlopen('http://' + self.host + path).read())
+    return json.loads(urllib.request.urlopen(
+        'http://' + self.host + path).read())
 
   def testWebAPI(self):
     # Test /api/app/list
@@ -137,8 +139,8 @@ class TestOverlord(unittest.TestCase):
 
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/shell/%s' %
-                      urllib.quote(client['mid']) + '?command=' +
-                      urllib.quote('uname -r'))
+                      urllib.parse.quote(client['mid']) + '?command=' +
+                      urllib.parse.quote('uname -r'))
       ws.connect()
       ws.run()
       self.assertEqual(ws.message, answer)
@@ -194,7 +196,7 @@ class TestOverlord(unittest.TestCase):
 
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/tty/%s' %
-                      urllib.quote(client['mid']))
+                      urllib.parse.quote(client['mid']))
       ws.connect()
       try:
         ws.run()

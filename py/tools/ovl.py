@@ -32,8 +32,9 @@ import threading
 import time
 import tty
 import unicodedata  # required by pyinstaller, pylint: disable=unused-import
-import urllib2
-import urlparse
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import jsonrpclib
 from jsonrpclib.config import Config
@@ -120,17 +121,17 @@ def GetTLSCertPath(host):
 
 
 def UrlOpen(state, url):
-  """Wrapper for urllib2.urlopen.
+  """Wrapper for urllib.request.urlopen.
 
   It selects correct HTTP scheme according to self._state.ssl, add HTTP
   basic auth headers, and add specify correct SSL context.
   """
   url = MakeRequestUrl(state, url)
-  request = urllib2.Request(url)
+  request = urllib.request.Request(url)
   if state.username is not None and state.password is not None:
     request.add_header(*BasicAuthHeader(state.username, state.password))
-  return urllib2.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
-                         context=state.ssl_context)
+  return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
+                                context=state.ssl_context)
 
 
 def GetTLSCertificateSHA1Fingerprint(cert_pem):
@@ -437,7 +438,7 @@ class OverlordClientDaemon(object):
     try:
       self._state.ssl = tls_enabled
       UrlOpen(self._state, '%s:%d' % (host, port))
-    except urllib2.HTTPError as e:
+    except urllib.error.HTTPError as e:
       return ('HTTPError', e.getcode(), str(e), e.read().strip())
     except Exception as e:
       return str(e)
@@ -784,7 +785,7 @@ class OverlordCLIClient(object):
     size = os.stat(filename).st_size
     boundary = '-----------%s' % _HTTP_BOUNDARY_MAGIC
     CRLF = '\r\n'
-    parse = urlparse.urlparse(url)
+    parse = urllib.parse.urlparse(url)
 
     part_headers = [
         '--' + boundary,
@@ -922,7 +923,8 @@ class OverlordCLIClient(object):
     ws = ShellWebSocketClient(
         self._state, sio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
             self._state.host, self._state.port,
-            urllib2.quote(self._selected_mid), urllib2.quote(command)),
+            urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(command)),
         headers=headers)
     ws.connect()
     ws.run()
@@ -1154,14 +1156,14 @@ class OverlordCLIClient(object):
           self._state, sys.stdout,
           scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
               self._state.host, self._state.port,
-              urllib2.quote(self._selected_mid), urllib2.quote(cmd)),
+              urllib.parse.quote(self._selected_mid), urllib.parse.quote(cmd)),
           headers=headers)
     else:
       ws = TerminalWebSocketClient(
           self._state, self._selected_mid, self._escape,
           scheme + '%s:%d/api/agent/tty/%s' % (
               self._state.host, self._state.port,
-              urllib2.quote(self._selected_mid)),
+              urllib.parse.quote(self._selected_mid)),
           headers=headers)
     try:
       ws.connect()
@@ -1199,10 +1201,10 @@ class OverlordCLIClient(object):
       mode = '0%o' % (0x1FF & os.stat(src).st_mode)
       url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
              (self._state.host, self._state.port,
-              urllib2.quote(self._selected_mid), dst, mode))
+              urllib.parse.quote(self._selected_mid), dst, mode))
       try:
         UrlOpen(self._state, url + '&filename=%s' % src_base)
-      except urllib2.HTTPError as e:
+      except urllib.error.HTTPError as e:
         msg = json.loads(e.read()).get('error', None)
         raise RuntimeError('push: %s' % msg)
 
@@ -1276,10 +1278,10 @@ class OverlordCLIClient(object):
 
       url = ('%s:%d/api/agent/download/%s?filename=%s' %
              (self._state.host, self._state.port,
-              urllib2.quote(self._selected_mid), urllib2.quote(src)))
+              urllib.parse.quote(self._selected_mid), urllib.parse.quote(src)))
       try:
         h = UrlOpen(self._state, url)
-      except urllib2.HTTPError as e:
+      except urllib.error.HTTPError as e:
         msg = json.loads(e.read()).get('error', 'unkown error')
         raise RuntimeError('pull: %s' % msg)
       except KeyboardInterrupt:
@@ -1387,7 +1389,7 @@ class OverlordCLIClient(object):
           self._state, conn,
           scheme + '%s:%d/api/agent/forward/%s?port=%d' % (
               self._state.host, self._state.port,
-              urllib2.quote(self._selected_mid), remote),
+              urllib.parse.quote(self._selected_mid), remote),
           headers=headers)
       try:
         ws.connect()
