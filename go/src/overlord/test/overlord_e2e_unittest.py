@@ -112,7 +112,7 @@ class TestOverlord(unittest.TestCase):
     assert len(self._GetJSON('/api/agents/list')) == 2
 
     # Test /api/logcats/list. TODO(wnhuang): test this properly
-    assert len(self._GetJSON('/api/logcats/list')) == 0
+    assert not self._GetJSON('/api/logcats/list')
 
     # Test /api/agent/properties/mid
     for client in self._GetJSON('/api/agents/list'):
@@ -190,7 +190,7 @@ class TestOverlord(unittest.TestCase):
             raise TestError('Unexpected response: %r' % msg_text)
 
     clients = self._GetJSON('/api/agents/list')
-    assert len(clients) > 0
+    assert clients
 
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/tty/%s' %
