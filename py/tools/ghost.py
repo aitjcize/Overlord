@@ -36,7 +36,6 @@ import uuid
 
 import jsonrpclib
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
-from six import PY2
 
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', 4499))
@@ -414,11 +413,7 @@ class Ghost(object):
 
         try:
           h = codecs.decode(parts[2], 'hex')
-          # TODO(kerker) Remove when py3 upgrade complete
-          if PY2:
-            ips.append('%d.%d.%d.%d' % tuple(ord(x) for x in reversed(h)))
-          else:
-            ips.append('.'.join([str(x) for x in reversed(h)]))
+          ips.append('.'.join([str(x) for x in reversed(h)]))
         except (TypeError, binascii.Error):
           pass
 
