@@ -40,7 +40,6 @@ import jsonrpclib
 from jsonrpclib.config import Config
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
 from six import iteritems
-from six.moves import input
 from ws4py.client import WebSocketBaseClient
 import yaml
 
