@@ -39,7 +39,6 @@ import urllib.request
 import jsonrpclib
 from jsonrpclib.config import Config
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
-from six import iteritems
 from ws4py.client import WebSocketBaseClient
 import yaml
 
@@ -672,7 +671,7 @@ def ParseMethodSubCommands(cls):
   This decorator retrieve command info from each method and append it in to the
   SUBCOMMANDS class variable, which is later used to construct parser.
   """
-  for unused_key, method in iteritems(cls.__dict__):
+  for unused_key, method in cls.__dict__.items():
     if hasattr(method, '__arg_attr'):
       # pylint: disable=protected-access
       cls.SUBCOMMANDS.append(method.__arg_attr)
