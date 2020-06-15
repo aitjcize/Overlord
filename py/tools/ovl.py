@@ -187,7 +187,7 @@ def MakeRequestUrl(state, url):
   return 'http%s://%s' % ('s' if state.ssl else '', url)
 
 
-class ProgressBar(object):
+class ProgressBar:
   SIZE_WIDTH = 11
   SPEED_WIDTH = 10
   DURATION_WIDTH = 6
@@ -277,7 +277,7 @@ class ProgressBar(object):
     sys.stdout.flush()
 
 
-class DaemonState(object):
+class DaemonState:
   """DaemonState is used for storing Overlord state info."""
   def __init__(self):
     self.version_sha1sum = GetVersionDigest()
@@ -297,7 +297,7 @@ class DaemonState(object):
     self.last_list = 0
 
 
-class OverlordClientDaemon(object):
+class OverlordClientDaemon:
   """Overlord Client Daemon."""
   def __init__(self):
     self._state = DaemonState()
@@ -679,7 +679,7 @@ def ParseMethodSubCommands(cls):
 
 
 @ParseMethodSubCommands
-class OverlordCLIClient(object):
+class OverlordCLIClient:
   """Overlord command line interface client."""
 
   SUBCOMMANDS = []

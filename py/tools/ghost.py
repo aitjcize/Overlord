@@ -75,7 +75,7 @@ class RequestError(Exception):
   pass
 
 
-class BufferedSocket(object):
+class BufferedSocket:
   """A buffered socket that supports unrecv.
 
   Allow putting back data back to the socket for the next recv() call.
@@ -114,7 +114,7 @@ class BufferedSocket(object):
     self.sock.close()
 
 
-class TLSSettings(object):
+class TLSSettings:
   def __init__(self, tls_cert_file, verify):
     """Constructor.
 
@@ -165,7 +165,7 @@ class TLSSettings(object):
     return self._tls_context
 
 
-class Ghost(object):
+class Ghost:
   """Ghost implements the client protocol of Overlord.
 
   Ghost provide terminal/shell/logcat functionality and manages the client
