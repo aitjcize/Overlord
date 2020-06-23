@@ -1019,8 +1019,7 @@ class OverlordCLIClient:
               if not username_provided or not password_provided:
                 continue
               break
-            else:
-              logging.error('%s; %s', except_str, body)
+            logging.error('%s; %s', except_str, body)
 
         if ret is not True:
           print('can not connect to %s: %s' % (host, ret))
@@ -1111,7 +1110,7 @@ class OverlordCLIClient:
 
     if not clients:
       raise RuntimeError('select: client not found')
-    elif len(clients) == 1:
+    if len(clients) == 1:
       mid = clients[0]['mid']
     else:
       # This case would not happen when args.mid is specified.

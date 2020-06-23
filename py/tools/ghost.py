@@ -1022,11 +1022,11 @@ class Ghost:
         if response['response'] != SUCCESS:
           self._reset.set()
           raise RuntimeError('Register: ' + response['response'])
-        else:
-          logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
-          self._connected_addr = non_local['addr']
-          self.Upgrade()  # Check for upgrade
-          self._queue.put('pause', True)
+
+        logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
+        self._connected_addr = non_local['addr']
+        self.Upgrade()  # Check for upgrade
+        self._queue.put('pause', True)
 
       try:
         logging.info('Trying %s:%d ...', *addr)

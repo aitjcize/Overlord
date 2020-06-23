@@ -184,9 +184,9 @@ class TestOverlord(unittest.TestCase):
           msg_text = msg_text.strip()
           if msg_text == b'SUCCESS':
             raise CloseWebSocket
-          elif msg_text == b'FAILED':
+          if msg_text == b'FAILED':
             raise TestError('Challange failed')
-          elif msg_text and int(msg_text) == self.answer:
+          if msg_text and int(msg_text) == self.answer:
             pass
           else:
             raise TestError('Unexpected response: %r' % msg_text)
