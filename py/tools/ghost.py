@@ -401,7 +401,7 @@ class Ghost:
       if ret:
         return [ret.group(1)]
       return []
-    elif self._platform == 'Linux':
+    if self._platform == 'Linux':
       with open('/proc/net/route', 'r') as f:
         lines = f.readlines()
 
@@ -418,9 +418,9 @@ class Ghost:
           pass
 
       return ips
-    else:
-      logging.warning('GetGateWayIP: unsupported platform')
-      return []
+
+    logging.warning('GetGateWayIP: unsupported platform')
+    return []
 
   def GetFactoryServerIP(self):
     try:
@@ -449,7 +449,7 @@ class Ghost:
     """
     if self._mid == Ghost.RANDOM_MID:
       return str(uuid.uuid4())
-    elif self._mid:
+    if self._mid:
       return self._mid
 
     # Darwin
@@ -494,7 +494,7 @@ class Ghost:
   def GetProcessWorkingDirectory(self, pid):
     if self._platform == 'Linux':
       return os.readlink('/proc/%d/cwd' % pid)
-    elif self._platform == 'Darwin':
+    if self._platform == 'Darwin':
       PROC_PIDVNODEPATHINFO = 9
       proc_vnodepathinfo_size = 2352
       vid_path_offset = 152
@@ -506,8 +506,7 @@ class Ghost:
       buf = buf.raw[vid_path_offset:]
       n = buf.index('\0')
       return buf[:n]
-    else:
-      raise RuntimeError('GetProcessWorkingDirectory: unsupported platform')
+    raise RuntimeError('GetProcessWorkingDirectory: unsupported platform')
 
   def Reset(self):
     """Reset state and clear request handlers."""

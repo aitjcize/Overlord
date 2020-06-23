@@ -733,7 +733,7 @@ class OverlordCLIClient:
     if command == 'start-server':
       self.StartServer()
       return
-    elif command == 'kill-server':
+    if command == 'kill-server':
       self.KillServer()
       return
 
@@ -741,7 +741,7 @@ class OverlordCLIClient:
     if command == 'status':
       self.Status()
       return
-    elif command == 'connect':
+    if command == 'connect':
       self.Connect(args)
       return
 
@@ -1001,7 +1001,7 @@ class OverlordCLIClient:
           if ret[0] == 'SSLCertificateChanged':
             print(_TLS_CERT_CHANGED_WARNING % (fp_text, GetTLSCertPath(host)))
             return
-          elif ret[0] == 'SSLVerifyFailed':
+          if ret[0] == 'SSLVerifyFailed':
             print(_TLS_CERT_FAILED_WARNING % (fp_text), end='')
             response = input()
             if response.lower() in ['y', 'ye', 'yes']:
@@ -1011,7 +1011,7 @@ class OverlordCLIClient:
               continue
             print('connection aborted.')
             return
-          elif ret[0] == 'HTTPError':
+          if ret[0] == 'HTTPError':
             code, except_str, body = ret[1:]
             if code == 401:
               print('connect: %s' % body)
