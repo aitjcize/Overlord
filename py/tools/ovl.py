@@ -1009,9 +1009,8 @@ class OverlordCLIClient:
               print('TLS host Certificate trusted, you will not be prompted '
                     'next time.\n')
               continue
-            else:
-              print('connection aborted.')
-              return
+            print('connection aborted.')
+            return
           elif ret[0] == 'HTTPError':
             code, except_str, body = ret[1:]
             if code == 401:
@@ -1019,8 +1018,7 @@ class OverlordCLIClient:
               prompt = True
               if not username_provided or not password_provided:
                 continue
-              else:
-                break
+              break
             else:
               logging.error('%s; %s', except_str, body)
 
