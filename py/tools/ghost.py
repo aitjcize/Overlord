@@ -271,6 +271,8 @@ class Ghost:
       return True
     except ssl.SSLError:
       return False
+    except socket.timeout:
+      return False
     except socket.error:  # Connect refused or timeout
       raise
     except Exception:
@@ -582,39 +584,49 @@ class Ghost:
       else:
         fd = os.open(self._tty_device, os.O_RDWR)
         tty.setraw(fd)
+        # 0: iflag
+        # 1: oflag
+        # 2: cflag
+        # 3: lflag
+        # 4: ispeed
+        # 5: ospeed
+        # 6: cc
         attr = termios.tcgetattr(fd)
-        attr[0] &= ~(termios.IXON | termios.IXOFF)
+        attr[0] &= (termios.IXON | termios.IXOFF)
         attr[2] |= termios.CLOCAL
         attr[2] &= ~termios.CRTSCTS
         attr[4] = termios.B115200
         attr[5] = termios.B115200
         termios.tcsetattr(fd, termios.TCSANOW, attr)
 
-      nonlocals = {'control_state': None, 'control_str': ''}
+      nonlocals = {
+          'control_state': None,
+          'control_str': b''
+      }
 
       def _ProcessBuffer(buf):
-        write_buffer = ''
+        write_buffer = b''
         while buf:
           if nonlocals['control_state']:
-            if chr(_CONTROL_END) in buf:
-              index = buf.index(chr(_CONTROL_END))
+            if _CONTROL_END in buf:
+              index = buf.index(_CONTROL_END)
               nonlocals['control_str'] += buf[:index]
               self.HandleTTYControl(fd, nonlocals['control_str'])
               nonlocals['control_state'] = None
-              nonlocals['control_str'] = ''
+              nonlocals['control_str'] = b''
               buf = buf[index+1:]
             else:
               nonlocals['control_str'] += buf
-              buf = ''
+              buf = b''
           else:
-            if chr(_CONTROL_START) in buf:
+            if _CONTROL_START in buf:
               nonlocals['control_state'] = _CONTROL_START
-              index = buf.index(chr(_CONTROL_START))
+              index = buf.index(_CONTROL_START)
               write_buffer += buf[:index]
               buf = buf[index+1:]
             else:
               write_buffer += buf
-              buf = ''
+              buf = b''
 
         if write_buffer:
           os.write(fd, write_buffer)
@@ -633,7 +645,7 @@ class Ghost:
             raise RuntimeError('connection terminated')
           _ProcessBuffer(buf)
     except Exception as e:
-      logging.error('SpawnTTYServer: %s', e)
+      logging.error('SpawnTTYServer: %s', e, exc_info=True)
     finally:
       self._sock.Close()
 
@@ -690,7 +702,7 @@ class Ghost:
         if p.returncode is not None:
           break
     except Exception as e:
-      logging.error('SpawnShellServer: %s', e)
+      logging.error('SpawnShellServer: %s', e, exc_info=True)
     finally:
       # Check if the process is terminated. If not, Send SIGTERM to process,
       # then wait for 1 second. Send another SIGKILL to make sure the process is
