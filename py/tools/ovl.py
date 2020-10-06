@@ -37,7 +37,7 @@ import urllib.parse
 import urllib.request
 
 import jsonrpclib
-from jsonrpclib.config import Config
+from jsonrpclib import config
 from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
 from ws4py.client import WebSocketBaseClient
 import yaml
@@ -171,8 +171,9 @@ def AutoRetry(action_name, retries):
 
 def BasicAuthHeader(user, password):
   """Return HTTP basic auth header."""
-  credential = base64.b64encode('%s:%s' % (user, password))
-  return ('Authorization', 'Basic %s' % credential)
+  credential = base64.b64encode(
+      b'%s:%s' % (user.encode('utf-8'), password.encode('utf-8')))
+  return ('Authorization', 'Basic %s' % credential.decode('utf-8'))
 
 
 def GetTerminalSize():
@@ -300,7 +301,9 @@ class DaemonState:
 class OverlordClientDaemon:
   """Overlord Client Daemon."""
   def __init__(self):
-    self._state = DaemonState()
+    # Use full module path for jsonrpclib to resolve.
+    import cros.factory.tools.ovl
+    self._state = cros.factory.tools.ovl.DaemonState()
     self._server = None
 
   def Start(self):
@@ -562,7 +565,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
 
   def received_message(self, message):
     if message.is_binary:
-      sys.stdout.write(message.data)
+      sys.stdout.write(message.data.decode('utf-8'))
       sys.stdout.flush()
 
 
@@ -583,7 +586,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
     def _FeedInput():
       try:
         while True:
-          data = sys.stdin.read(1)
+          data = sys.stdin.buffer.read(1)
 
           if not data:
             self.send(_STDIN_CLOSED * 2)
@@ -601,7 +604,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
 
   def received_message(self, message):
     if message.is_binary:
-      self.output.write(message.data)
+      self.output.write(message.data.decode('utf-8'))
       self.output.flush()
 
 
@@ -797,9 +800,10 @@ class OverlordCLIClient:
 
     content_length = len(part_header) + size + len(end_part)
     if parse.scheme == 'http':
-      h = http.client.HTTP(parse.netloc)
+      h = http.client.HTTPConnection(parse.netloc)
     else:
-      h = http.client.HTTPS(parse.netloc, context=self._state.ssl_context)
+      h = http.client.HTTPSConnection(parse.netloc,
+                                      context=self._state.ssl_context)
 
     post_path = url[url.index(parse.netloc) + len(parse.netloc):]
     h.putrequest('POST', post_path)
@@ -809,10 +813,10 @@ class OverlordCLIClient:
     if user and passwd:
       h.putheader(*BasicAuthHeader(user, passwd))
     h.endheaders()
-    h.send(part_header)
+    h.send(part_header.encode('utf-8'))
 
     count = 0
-    with open(filename, 'r') as f:
+    with open(filename, 'rb') as f:
       while True:
         data = f.read(_BUFSIZ)
         if not data:
@@ -822,14 +826,14 @@ class OverlordCLIClient:
           progress(count * 100 // size, count)
         h.send(data)
 
-    h.send(end_part)
+    h.send(end_part.encode('utf-8'))
     progress(100)
 
     if count != size:
       logging.warning('file changed during upload, upload may be truncated.')
 
-    errcode, unused_x, unused_y = h.getreply()
-    return errcode == 200
+    resp = h.getresponse()
+    return resp.status == 200
 
   def CheckDaemon(self):
     self._server = OverlordClientDaemon.GetRPCServer()
@@ -1283,7 +1287,7 @@ class OverlordCLIClient:
         return
 
       pbar = ProgressBar(src_base)
-      with open(dst, 'w') as f:
+      with open(dst, 'wb') as f:
         os.fchmod(f.fileno(), perm)
         total_size = int(h.headers.get('Content-Length'))
         downloaded_size = 0
@@ -1413,14 +1417,14 @@ class OverlordCLIClient:
 def main():
   # Setup logging format
   logger = logging.getLogger()
-  logger.setLevel(logging.INFO)
+  logger.setLevel(logging.DEBUG)
   handler = logging.StreamHandler()
   formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
   handler.setFormatter(formatter)
   logger.addHandler(handler)
 
   # Add DaemonState to JSONRPC lib classes
-  Config.instance().classes.add(DaemonState)
+  config.DEFAULT.classes.add(DaemonState)
 
   ovl = OverlordCLIClient()
   try:
@@ -1428,7 +1432,7 @@ def main():
   except KeyboardInterrupt:
     print('Ctrl-C received, abort')
   except Exception as e:
-    print('error: %s' % e)
+    logging.exception('exit with error [%s]', e)
 
 
 if __name__ == '__main__':
