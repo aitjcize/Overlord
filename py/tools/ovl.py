@@ -4,7 +4,6 @@
 # found in the LICENSE file.
 
 from __future__ import division
-from __future__ import print_function
 
 import argparse
 import ast
