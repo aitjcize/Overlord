@@ -648,7 +648,7 @@ class Ghost:
       self._sock.Close()
 
     logging.info('SpawnTTYServer: terminated')
-    sys.exit(0)
+    os._exit(0)  # pylint: disable=protected-access
 
   def SpawnShellServer(self, unused_var):
     """Spawn a shell server and forward input/output from/to the TCP socket."""
@@ -718,7 +718,7 @@ class Ghost:
       self._sock.Close()
 
     logging.info('SpawnShellServer: terminated')
-    sys.exit(0)
+    os._exit(0)  # pylint: disable=protected-access
 
   def InitiateFileOperation(self, unused_var):
     if self._file_op[0] == 'download':
@@ -788,7 +788,7 @@ class Ghost:
       self._sock.Close()
 
     logging.info('StartUploadServer: terminated')
-    sys.exit(0)
+    os._exit(0)  # pylint: disable=protected-access
 
   def SpawnPortForwardServer(self, unused_var):
     """Spawn a port forwarding server and forward I/O to the TCP socket."""
@@ -824,7 +824,7 @@ class Ghost:
       self._sock.Close()
 
     logging.info('SpawnPortForwardServer: terminated')
-    sys.exit(0)
+    os._exit(0)  # pylint: disable=protected-access
 
   def Ping(self):
     def timeout_handler(x):
