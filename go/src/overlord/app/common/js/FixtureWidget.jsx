@@ -54,7 +54,7 @@ var LIGHT_CSS_MAP = {
 //   "properties": {
 //     "ip": "127.0.0.1",
 //     "ui": {
-//       // A master command which updates ui states.
+//       // The main command which updates ui states.
 //       // "update_ui_status" is a script we wrote that will respect
 //       // @init_cmd and @poll attributes in lights and display.data, you can
 //       // implement your own script instead.
