@@ -814,7 +814,7 @@ class Ghost:
         if src_sock in rd:
           data = src_sock.recv(_BUFSIZE)
           if not data:
-            break
+            continue
           self._sock.Send(data)
     except Exception as e:
       logging.error('SpawnPortForwardServer: %s', e)
