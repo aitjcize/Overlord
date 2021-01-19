@@ -461,20 +461,29 @@ var Controls = React.createClass({
         $("<iframe src='" + url + "' style='display:none'>" +
           "</iframe>").appendTo('body');
       }
-      var startDownload = function () {
+      var startDownload = function (file_path) {
         // Check if there is filename_cmd
         if (typeof(ctrl.filename_cmd) != "undefined") {
           getRemoteCmdOutput(mid, ctrl.filename_cmd)
             .done(function (path) { downloadFile(path); });
         } else {
-          downloadFile(ctrl.filename);
+          downloadFile(file_path);
         }
+      }
+      var file_path = ctrl.filename;
+      if (typeof(file_path) == "undefined" &&
+          typeof(ctrl.filename_cmd) == "undefined") {
+        file_path = prompt('Enter abosolute path to file:');
+      }
+      if ((file_path == null || file_path == "") &&
+          typeof(ctrl.filename_cmd) == "undefined") {
+        return;
       }
       if (typeof(ctrl.command) != "undefined") {
         fixture.executeRemoteCmd(mid, ctrl.command)
-          .done(function() { startDownload(); });
+          .done(function() { startDownload(file_path); });
       } else {
-        startDownload();
+        startDownload(file_path);
       }
     } else {
       fixture.executeRemoteCmd(mid, ctrl.command);

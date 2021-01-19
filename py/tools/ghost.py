@@ -754,7 +754,7 @@ class Ghost:
       self._sock.Close()
 
     logging.info('StartDownloadServer: terminated')
-    sys.exit(0)
+    os._exit(0)  # pylint: disable=protected-access
 
   def StartUploadServer(self):
     logging.info('StartUploadServer: started')
