@@ -460,6 +460,8 @@ var Controls = React.createClass({
                   "?filename=" + filename;
         $("<iframe src='" + url + "' style='display:none'>" +
           "</iframe>").appendTo('body');
+        target.text(ctrl.name);
+        target.removeClass("active");
       }
       var startDownload = function (file_path) {
         // Check if there is filename_cmd
@@ -479,6 +481,9 @@ var Controls = React.createClass({
           typeof(ctrl.filename_cmd) == "undefined") {
         return;
       }
+
+      target.text(ctrl.name + " (Processing...)");
+      target.addClass("active");
       if (typeof(ctrl.command) != "undefined") {
         fixture.executeRemoteCmd(mid, ctrl.command)
           .done(function() { startDownload(file_path); });
