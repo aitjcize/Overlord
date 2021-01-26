@@ -661,7 +661,10 @@ var AuxLog = React.createClass({
   },
   render: function () {
     return (
-      <div className="log log-aux well well-sm" ref={"log-" + this.props.mid}>
+      <div>
+        {this.props.filename + ":"}
+        <div className="log log-aux well well-sm" ref={"log-" + this.props.mid}>
+        </div>
       </div>
     );
   }
