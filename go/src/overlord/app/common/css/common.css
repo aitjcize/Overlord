@@ -140,6 +140,9 @@
   display: inline-block;
   /** width and margin are defined in FixtureWidget.jsx */
   vertical-align: text-top;
+  height: calc(100% - 100px);
+  overflow: auto;
+  overflow-wrap: anywhere;
 }
 
 .fixture-block > .panel-heading {
