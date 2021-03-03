@@ -866,11 +866,9 @@ class OverlordCLIClient:
       pass
 
     subprocess.Popen([
-        'ssh', '-Nf',
-        '-M',  # Enable master mode
-        '-S', control_file,
-        '-L', '9000:localhost:9000',
-        '-p', str(port),
+        'ssh', '-Nf', '-M', '-S', control_file, '-L', '9000:localhost:9000',
+        '-p',
+        str(port),
         '%s%s' % (user + '@' if user else '', host)
     ]).wait()
 
