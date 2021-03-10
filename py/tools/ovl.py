@@ -693,7 +693,9 @@ class OverlordCLIClient:
 
   def _BuildParser(self):
     root_parser = argparse.ArgumentParser(prog='ovl')
-    subparsers = root_parser.add_subparsers(help='sub-command')
+    subparsers = root_parser.add_subparsers(title='subcommands',
+                                            dest='subcommand')
+    subparsers.required = True
 
     root_parser.add_argument('-s', dest='selected_mid', action='store',
                              default=None,
