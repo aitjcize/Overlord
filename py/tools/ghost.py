@@ -1255,14 +1255,6 @@ def DownloadFile(filename):
 
 
 def main():
-  # Setup logging format
-  logger = logging.getLogger()
-  logger.setLevel(logging.INFO)
-  handler = logging.StreamHandler()
-  formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
-  handler.setFormatter(formatter)
-  logger.addHandler(handler)
-
   parser = argparse.ArgumentParser()
   parser.add_argument('--fork', dest='fork', action='store_true', default=False,
                       help='fork procecess to run in background')
@@ -1328,8 +1320,20 @@ def main():
   g.Start(args.lan_disc, args.rpc_server)
 
 
-if __name__ == '__main__':
+def try_main():
+  # Setup logging format
+  logger = logging.getLogger()
+  logger.setLevel(logging.INFO)
+  handler = logging.StreamHandler()
+  formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
+  handler.setFormatter(formatter)
+  logger.addHandler(handler)
+
   try:
     main()
   except Exception as e:
     logging.error(e)
+
+
+if __name__ == '__main__':
+  try_main()
