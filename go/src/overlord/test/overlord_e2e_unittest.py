@@ -14,10 +14,12 @@ import urllib.request
 
 from ws4py.client import WebSocketBaseClient
 
+from cros.factory.unittest_utils import label_utils
 from cros.factory.utils import net_utils
 from cros.factory.utils import sync_utils
 
 
+# Constants.
 _HOST = '127.0.0.1'
 _INCREMENT = 42
 
@@ -124,7 +126,7 @@ class TestOverlord(unittest.TestCase):
   def testShellCommand(self):
     class TestClient(WebSocketBaseClient):
       def __init__(self, *args, **kwargs):
-        super(TestClient, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.message = b''
 
       def handshake_ok(self):
@@ -150,7 +152,7 @@ class TestOverlord(unittest.TestCase):
       NONE, PROMPT, RESPONSE = range(0, 3)
 
       def __init__(self, *args, **kwargs):
-        super(TestClient, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.state = self.NONE
         self.answer = 0
         self.test_run = False
