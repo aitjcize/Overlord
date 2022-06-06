@@ -1007,9 +1007,9 @@ class Ghost:
         if self._reset.is_set():
           break
     except socket.error:
-      raise RuntimeError('Connection dropped')
+      raise RuntimeError('Connection dropped') from None
     except PingTimeoutError:
-      raise RuntimeError('Connection timeout')
+      raise RuntimeError('Connection timeout') from None
     finally:
       self.Reset()
 

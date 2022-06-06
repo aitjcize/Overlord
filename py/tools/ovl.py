@@ -892,7 +892,7 @@ class OverlordCLIClient:
     try:
       self._server.Clients()
     except Exception:
-      raise RuntimeError('remote server disconnected, abort')
+      raise RuntimeError('remote server disconnected, abort') from None
 
     if self._state.ssh_pid is not None:
       with subprocess.Popen(
@@ -1125,9 +1125,9 @@ class OverlordCLIClient:
         choice = int(input()) - 1
         mid = clients[choice]['mid']
       except ValueError:
-        raise RuntimeError('select: invalid selection')
+        raise RuntimeError('select: invalid selection') from None
       except IndexError:
-        raise RuntimeError('select: selection out of range')
+        raise RuntimeError('select: selection out of range') from None
 
     self._selected_mid = mid
     if store:
@@ -1203,7 +1203,7 @@ class OverlordCLIClient:
         UrlOpen(self._state, url + '&filename=%s' % src_base)
       except urllib.error.HTTPError as e:
         msg = json.loads(e.read()).get('error', None)
-        raise RuntimeError('push: %s' % msg)
+        raise RuntimeError('push: %s' % msg) from None
 
       pbar = ProgressBar(src_base)
       self._HTTPPostFile(url, src, pbar.SetProgress,
@@ -1280,7 +1280,7 @@ class OverlordCLIClient:
         h = UrlOpen(self._state, url)
       except urllib.error.HTTPError as e:
         msg = json.loads(e.read()).get('error', 'unkown error')
-        raise RuntimeError('pull: %s' % msg)
+        raise RuntimeError('pull: %s' % msg) from None
       except KeyboardInterrupt:
         return
 
