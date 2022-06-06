@@ -841,7 +841,7 @@ class Ghost:
       filepath = os.path.join(os.getenv('HOME', '/tmp'), filepath)
 
     try:
-      with open(filepath, 'r') as _:
+      with open(filepath, 'rb', encoding=None):
         pass
     except Exception as e:
       self.SendResponse(msg, str(e))
@@ -886,7 +886,7 @@ class Ghost:
       pass
 
     try:
-      with open(dest_path, 'w') as _:
+      with open(dest_path, 'wb', encoding=None):
         pass
     except Exception as e:
       self.SendResponse(msg, str(e))

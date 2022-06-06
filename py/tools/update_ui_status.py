@@ -30,7 +30,7 @@ def main():
 
   args = parser.parse_args()
 
-  with open(args.config) as f:
+  with open(args.config, encoding='utf8') as f:
     properties = json.load(f)
     try:
       lights = properties['ui']['lights']
