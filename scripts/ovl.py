@@ -32,10 +32,9 @@ import unicodedata  # required by pyinstaller, pylint: disable=unused-import
 import urllib.error
 import urllib.parse
 import urllib.request
+from xmlrpc.client import ServerProxy
+from xmlrpc.server import SimpleXMLRPCServer
 
-import jsonrpclib
-from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
-from jsonrpclib import config
 from ws4py.client import WebSocketBaseClient
 import yaml
 
@@ -126,7 +125,7 @@ def UrlOpen(state, url):
   if state.username is not None and state.password is not None:
     request.add_header(*BasicAuthHeader(state.username, state.password))
   return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
-                                context=state.ssl_context)
+                                context=state.SSLContext())
 
 
 def GetTLSCertificateSHA1Fingerprint(cert_pem):
@@ -283,7 +282,8 @@ class DaemonState:
     self.port = None
     self.ssl = False
     self.ssl_self_signed = False
-    self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    self.ssl_verify = True
+    self.ssl_check_hostname = True
     self.ssh = False
     self.orig_host = None
     self.ssh_pid = None
@@ -294,21 +294,48 @@ class DaemonState:
     self.listing = []
     self.last_list = 0
 
+  def SSLContext(self):
+    # No verify.
+    if not self.ssl_verify:
+      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context.verify_mode = ssl.CERT_NONE
+      return context
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = self.ssl_check_hostname
+
+    # Check if self signed certificate exists.
+    ssl_cert_path = GetTLSCertPath(self.host)
+    if os.path.exists(ssl_cert_path):
+      context.load_verify_locations(ssl_cert_path)
+      self.ssl_self_signed = True
+      return context
+
+    return ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+
+
+  @staticmethod
+  def FromDict(kw):
+    state = DaemonState()
+
+    for k, v in kw.items():
+      setattr(state, k, v)
+    return state
+
 
 class OverlordClientDaemon:
   """Overlord Client Daemon."""
   def __init__(self):
-    # Use full module path for jsonrpclib to resolve.
-    import ovl
-    self._state = ovl.DaemonState()
+    self._state = DaemonState()
     self._server = None
 
   def Start(self):
     self.StartRPCServer()
 
   def StartRPCServer(self):
-    self._server = SimpleJSONRPCServer(_OVERLORD_CLIENT_DAEMON_RPC_ADDR,
-                                       logRequests=False)
+    self._server = SimpleXMLRPCServer(_OVERLORD_CLIENT_DAEMON_RPC_ADDR,
+                                      logRequests=False, allow_none=True)
     exports = [
         (self.State, 'State'),
         (self.Ping, 'Ping'),
@@ -332,8 +359,8 @@ class OverlordClientDaemon:
   @staticmethod
   def GetRPCServer():
     """Returns the Overlord client daemon RPC server."""
-    server = jsonrpclib.Server('http://%s:%d' %
-                               _OVERLORD_CLIENT_DAEMON_RPC_ADDR)
+    server = ServerProxy('http://%s:%d' % _OVERLORD_CLIENT_DAEMON_RPC_ADDR,
+                         allow_none=True)
     try:
       server.Ping()
     except Exception:
@@ -389,30 +416,13 @@ class OverlordClientDaemon:
       finally:
         sock.close()
 
-      # Save SSLContext for future use.
-      self._state.ssl_context = context
       return True
 
-    # First try connect with built-in certificates
-    tls_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-    if _DoConnect(tls_context):
-      return True
-
-    # Try with already saved certificate, if any.
-    tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-    tls_context.verify_mode = ssl.CERT_REQUIRED
-    tls_context.check_hostname = check_hostname
-
-    tls_cert_path = GetTLSCertPath(self._state.host)
-    if os.path.exists(tls_cert_path):
-      tls_context.load_verify_locations(tls_cert_path)
-      self._state.ssl_self_signed = True
-
-    return _DoConnect(tls_context)
+    return _DoConnect(self._state.SSLContext())
 
   def Connect(self, host, port=_OVERLORD_HTTP_PORT, ssh_pid=None,
               username=None, password=None, orig_host=None,
-              check_hostname=True):
+              ssl_verify=True, ssl_check_hostname=True):
     self._state.username = username
     self._state.password = password
     self._state.host = host
@@ -422,10 +432,12 @@ class OverlordClientDaemon:
     self._state.orig_host = orig_host
     self._state.ssh_pid = ssh_pid
     self._state.selected_mid = None
+    self._state.ssl_verify = ssl_verify
+    self._state.ssl_check_hostname = ssl_check_hostname
 
-    tls_enabled = self._TLSEnabled()
-    if tls_enabled:
-      result = self._CheckTLSCertificate(check_hostname)
+    ssl_enabled = self._TLSEnabled()
+    if ssl_enabled:
+      result = self._CheckTLSCertificate(ssl_check_hostname)
       if not result:
         if self._state.ssl_self_signed:
           return ('SSLCertificateChanged', ssl.get_server_certificate(
@@ -434,7 +446,7 @@ class OverlordClientDaemon:
             (self._state.host, self._state.port)))
 
     try:
-      self._state.ssl = tls_enabled
+      self._state.ssl = ssl_enabled
       UrlOpen(self._state, '%s:%d' % (host, port))
     except urllib.error.HTTPError as e:
       return ('HTTPError', e.getcode(), str(e), e.read().strip())
@@ -455,11 +467,11 @@ class OverlordClientDaemon:
     self._state.selected_mid = mid
 
   def AddForward(self, mid, remote, local, pid):
-    self._state.forwards[local] = (mid, remote, pid)
+    self._state.forwards[str(local)] = (mid, remote, pid)
 
   def RemoveForward(self, local_port):
     try:
-      unused_mid, unused_remote, pid = self._state.forwards[local_port]
+      unused_mid, unused_remote, pid = self._state.forwards[str(local_port)]
       KillGraceful(pid)
       del self._state.forwards[local_port]
     except (KeyError, OSError):
@@ -486,7 +498,7 @@ class SSLEnabledWebSocketBaseClient(WebSocketBaseClient):
       cafile = GetTLSCertPath(state.host)
 
     ssl_options = {
-        'cert_reqs': ssl.CERT_REQUIRED,
+        'cert_reqs': ssl.CERT_REQUIRED if state.ssl_verify else ssl.CERT_NONE,
         'ca_certs': cafile
     }
     # ws4py does not allow you to specify SSLContext, but rather passing in the
@@ -557,7 +569,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
   def closed(self, code, reason=None):
     del code, reason  # Unused.
     termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
-    print('Connection to %s closed.' % self._mid)
+    print('\nConnection to %s closed.' % self._mid)
 
   def received_message(self, message):
     if message.is_binary:
@@ -801,7 +813,7 @@ class OverlordCLIClient:
       h = http.client.HTTPConnection(parse.netloc)
     else:
       h = http.client.HTTPSConnection(parse.netloc,
-                                      context=self._state.ssl_context)
+                                      context=self._state.SSLContext())
 
     post_path = url[url.index(parse.netloc) + len(parse.netloc):]
     h.putrequest('POST', post_path)
@@ -840,7 +852,7 @@ class OverlordCLIClient:
             _OVERLORD_CLIENT_DAEMON_PORT)
       self.StartServer()
 
-    self._state = self._server.State()
+    self._state = DaemonState.FromDict(self._server.State())
     sha1sum = GetVersionDigest()
 
     if sha1sum != self._state.version_sha1sum:
@@ -964,7 +976,10 @@ class OverlordCLIClient:
           type=str, help='Overlord HTTP auth username'),
       Arg('-w', '--passwd', dest='passwd', default=None, type=str,
           help='Overlord HTTP auth password'),
-      Arg('-i', '--no-check-hostname', dest='check_hostname',
+      Arg('--ssl-no-verify', dest='ssl_verify',
+          default=True, action='store_false',
+          help='Ignore SSL cert verification'),
+      Arg('--ssl-no-check-hostname', dest='ssl_check_hostname',
           default=True, action='store_false',
           help='Ignore SSL cert hostname check')])
   def Connect(self, args):
@@ -993,7 +1008,7 @@ class OverlordCLIClient:
 
         ret = self._server.Connect(host, args.port, ssh_pid, args.user,
                                    args.passwd, orig_host,
-                                   args.check_hostname)
+                                   args.ssl_verify, args.ssl_check_hostname)
         if isinstance(ret, list):
           if ret[0].startswith('SSL'):
             cert_pem = ret[1]
@@ -1048,7 +1063,7 @@ class OverlordCLIClient:
     if self._server is None:
       return
 
-    self._state = self._server.State()
+    self._state = DaemonState.FromDict(self._server.State())
 
     # Kill SSH Tunnel
     self.KillSSHTunnel()
@@ -1421,16 +1436,13 @@ def main():
   handler.setFormatter(formatter)
   logger.addHandler(handler)
 
-  # Add DaemonState to JSONRPC lib classes
-  config.DEFAULT.classes.add(DaemonState)
-
   ovl = OverlordCLIClient()
   try:
     ovl.Main()
   except KeyboardInterrupt:
     print('Ctrl-C received, abort')
   except Exception as e:
-    logging.exception('exit with error [%s]', e)
+    print(f'error: {e}')
 
 
 if __name__ == '__main__':

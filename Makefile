@@ -39,7 +39,7 @@ py-bin:
 	# Build ovl binary with pyinstaller
 	cd $(BUILD); \
 	. $(BUILD)/.venv/bin/activate; \
-	pip install jsonrpclib ws4py pyyaml pyinstaller; \
+	pip install ws4py pyyaml pyinstaller; \
 	pyinstaller --onefile $(CURDIR)/scripts/ovl.py; \
 	pyinstaller --onefile $(CURDIR)/scripts/ghost.py
 	# Move built binary to bin

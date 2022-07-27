@@ -31,9 +31,8 @@ import traceback
 import tty
 import urllib.request
 import uuid
-
-import jsonrpclib
-from jsonrpclib.SimpleJSONRPCServer import SimpleJSONRPCServer
+from xmlrpc.client import ServerProxy
+from xmlrpc.server import SimpleXMLRPCServer
 
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', '4499'))
@@ -1160,8 +1159,8 @@ class Ghost:
 
   def StartRPCServer(self):
     logging.info('RPC Server: started')
-    rpc_server = SimpleJSONRPCServer((_DEFAULT_BIND_ADDRESS, _GHOST_RPC_PORT),
-                                     logRequests=False)
+    rpc_server = SimpleXMLRPCServer((_DEFAULT_BIND_ADDRESS, _GHOST_RPC_PORT),
+                                     logRequests=False, allow_none=True)
     rpc_server.register_function(self.Reconnect, 'Reconnect')
     rpc_server.register_function(self.GetStatus, 'GetStatus')
     rpc_server.register_function(self.RegisterTTY, 'RegisterTTY')
@@ -1226,7 +1225,7 @@ class Ghost:
 
 def GhostRPCServer():
   """Returns handler to Ghost's JSON RPC server."""
-  return jsonrpclib.Server('http://localhost:%d' % _GHOST_RPC_PORT)
+  return ServerProxy('http://localhost:%d' % _GHOST_RPC_PORT)
 
 
 def ForkToBackground():
