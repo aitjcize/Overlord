@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
@@ -16,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -125,6 +126,7 @@ func NewBasicAuth(realm, htpasswd string, Disable bool) *BasicAuth {
 
 	f, err := os.Open(htpasswd)
 	if err != nil {
+		log.Printf("Warning: %s", err.Error())
 		return &BasicAuth{realm, secrets, true}
 	}
 
