@@ -589,7 +589,7 @@ class Ghost:
         # 5: ospeed
         # 6: cc
         attr = termios.tcgetattr(fd)
-        attr[0] &= (termios.IXON | termios.IXOFF)
+        attr[0] &= ~(termios.IXON | termios.IXOFF)
         attr[2] |= termios.CLOCAL
         attr[2] &= ~termios.CRTSCTS
         attr[4] = termios.B115200
@@ -608,7 +608,7 @@ class Ghost:
             if _CONTROL_END in buf:
               index = buf.index(_CONTROL_END)
               nonlocals['control_str'] += buf[:index]
-              self.HandleTTYControl(fd, nonlocals['control_str'])
+              self.HandleTTYControl(fd, nonlocals['control_str'].decode('utf-8'))
               nonlocals['control_state'] = None
               nonlocals['control_str'] = b''
               buf = buf[index+1:]

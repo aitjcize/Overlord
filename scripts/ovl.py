@@ -524,12 +524,14 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
       size = GetTerminalSize()
       if size != nonlocals['size']:  # Size not changed, ignore
         control = {'command': 'resize', 'params': list(size)}
-        payload = chr(_CONTROL_START) + json.dumps(control) + chr(_CONTROL_END)
+        payload = (_CONTROL_START.to_bytes(1, 'big') +
+                   json.dumps(control).encode('utf-8') +
+                   _CONTROL_END.to_bytes(1, 'big'))
         nonlocals['size'] = size
         try:
           self.send(payload, binary=True)
-        except Exception:
-          pass
+        except Exception as e:
+          logging.exception(e)
 
     def _FeedInput():
       self._old_termios = termios.tcgetattr(self._stdin_fd)
