@@ -42,7 +42,7 @@ const (
 	defaultShell         = "/bin/bash"
 	pingInterval         = 10 * time.Second
 	readTimeout          = 3 * time.Second
-	connectTimeout       = 3 * time.Second
+	connectTimeout       = 10 * time.Second
 	httpRequestTimeout   = 30 * time.Second
 	retryIntervalSeconds = 2
 	blockSize            = 4096
