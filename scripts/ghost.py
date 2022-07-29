@@ -304,7 +304,7 @@ class Ghost:
                                  context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
-        sha1sum = f.read().strip()
+        sha1sum = f.read().strip().decode('utf-8')
     except (ssl.SSLError, ssl.CertificateError) as e:
       logging.error('Upgrade: %s: %s', e.__class__.__name__, e)
       return
@@ -396,7 +396,7 @@ class Ghost:
   def GetGateWayIP(self):
     if self._platform == 'Darwin':
       output = subprocess.check_output(['route', '-n', 'get', 'default'])
-      ret = re.search('gateway: (.*)', output)
+      ret = re.search('gateway: (.*)', output.decode('utf-8'))
       if ret:
         return [ret.group(1)]
       return []
@@ -455,7 +455,8 @@ class Ghost:
     if self._platform == 'Darwin':
       output = subprocess.check_output(['ioreg', '-rd1', '-c',
                                         'IOPlatformExpertDevice'])
-      ret = re.search('"IOPlatformSerialNumber" = "(.*)"', output)
+      ret = re.search('"IOPlatformSerialNumber" = "(.*)"',
+                      output.decode('utf-8'))
       if ret:
         return ret.group(1)
 

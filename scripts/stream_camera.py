@@ -1,4 +1,4 @@
-#!/usr/bin/python -u
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
@@ -9,7 +9,7 @@
 
 import argparse
 import atexit
-import BaseHTTPServer
+import http.server
 import platform
 import struct
 import subprocess
@@ -24,7 +24,7 @@ _DEFAULT_BITRATE = '800k'
 _DEFAULT_FRAMERATE = 30
 
 
-class ForwardToStdoutRequestHandler(BaseHTTPServer.BaseHTTPRequestHandler):
+class ForwardToStdoutRequestHandler(http.server.BaseHTTPRequestHandler):
   def do_POST(self):
     size = self.server.size.split('x')
     width = int(size[0])
@@ -92,7 +92,7 @@ def main():
   handler = StartCaptureProcess(args)
   atexit.register(StopCaptureProcess, handler)
 
-  server = BaseHTTPServer.HTTPServer(
+  server = http.server.HTTPServer(
       ('localhost', _SERVER_PORT), ForwardToStdoutRequestHandler)
   server.size = args.size
   server.serve_forever()

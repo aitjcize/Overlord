@@ -575,7 +575,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
 
   def received_message(self, message):
     if message.is_binary:
-      sys.stdout.write(message.data.decode('utf-8'))
+      sys.stdout.buffer.write(message.data)
       sys.stdout.flush()
 
 
