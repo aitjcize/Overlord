@@ -1,22 +1,21 @@
-#!/usr/bin/python -u
+#!/usr/bin/env python3
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from contextlib import closing
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
+import time
 import unittest
 import urllib.parse
 import urllib.request
 
 from ws4py.client import WebSocketBaseClient
-
-from cros.factory.unittest_utils import label_utils
-from cros.factory.utils import net_utils
-from cros.factory.utils import sync_utils
 
 
 # Constants.
@@ -32,14 +31,21 @@ class CloseWebSocket(Exception):
   pass
 
 
+def FindUnusedPort():
+  with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+    s.bind(('', 0))
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    return s.getsockname()[1]
+
+
 class TestOverlord(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     # Build overlord, only do this once over all tests.
-    basedir = os.path.dirname(__file__)
+    gitroot = os.path.normpath(os.path.join(os.path.dirname(__file__),
+                               '../..'))
     cls.bindir = tempfile.mkdtemp()
-    subprocess.call('make -C %s BINDIR=%s' % (
-        os.path.join(basedir, '..'), cls.bindir), shell=True)
+    subprocess.call('make -C %s BIN=%s' % (gitroot, cls.bindir), shell=True)
 
   @classmethod
   def tearDownClass(cls):
@@ -49,30 +55,30 @@ class TestOverlord(unittest.TestCase):
   def setUp(self):
     self.basedir = os.path.dirname(__file__)
     bindir = self.__class__.bindir
-    factorydir = os.path.normpath(os.path.join(self.basedir, '../../../..'))
+    scriptdir = os.path.normpath(os.path.join(self.basedir, '../../scripts'))
 
     env = os.environ.copy()
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')
 
     # set ports for overlord to bind
-    overlord_http_port = net_utils.FindUnusedPort()
+    overlord_http_port = FindUnusedPort()
     self.host = '%s:%d' % (_HOST, overlord_http_port)
-    env['OVERLORD_PORT'] = str(net_utils.FindUnusedPort())
-    env['OVERLORD_LD_PORT'] = str(net_utils.FindUnusedPort())
+    env['OVERLORD_PORT'] = str(FindUnusedPort())
+    env['OVERLORD_LD_PORT'] = str(FindUnusedPort())
     env['OVERLORD_HTTP_PORT'] = str(overlord_http_port)
-    env['GHOST_RPC_PORT'] = str(net_utils.FindUnusedPort())
+    env['GHOST_RPC_PORT'] = str(FindUnusedPort())
 
     # Launch overlord
     self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-no-auth'], env=env)
 
     # Launch go implementation of ghost
     self.goghost = subprocess.Popen(['%s/ghost' % bindir,
-                                     '-rand-mid', '-no-lan-disc',
+                                     '-mid=go', '-no-lan-disc',
                                      '-no-rpc-server', '-tls=n'], env=env)
 
     # Launch python implementation of ghost
-    self.pyghost = subprocess.Popen(['%s/py/tools/ghost.py' % factorydir,
-                                     '--rand-mid', '--no-lan-disc',
+    self.pyghost = subprocess.Popen(['%s/ghost.py' % scriptdir,
+                                     '--mid=python', '--no-lan-disc',
                                      '--no-rpc-server', '--tls=n'],
                                     env=env)
 
@@ -86,18 +92,28 @@ class TestOverlord(unittest.TestCase):
 
     # Wait for clients to connect
     try:
-      sync_utils.WaitFor(CheckClient, 30)
+      for unused_i in range(30):
+        if CheckClient():
+          return
+        time.sleep(1)
+      raise RuntimeError('client not connected')
     except Exception:
       self.tearDown()
       raise
 
   def tearDown(self):
-    self.ovl.kill()
     self.goghost.kill()
+    self.goghost.wait()
 
     # Python implementation uses process instead of goroutine, also kill those
-    subprocess.Popen('pkill -P %d' % self.pyghost.pid, shell=True).wait()
+    with subprocess.Popen('pkill -P %d' % self.pyghost.pid, shell=True) as p:
+      p.wait()
+
     self.pyghost.kill()
+    self.pyghost.wait()
+
+    self.ovl.kill()
+    self.ovl.wait()
 
   def _GetJSON(self, path):
     return json.loads(urllib.request.urlopen(
