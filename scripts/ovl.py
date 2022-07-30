@@ -586,73 +586,78 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
     Args:
       output: output file object.
     """
-    self.output = output
     super().__init__(state, *args, **kwargs)
+    self._output = output
+    self._input_thread = threading.Thread(target=self._FeedInput)
+    self._stop = threading.Event()
 
   def handshake_ok(self):
     pass
 
+  def _FeedInput(self):
+    try:
+      while True:
+        rd, unused_w, unused_x = select.select([sys.stdin], [], [], 0.5)
+        if self._stop.is_set():
+          break
+
+        data = sys.stdin.read()
+        if not data:
+          self.send(_STDIN_CLOSED * 2)
+          break
+        self.send(data, binary=True)
+    except (KeyboardInterrupt, RuntimeError):
+      pass
+
   def opened(self):
-    def _FeedInput():
-      try:
-        while True:
-          data = sys.stdin.buffer.read(1)
-
-          if not data:
-            self.send(_STDIN_CLOSED * 2)
-            break
-          self.send(data, binary=True)
-      except (KeyboardInterrupt, RuntimeError):
-        pass
-
-    t = threading.Thread(target=_FeedInput)
-    t.daemon = True
-    t.start()
+    self._input_thread.start()
 
   def closed(self, code, reason=None):
-    pass
+    self._stop.set()
+    self._input_thread.join()
 
   def received_message(self, message):
     if message.is_binary:
-      self.output.write(message.data.decode('utf-8'))
-      self.output.flush()
+      self._output.write(message.data.decode('utf-8'))
+      self._output.flush()
 
 
 class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
   def __init__(self, state, sock, *args, **kwargs):
     super().__init__(state, *args, **kwargs)
     self._sock = sock
+    self._input_thread = threading.Thread(target=self._FeedInput)
     self._stop = threading.Event()
 
   def handshake_ok(self):
     pass
 
-  def opened(self):
-    def _FeedInput():
-      try:
-        self._sock.setblocking(False)
-        while True:
-          rd, unused_w, unused_x = select.select([self._sock], [], [], 0.5)
-          if self._stop.is_set():
+  def _FeedInput(self):
+    try:
+      self._sock.setblocking(False)
+      while True:
+        rd, unused_w, unused_x = select.select([self._sock], [], [], 0.5)
+        if self._stop.is_set():
+          break
+        if self._sock in rd:
+          data = self._sock.recv(_BUFSIZ)
+          if not data:
+            self.close()
             break
-          if self._sock in rd:
-            data = self._sock.recv(_BUFSIZ)
-            if not data:
-              self.close()
-              break
-            self.send(data, binary=True)
-      except Exception:
-        pass
-      finally:
-        self._sock.close()
+          self.send(data, binary=True)
+    except Exception:
+      pass
+    finally:
+      self._sock.close()
 
-    t = threading.Thread(target=_FeedInput)
-    t.daemon = True
-    t.start()
+
+  def opened(self):
+    self._input_thread.start()
 
   def closed(self, code, reason=None):
     del code, reason  # Unused.
     self._stop.set()
+    self._input_thread.join()
     sys.exit(0)
 
   def received_message(self, message):
@@ -1432,7 +1437,7 @@ class OverlordCLIClient:
 def main():
   # Setup logging format
   logger = logging.getLogger()
-  logger.setLevel(logging.DEBUG)
+  logger.setLevel(logging.INFO)
   handler = logging.StreamHandler()
   formatter = logging.Formatter('%(asctime)s %(message)s', '%Y/%m/%d %H:%M:%S')
   handler.setFormatter(formatter)
