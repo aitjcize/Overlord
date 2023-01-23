@@ -33,7 +33,7 @@ Run ``make`` in the project root directory.  ``make`` builds the overlord daemon
 
 Basic Deployment
 ----------------
-1. On a server with public IP (to be used as a proxy), run ``overlordd`` to start the server.
+1. On a server with public IP (to be used as a proxy), run ``overlordd -port 9000`` to start the server (if ``-port`` is not specified, default port is 80 or 443 depends on whether TLS is enabled or not).
 2. On a client machine, run ``ghost SERVER_IP`` or ``ghost.py SERVER_IP``.  ``ghost`` and ``ghost.py`` are functional equivalent except one is written in Python, and the other is written in Go.
 3. Browse http://SERVER_IP:9000 and you will see the overlord web dashboard.  The default user/password is ``overlord/cros``.  To change the password, please follow the `Overlord advanced deployment guide <https://github.com/aitjcize/Overlord/blob/master/docs/deployment.rst#changing-default-password>`_.
 

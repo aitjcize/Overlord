@@ -6,9 +6,9 @@ package overlord
 
 // Overlord server ports.
 var (
-	OverlordPort     = GetenvInt("OVERLORD_PORT", 4455)      // Socket server port
-	OverlordLDPort   = GetenvInt("OVERLORD_LD_PORT", 4456)   // LAN discovery port
-	OverlordHTTPPort = GetenvInt("OVERLORD_HTTP_PORT", 9000) // Overlord HTTP server port
+	OverlordLDPort   = GetenvInt("OVERLORD_LD_PORT", 4456) // LAN discovery port
+	DefaultHTTPPort  = 80
+	DefaultHTTPSPort = 443
 )
 
 const (

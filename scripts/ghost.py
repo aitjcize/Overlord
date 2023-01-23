@@ -10,6 +10,7 @@ import contextlib
 import ctypes
 import ctypes.util
 import fcntl
+from functools import reduce
 import hashlib
 import json
 import logging
@@ -27,19 +28,19 @@ import sys
 import termios
 import threading
 import time
-import traceback
 import tty
 import urllib.request
 import uuid
+from ws4py.client import WebSocketBaseClient
 from xmlrpc.client import ServerProxy
 from xmlrpc.server import SimpleXMLRPCServer
 
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', '4499'))
 
-_OVERLORD_PORT = int(os.getenv('OVERLORD_PORT', '4455'))
 _OVERLORD_LAN_DISCOVERY_PORT = int(os.getenv('OVERLORD_LD_PORT', '4456'))
-_OVERLORD_HTTP_PORT = int(os.getenv('OVERLORD_HTTP_PORT', '9000'))
+_DEFAULT_HTTP_PORT = 80
+_DEFAULT_HTTPS_PORT = 443
 
 _BUFSIZE = 8192
 _RETRY_INTERVAL = 2
@@ -48,13 +49,15 @@ _PING_TIMEOUT = 3
 _PING_INTERVAL = 5
 _REQUEST_TIMEOUT_SECS = 60
 _SHELL = os.getenv('SHELL', '/bin/bash')
-_DEFAULT_BIND_ADDRESS = 'localhost'
+_DEFAULT_BIND_ADDRESS = '127.0.0.1'
 
 _CONTROL_START = 128
 _CONTROL_END = 129
 
 _BLOCK_SIZE = 4096
 _CONNECT_TIMEOUT = 3
+
+_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 
 # Stream control
 _STDIN_CLOSED = '##STDIN_CLOSED##'
@@ -129,7 +132,7 @@ class TLSSettings:
       self._tls_context = None
       return
 
-    self._tls_context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+    self._tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     self._tls_context.verify_mode = ssl.CERT_REQUIRED
 
     if self._verify:
@@ -143,8 +146,11 @@ class TLSSettings:
           sys.exit(1)
       else:
         self._tls_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        self._tls_context.check_hostname = True
+        self._tls_context.verify_mode = ssl.CERT_REQUIRED
         logging.info('TLSSettings: using built-in ca-certificates')
     else:
+      self._tls_context.check_hostname = False
       self._tls_context.verify_mode = ssl.CERT_NONE
       logging.info('TLSSettings: skipping TLS verification!!!')
 
@@ -158,8 +164,16 @@ class TLSSettings:
   def Enabled(self):
     return self._enabled
 
+  def CertFilePath(self):
+    return self._tls_cert_file
+
   def Context(self):
     return self._tls_context
+
+
+class GhostWebsocketClient(WebSocketBaseClient):
+  def __init__(self, tls_settings, *args, **kwargs):
+    super().__init__(ssl_context=tls_settings.Context(), *args, **kwargs)
 
 
 class Ghost:
@@ -259,7 +273,8 @@ class Ghost:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
       # Allow any certificate since we only want to check if server talks TLS.
-      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+      context.check_hostname = False
       context.verify_mode = ssl.CERT_NONE
 
       sock = context.wrap_socket(sock, server_hostname=host)
@@ -280,7 +295,7 @@ class Ghost:
 
     try:
       https_enabled = self.TLSEnabled(self._connected_addr[0],
-                                      _OVERLORD_HTTP_PORT)
+                                      self._connected_addr[1])
     except socket.error:
       logging.error('Upgrade: failed to connect to Overlord HTTP server, '
                     'abort')
@@ -294,13 +309,15 @@ class Ghost:
 
     scriptpath = os.path.abspath(sys.argv[0])
     url = 'http%s://%s:%d/upgrade/ghost.py' % (
-        's' if https_enabled else '', self._connected_addr[0],
-        _OVERLORD_HTTP_PORT)
+        's' if https_enabled else '',
+        self._connected_addr[0], self._connected_addr[1])
 
     # Download sha1sum for ghost.py for verification
     try:
+      request = urllib.request.Request(url + '.sha1')
+      request.add_header('User-Agent', _USER_AGENT)
       with contextlib.closing(
-          urllib.request.urlopen(url + '.sha1', timeout=_CONNECT_TIMEOUT,
+          urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT,
                                  context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
@@ -308,8 +325,8 @@ class Ghost:
     except (ssl.SSLError, ssl.CertificateError) as e:
       logging.error('Upgrade: %s: %s', e.__class__.__name__, e)
       return
-    except Exception:
-      logging.error('Upgrade: failed to download sha1sum file, abort')
+    except Exception as e:
+      logging.exception('Upgrade: failed to download sha1sum file, abort')
       return
 
     if self.GetFileSha1(scriptpath) == sha1sum:
@@ -318,8 +335,10 @@ class Ghost:
 
     # Download upgrade version of ghost.py
     try:
+      request = urllib.request.Request(url)
+      request.add_header('User-Agent', _USER_AGENT)
       with contextlib.closing(
-          urllib.request.urlopen(url, timeout=_CONNECT_TIMEOUT,
+          urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT,
                                  context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
@@ -798,7 +817,7 @@ class Ghost:
     try:
       src_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       src_sock.settimeout(_CONNECT_TIMEOUT)
-      src_sock.connect(('localhost', self._port))
+      src_sock.connect(('127.0.0.1', self._port))
 
       src_sock.send(self._sock.RecvBuf())
 
@@ -1068,8 +1087,6 @@ class Ghost:
             continue
           raise
 
-        self._sock = BufferedSocket(sock)
-
         logging.info('Connection established, registering...')
         handler = {
             Ghost.AGENT: registered,
@@ -1078,6 +1095,15 @@ class Ghost:
             Ghost.FILE: self.InitiateFileOperation,
             Ghost.FORWARD: self.SpawnPortForwardServer,
         }[self._mode]
+
+        uri = '%s://%s:%s/connect' % (
+            ('wss' if self._tls_settings.Enabled() else 'ws',) + addr)
+        self._ws = GhostWebsocketClient(self._tls_settings, uri)
+        self._ws.connect()
+
+        # Hijack the raw socket from the websocket, we do not want to use the
+        # websocket protocol.
+        self._sock = BufferedSocket(self._ws.sock)
 
         # Machine ID may change if MAC address is used (USB-ethernet dongle
         # plugged/unplugged)
@@ -1088,6 +1114,8 @@ class Ghost:
                           'properties': self._properties}, handler)
       except socket.error:
         pass
+      except Exception as e:
+        logging.error('Register: %s', e)
       else:
         sock.settimeout(None)
         self.Listen()
@@ -1173,7 +1201,10 @@ class Ghost:
 
   def ScanServer(self):
     for meth in [self.GetGateWayIP, self.GetFactoryServerIP]:
-      for addr in [(x, _OVERLORD_PORT) for x in meth()]:
+      addrs = reduce(lambda x, y: x + y,
+                     [[(h, _DEFAULT_HTTP_PORT), (h, _DEFAULT_HTTPS_PORT)]
+                      for h in meth()], [])
+      for addr in addrs:
         if addr not in self._overlord_addrs:
           self._overlord_addrs.append(addr)
 
@@ -1212,8 +1243,6 @@ class Ghost:
           logging.info('%s, retrying in %ds', str(e), _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
         except Exception as e:
-          unused_x, unused_y, exc_traceback = sys.exc_info()
-          traceback.print_tb(exc_traceback)
           logging.info('%s: %s, retrying in %ds',
                        e.__class__.__name__, str(e), _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
@@ -1226,7 +1255,7 @@ class Ghost:
 
 def GhostRPCServer():
   """Returns handler to Ghost's JSON RPC server."""
-  return ServerProxy('http://localhost:%d' % _GHOST_RPC_PORT)
+  return ServerProxy('http://127.0.0.1:%d' % _GHOST_RPC_PORT)
 
 
 def ForkToBackground():
@@ -1289,8 +1318,8 @@ def main():
   parser.add_argument('--status', dest='status', default=False,
                       action='store_true',
                       help='show status of the client')
-  parser.add_argument('overlord_ip', metavar='OVERLORD_IP', type=str,
-                      nargs='*', help='overlord server address')
+  parser.add_argument('overlord_addr', metavar='OVERLORD_ADDR', type=str,
+                      nargs='*', help='overlord server address in format: host:port')
   args = parser.parse_args()
 
   if args.status:
@@ -1307,8 +1336,17 @@ def main():
   if args.download:
     DownloadFile(args.download)
 
-  addrs = [('localhost', _OVERLORD_PORT)]
-  addrs = [(x, _OVERLORD_PORT) for x in args.overlord_ip] + addrs
+  addrs = []
+
+  for addr in args.overlord_addr:
+    if ':' not in addr:
+      addrs += [(addr, _DEFAULT_HTTP_PORT), (addr, _DEFAULT_HTTPS_PORT)]
+    else:
+      host, port = addr.split(':')
+      addrs.append((host, int(port)))
+
+  addrs += [('127.0.0.1', _DEFAULT_HTTP_PORT),
+            ('127.0.0.1', _DEFAULT_HTTPS_PORT)]
 
   prop_file = os.path.abspath(args.prop_file) if args.prop_file else None
 

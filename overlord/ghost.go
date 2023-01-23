@@ -32,6 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/creack/pty"
+	"github.com/gorilla/websocket"
 	"github.com/pkg/term/termios"
 	uuid "github.com/satori/go.uuid"
 )
@@ -377,9 +378,7 @@ func (ghost *Ghost) Upgrade() error {
 	var buffer bytes.Buffer
 	var client http.Client
 
-	parts := strings.Split(ghost.connectedAddr, ":")
-	httpsEnabled, err := ghost.tlsEnabled(
-		fmt.Sprintf("%s:%d", parts[0], OverlordHTTPPort))
+	httpsEnabled, err := ghost.tlsEnabled(ghost.connectedAddr)
 	if err != nil {
 		return errors.New("Upgrade: failed to connect to Overlord HTTP server, " +
 			"abort")
@@ -395,8 +394,8 @@ func (ghost *Ghost) Upgrade() error {
 	if httpsEnabled {
 		proto = "https"
 	}
-	url := fmt.Sprintf("%s://%s:%d/upgrade/ghost.%s", proto, parts[0],
-		OverlordHTTPPort, GetPlatformString())
+	url := fmt.Sprintf("%s://%s/upgrade/ghost.%s", proto, ghost.connectedAddr,
+		GetPlatformString())
 
 	if httpsEnabled {
 		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
@@ -1176,18 +1175,31 @@ func (ghost *Ghost) Register() error {
 			ghost.tls.SetEnabled(enabled)
 		}
 
-		conn, err = net.DialTimeout("tcp", addr, connectTimeout)
+		proto := "ws"
+		if ghost.tls.Enabled {
+			proto = "wss"
+		}
+		uri := fmt.Sprintf("%s://%s/connect", proto, addr)
+
+		dialer := websocket.DefaultDialer
+
+		if ghost.tls.Config != nil {
+			dialer = &websocket.Dialer{
+				Proxy:            http.ProxyFromEnvironment,
+				HandshakeTimeout: 45 * time.Second,
+				TLSClientConfig:  ghost.tls.Config,
+			}
+		}
+
+		wsConn, _, err := dialer.Dial(uri, http.Header{})
 		if err != nil {
+			log.Printf("error: %s\n", err)
 			continue
 		}
 
+		conn = wsConn.UnderlyingConn()
+
 		log.Println("Connection established, registering...")
-		if ghost.tls.Enabled {
-			colonPos := strings.LastIndex(addr, ":")
-			config := ghost.tls.Config
-			config.ServerName = addr[:colonPos]
-			conn = tls.Client(conn, config)
-		}
 
 		ghost.Conn = conn
 		req := NewRequest("register", map[string]interface{}{
@@ -1434,7 +1446,11 @@ func (ghost *Ghost) StartRPCServer() {
 func (ghost *Ghost) ScanGateway() {
 	if gateways, err := GetGateWayIP(); err == nil {
 		for _, gw := range gateways {
-			addr := fmt.Sprintf("%s:%d", gw, OverlordPort)
+			addr := fmt.Sprintf("%s:%d", gw, DefaultHTTPPort)
+			if !ghost.existsInAddr(addr) {
+				ghost.addrs = append(ghost.addrs, addr)
+			}
+			addr = fmt.Sprintf("%s:%d", gw, DefaultHTTPSPort)
 			if !ghost.existsInAddr(addr) {
 				ghost.addrs = append(ghost.addrs, addr)
 			}
@@ -1574,9 +1590,17 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 
 	if len(args) >= 1 {
-		addrs = append(addrs, fmt.Sprintf("%s:%d", args[0], OverlordPort))
+		if strings.Index(args[0], ":") == -1 {
+			addrs = append(addrs,
+				fmt.Sprintf("%s:%d", args[0], DefaultHTTPPort),
+				fmt.Sprintf("%s:%d", args[0], DefaultHTTPSPort))
+		} else {
+			addrs = append(addrs, args[0])
+		}
 	}
-	addrs = append(addrs, fmt.Sprintf("127.0.0.1:%d", OverlordPort))
+	addrs = append(addrs,
+		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPPort),
+		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPSPort))
 
 	tlsSettings := newTLSSettings(tlsCertFile, verify)
 

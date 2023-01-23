@@ -12,6 +12,9 @@ import (
 	"github.com/aitjcize/Overlord/overlord"
 )
 
+var bindAddr = flag.String("bind", "0.0.0.0", "specify alternate bind address")
+var port = flag.Int("port", 0,
+	"alternate port listen instead of standard ports (http:80, https:443)")
 var lanDiscInterface = flag.String("lan-disc-iface", "",
 	"the network interface used for broadcasting LAN discovery packets")
 var noLanDisc = flag.Bool("no-lan-disc", false,
@@ -34,6 +37,6 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	overlord.StartOverlord(*lanDiscInterface, !*noLanDisc, !*noAuth,
-		*tlsCerts, !*noLinkTLS, *htpasswdPath)
+	overlord.StartOverlord(*bindAddr, *port, *lanDiscInterface, !*noLanDisc,
+		!*noAuth, *tlsCerts, !*noLinkTLS, *htpasswdPath)
 }

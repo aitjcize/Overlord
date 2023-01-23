@@ -25,6 +25,9 @@ const (
 )
 
 func getRequestIP(r *http.Request) string {
+	if ips, ok := r.Header["X-Forwarded-For"]; ok {
+		return ips[len(ips)-1]
+	}
 	idx := strings.LastIndex(r.RemoteAddr, ":")
 	return r.RemoteAddr[:idx]
 }

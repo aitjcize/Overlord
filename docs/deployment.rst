@@ -43,7 +43,7 @@ To generate a self-signed SSL certificate, you need the OpenSSL software suite f
 
 .. code-block:: bash
 
-   % openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365
+   % openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -addext "subjectAltName = DNS:domain"
 
 Note that you need to input the correct ``common name`` when generating the certificate, ``common name`` is typically the domain name or IP of the server.
 
@@ -51,9 +51,9 @@ This will generate two files: ``cert.pem`` and ``key.pem``.  Assign it to the ``
 
 .. code-block:: bash
 
-   % nohup ./overlordd -tls=cert.pem,key.pem &
+   % nohup ./overlordd -p 9000 -tls=cert.pem,key.pem &
 
-Now you can browse ``https://SERVER_IP:9000`` to access the web frontend.  Note that you need to use ``https`` instead of ``http``.
+Now you can browse ``https://SERVER_IP:9000`` to access the web frontend.  Note that you need to use ``https`` instead of ``http`` since TLS is enabled.
 
 Connecting to a TLS enabled Server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

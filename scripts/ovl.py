@@ -43,8 +43,7 @@ _CERT_DIR = os.path.expanduser('~/.config/ovl')
 
 _ESCAPE = '~'
 _BUFSIZ = 8192
-_OVERLORD_PORT = 4455
-_OVERLORD_HTTP_PORT = 9000
+_DEFAULT_HTTPS_PORT = 443
 _OVERLORD_CLIENT_DAEMON_PORT = 4488
 _OVERLORD_CLIENT_DAEMON_RPC_ADDR = ('127.0.0.1', _OVERLORD_CLIENT_DAEMON_PORT)
 
@@ -94,6 +93,8 @@ The fingerprint for the TLS host certificate sent by the remote host is
 Remove '%s' if you still want to proceed.
 SSL Certificate verification failed."""
 
+_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+
 
 def GetVersionDigest():
   """Return the sha1sum of the current executing script."""
@@ -124,6 +125,7 @@ def UrlOpen(state, url):
   request = urllib.request.Request(url)
   if state.username is not None and state.password is not None:
     request.add_header(*BasicAuthHeader(state.username, state.password))
+  request.add_header('User-Agent', _USER_AGENT)
   return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
                                 context=state.SSLContext())
 
@@ -297,13 +299,13 @@ class DaemonState:
   def SSLContext(self):
     # No verify.
     if not self.ssl_verify:
-      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
       context.verify_mode = ssl.CERT_NONE
       return context
 
-    context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-    context.verify_mode = ssl.CERT_REQUIRED
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = self.ssl_check_hostname
+    context.verify_mode = ssl.CERT_REQUIRED
 
     # Check if self signed certificate exists.
     ssl_cert_path = GetTLSCertPath(self.host)
@@ -385,7 +387,8 @@ class OverlordClientDaemon:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
       # Allow any certificate since we only want to check if server talks TLS.
-      context = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+      context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+      context.check_hostname = False
       context.verify_mode = ssl.CERT_NONE
 
       sock = context.wrap_socket(sock, server_hostname=self._state.host)
@@ -420,7 +423,7 @@ class OverlordClientDaemon:
 
     return _DoConnect(self._state.SSLContext())
 
-  def Connect(self, host, port=_OVERLORD_HTTP_PORT, ssh_pid=None,
+  def Connect(self, host, port, ssh_pid=None,
               username=None, password=None, orig_host=None,
               ssl_verify=True, ssl_check_hostname=True):
     self._state.username = username
@@ -488,22 +491,7 @@ class OverlordClientDaemon:
 
 class SSLEnabledWebSocketBaseClient(WebSocketBaseClient):
   def __init__(self, state, *args, **kwargs):
-    cafile = ssl.get_default_verify_paths().openssl_cafile
-    # For some system / distribution, python can not detect system cafile path.
-    # In such case we fallback to the default path.
-    if not os.path.exists(cafile):
-      cafile = '/etc/ssl/certs/ca-certificates.crt'
-
-    if state.ssl_self_signed:
-      cafile = GetTLSCertPath(state.host)
-
-    ssl_options = {
-        'cert_reqs': ssl.CERT_REQUIRED if state.ssl_verify else ssl.CERT_NONE,
-        'ca_certs': cafile
-    }
-    # ws4py does not allow you to specify SSLContext, but rather passing in the
-    # argument of ssl.wrap_socket
-    super().__init__(ssl_options=ssl_options, *args, **kwargs)
+    super().__init__(ssl_context=state.SSLContext(), *args, **kwargs)
 
 
 class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
@@ -874,7 +862,7 @@ class OverlordCLIClient:
     """SSH forward the remote overlord server.
 
     Overlord server may not have port 9000 open to the public network, in such
-    case we can SSH forward the port to localhost.
+    case we can SSH forward the port to 127.0.0.1.
     """
 
     control_file = self.GetSSHControlFile(host)
@@ -884,7 +872,7 @@ class OverlordCLIClient:
       pass
 
     with subprocess.Popen([
-        'ssh', '-Nf', '-M', '-S', control_file, '-L', '9000:localhost:9000',
+        'ssh', '-Nf', '-M', '-S', control_file, '-L', '9000:127.0.0.1:9000',
         '-p',
         str(port),
         '%s%s' % (user + '@' if user else '', host)
@@ -968,10 +956,10 @@ class OverlordCLIClient:
       print('Client %s selected.' % self._selected_mid)
 
   @Command('connect', 'connect to Overlord server', [
-      Arg('host', metavar='HOST', type=str, default='localhost',
+      Arg('host', metavar='HOST', type=str, default='127.0.0.1',
           help='Overlord hostname/IP'),
-      Arg('port', metavar='PORT', type=int,
-          default=_OVERLORD_HTTP_PORT, help='Overlord port'),
+      Arg('port', metavar='PORT', type=int, nargs='?',
+          default=_DEFAULT_HTTPS_PORT, help='Overlord port'),
       Arg('-f', '--forward', dest='ssh_forward', default=False,
           action='store_true',
           help='connect with SSH forwarding to the host'),
@@ -999,7 +987,7 @@ class OverlordCLIClient:
       self.KillSSHTunnel()
 
       ssh_pid = self.SSHTunnel(args.ssh_login, args.host, args.ssh_port)
-      host = 'localhost'
+      host = '127.0.0.1'
 
     username_provided = args.user is not None
     password_provided = args.passwd is not None

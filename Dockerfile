@@ -11,12 +11,15 @@ RUN make
 
 FROM alpine:latest
 
-RUN mkdir -p /overlord/config
+RUN mkdir /config /overlord
 
 COPY --from=builder /src/bin/overlordd /overlord
+COPY --from=builder /src/bin/ghost /overlord
 COPY --from=builder /src/overlord/app /overlord/app
+COPY --from=builder /src/scripts/start_overlordd.sh /overlord
 
-EXPOSE 4455 4456 9000
+ENV SHELL=/bin/sh
 
-CMD ["/overlord/overlordd", "-tls=/config/cert.pem,/config/key.pem", \
-     "-htpasswd-path=/config/overlord.htpasswd"]
+EXPOSE 4456 80
+
+CMD ["/overlord/start_overlordd.sh"]

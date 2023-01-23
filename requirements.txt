@@ -1,0 +1,2 @@
+git+https://github.com/aitjcize/WebSocket-for-Python.git
+PyYAML==6.0

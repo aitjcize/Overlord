@@ -5,7 +5,6 @@
 package overlord
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +30,6 @@ import (
 
 const (
 	systemAppDir    = "../share/overlord"
-	webServerHost   = "0.0.0.0"
 	ldInterval      = 5
 	keepAlivePeriod = 1
 )
@@ -97,6 +95,8 @@ type TLSCerts struct {
 
 // Overlord type is the main context for storing the overlord server state.
 type Overlord struct {
+	bindAddr         string                            // Bind address
+	port             int                               // Port number to listen to
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
 	lanDisc          bool                              // Enable LAN discovery broadcasting
 	auth             bool                              // Enable HTTP basic authentication
@@ -118,8 +118,12 @@ type Overlord struct {
 }
 
 // NewOverlord creates an Overlord object.
-func NewOverlord(lanDiscInterface string, lanDisc bool, auth bool,
+func NewOverlord(
+	bindAddr string, port int,
+	lanDiscInterface string,
+	lanDisc bool, auth bool,
 	certsString string, linkTLS bool, htpasswdPath string) *Overlord {
+
 	var certs *TLSCerts
 	if certsString != "" {
 		parts := strings.Split(certsString, ",")
@@ -141,6 +145,8 @@ func NewOverlord(lanDiscInterface string, lanDisc bool, auth bool,
 		}
 	}
 	return &Overlord{
+		bindAddr:         bindAddr,
+		port:             port,
 		lanDiscInterface: lanDiscInterface,
 		lanDisc:          lanDisc,
 		auth:             auth,
@@ -305,60 +311,6 @@ func (ovl *Overlord) handleConnection(conn net.Conn) {
 	go handler.Listen()
 }
 
-// ServSocket is the socket server main routine.
-func (ovl *Overlord) ServSocket(port int) {
-	var (
-		err       error
-		ln        net.Listener
-		tlsConfig *tls.Config
-	)
-
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
-
-	if ovl.certs != nil && ovl.linkTLS { // TLS enabled
-		cert, err := tls.LoadX509KeyPair(ovl.certs.Cert, ovl.certs.Key)
-		if err != nil {
-			log.Fatalf("Unable to load TLS cert files: %s\n", err)
-		}
-
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
-	}
-
-	ln, err = net.Listen("tcp", addr)
-	if err != nil {
-		log.Fatalf("Unable to listen at %s: %s\n", addr, err)
-	}
-	defer ln.Close()
-
-	tlsStatus := "disabled"
-	if tlsConfig != nil {
-		tlsStatus = "enabled"
-	}
-
-	log.Printf("TCP socket server started, listening at %s, TLS: %s",
-		addr, tlsStatus)
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Fatalln("Unable to accept client:", err)
-		}
-		log.Printf("Incoming connection from %s\n", conn.RemoteAddr())
-
-		// Set TCP Keep Alive
-		tcpConn := conn.(*net.TCPConn)
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(keepAlivePeriod * time.Second)
-
-		if tlsConfig != nil {
-			conn = tls.Server(conn, tlsConfig)
-		}
-		ovl.handleConnection(conn)
-	}
-}
-
 // InitSocketIOServer initializes the Socket.io server.
 func (ovl *Overlord) InitSocketIOServer() {
 	server, err := socketio.NewServer(nil)
@@ -465,6 +417,18 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
 		ws.WriteMessage(websocket.CloseMessage, msg)
 		ws.Close()
+	}
+
+	GhostConnectHandler := func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		log.Printf("Incoming connection from %s", conn.UnderlyingConn().RemoteAddr())
+		cs := NewConnServer(ovl, conn.UnderlyingConn())
+		cs.Listen()
 	}
 
 	// List all apps available on Overlord.
@@ -924,6 +888,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", ovl.htpasswdPath, !ovl.auth)
 
+	http.HandleFunc("/connect", GhostConnectHandler)
+
 	// Register the request handlers.
 	r := mux.NewRouter()
 
@@ -977,21 +943,27 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 }
 
 // ServHTTP is the Web server main routine.
-func (ovl *Overlord) ServHTTP(port int) {
+func (ovl *Overlord) ServHTTP() {
 	var err error
 
 	tlsStatus := "disabled"
 	if ovl.certs != nil {
 		tlsStatus = "enabled"
 	}
+	if ovl.port == 0 {
+		if ovl.certs != nil {
+			ovl.port = 443
+		} else {
+			ovl.port = 80
+		}
+	}
 
-	addr := fmt.Sprintf("%s:%d", webServerHost, port)
+	addr := fmt.Sprintf("%s:%d", ovl.bindAddr, ovl.port)
 	log.Printf("HTTP server started, listening at %s, TLS: %s",
 		addr, tlsStatus)
 
 	if ovl.certs != nil {
-		err = http.ListenAndServeTLS(addr, ovl.certs.Cert,
-			ovl.certs.Key, nil)
+		err = http.ListenAndServeTLS(addr, ovl.certs.Cert, ovl.certs.Key, nil)
 	} else {
 		err = http.ListenAndServe(addr, nil)
 	}
@@ -1061,7 +1033,7 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 	for {
 		select {
 		case <-ticker.C:
-			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, OverlordPort)))
+			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, ovl.port)))
 		}
 	}
 }
@@ -1069,8 +1041,7 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 // Serv is the main routine for starting all the overlord sub-server.
 func (ovl *Overlord) Serv() {
 	ovl.RegisterHTTPHandlers()
-	go ovl.ServSocket(OverlordPort)
-	go ovl.ServHTTP(OverlordHTTPPort)
+	go ovl.ServHTTP()
 	if ovl.lanDisc {
 		go ovl.StartUDPBroadcast(OverlordLDPort)
 	}
@@ -1087,9 +1058,9 @@ func (ovl *Overlord) Serv() {
 }
 
 // StartOverlord starts the overlord server.
-func StartOverlord(lanDiscInterface string, lanDisc bool, auth bool,
+func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool, auth bool,
 	certsString string, linkTLS bool, htpasswdPath string) {
-	ovl := NewOverlord(lanDiscInterface, lanDisc, auth, certsString, linkTLS,
-		htpasswdPath)
+	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, auth,
+		certsString, linkTLS, htpasswdPath)
 	ovl.Serv()
 }
