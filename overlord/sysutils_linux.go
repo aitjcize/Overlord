@@ -87,9 +87,3 @@ func GetMachineID() (string, error) {
 func GetProcessWorkingDirectory(pid int) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 }
-
-// GetExecutablePath return the executable path of the current process.
-func GetExecutablePath() (string, error) {
-	path, err := os.Readlink("/proc/self/exe")
-	return path, err
-}

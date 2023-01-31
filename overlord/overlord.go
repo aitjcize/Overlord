@@ -134,7 +134,7 @@ func NewOverlord(
 		}
 	}
 	if !filepath.IsAbs(htpasswdPath) {
-		execPath, err := GetExecutablePath()
+		execPath, err := os.Executable()
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -341,7 +341,7 @@ func (ovl *Overlord) InitSocketIOServer() {
 
 // GetAppDir returns the overlord application directory.
 func (ovl *Overlord) GetAppDir() string {
-	execPath, err := GetExecutablePath()
+	execPath, err := os.Executable()
 	if err != nil {
 		log.Fatalln(err)
 	}

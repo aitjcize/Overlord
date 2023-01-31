@@ -370,7 +370,7 @@ func (ghost *Ghost) tlsEnabled(addr string) (bool, error) {
 func (ghost *Ghost) Upgrade() error {
 	log.Println("Upgrade: initiating upgrade sequence...")
 
-	exePath, err := GetExecutablePath()
+	exePath, err := os.Executable()
 	if err != nil {
 		return errors.New("Upgrade: can not find executable path")
 	}
@@ -457,7 +457,11 @@ func (ghost *Ghost) Upgrade() error {
 
 	log.Println("Upgrade: restarting ghost...")
 	os.Args[0] = exePath
-	return syscall.Exec(exePath, os.Args, os.Environ())
+	err = syscall.Exec(exePath, os.Args, os.Environ())
+	if err != nil {
+		return fmt.Errorf("Upgrade: exec: %s", err)
+	}
+	return nil
 }
 
 func (ghost *Ghost) handleTerminalRequest(req *Request) error {
@@ -816,7 +820,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		}
 
 		// Add ghost executable to PATH
-		exePath, err := GetExecutablePath()
+		exePath, err := os.Executable()
 		if err == nil {
 			os.Setenv("PATH", fmt.Sprintf("%s:%s", filepath.Dir(exePath),
 				os.Getenv("PATH")))
@@ -979,7 +983,7 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	os.Chdir(home)
 
 	// Add ghost executable to PATH
-	exePath, err := GetExecutablePath()
+	exePath, err := os.Executable()
 	if err == nil {
 		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
 			filepath.Dir(exePath)))

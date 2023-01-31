@@ -48,19 +48,3 @@ func TestGetProcessWorkingDirectory(t *testing.T) {
 
 	os.RemoveAll(filepath.Join(os.TempDir(), "a"))
 }
-
-func TestGetExecutablePath(t *testing.T) {
-	path, err := GetExecutablePath()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ans, err := filepath.EvalSymlinks(os.Args[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if ans != path {
-		t.Fatalf("Executable path differs: (%s, %s)", ans, path)
-	}
-}

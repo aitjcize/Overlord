@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"unsafe"
@@ -61,16 +60,4 @@ func GetProcessWorkingDirectory(pid int) (string, error) {
 	n := bytes.Index(buf, []byte{0})
 
 	return string(buf[:n]), nil
-}
-
-// GetExecutablePath return the executable path of the current process.
-func GetExecutablePath() (string, error) {
-	buf := make([]byte, C.MAXPATHLEN*4)
-	length := C.proc_pidpath(C.int(os.Getpid()), unsafe.Pointer(&buf[0]),
-		C.uint32_t(C.MAXPATHLEN*4))
-
-	if length == 0 {
-		return "", fmt.Errorf("proc_pidpath returned %d", length)
-	}
-	return string(buf[:length]), nil
 }
