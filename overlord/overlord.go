@@ -952,9 +952,9 @@ func (ovl *Overlord) ServHTTP() {
 	}
 	if ovl.port == 0 {
 		if ovl.certs != nil {
-			ovl.port = 443
+			ovl.port = DefaultHTTPSPort
 		} else {
-			ovl.port = 80
+			ovl.port = DefaultHTTPPort
 		}
 	}
 

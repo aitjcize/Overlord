@@ -628,7 +628,8 @@ class Ghost:
             if _CONTROL_END in buf:
               index = buf.index(_CONTROL_END)
               nonlocals['control_str'] += buf[:index]
-              self.HandleTTYControl(fd, nonlocals['control_str'].decode('utf-8'))
+              self.HandleTTYControl(
+                      fd, nonlocals['control_str'].decode('utf-8'))
               nonlocals['control_state'] = None
               nonlocals['control_str'] = b''
               buf = buf[index+1:]
@@ -1202,7 +1203,7 @@ class Ghost:
   def ScanServer(self):
     for meth in [self.GetGateWayIP, self.GetFactoryServerIP]:
       addrs = reduce(lambda x, y: x + y,
-                     [[(h, _DEFAULT_HTTP_PORT), (h, _DEFAULT_HTTPS_PORT)]
+                     [[(h, _DEFAULT_HTTPS_PORT), (h, _DEFAULT_HTTP_PORT)]
                       for h in meth()], [])
       for addr in addrs:
         if addr not in self._overlord_addrs:
@@ -1319,7 +1320,8 @@ def main():
                       action='store_true',
                       help='show status of the client')
   parser.add_argument('overlord_addr', metavar='OVERLORD_ADDR', type=str,
-                      nargs='*', help='overlord server address in format: host:port')
+                      nargs='*',
+                      help='overlord server address in format: host:port')
   args = parser.parse_args()
 
   if args.status:
@@ -1340,13 +1342,13 @@ def main():
 
   for addr in args.overlord_addr:
     if ':' not in addr:
-      addrs += [(addr, _DEFAULT_HTTP_PORT), (addr, _DEFAULT_HTTPS_PORT)]
+      addrs += [(addr, _DEFAULT_HTTPS_PORT), (addr, _DEFAULT_HTTP_PORT)]
     else:
       host, port = addr.split(':')
       addrs.append((host, int(port)))
 
-  addrs += [('127.0.0.1', _DEFAULT_HTTP_PORT),
-            ('127.0.0.1', _DEFAULT_HTTPS_PORT)]
+  addrs += [('127.0.0.1', _DEFAULT_HTTPS_PORT),
+            ('127.0.0.1', _DEFAULT_HTTP_PORT)]
 
   prop_file = os.path.abspath(args.prop_file) if args.prop_file else None
 

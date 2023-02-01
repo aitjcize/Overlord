@@ -1450,11 +1450,11 @@ func (ghost *Ghost) StartRPCServer() {
 func (ghost *Ghost) ScanGateway() {
 	if gateways, err := GetGateWayIP(); err == nil {
 		for _, gw := range gateways {
-			addr := fmt.Sprintf("%s:%d", gw, DefaultHTTPPort)
+			addr := fmt.Sprintf("%s:%d", gw, DefaultHTTPSPort)
 			if !ghost.existsInAddr(addr) {
 				ghost.addrs = append(ghost.addrs, addr)
 			}
-			addr = fmt.Sprintf("%s:%d", gw, DefaultHTTPSPort)
+			addr = fmt.Sprintf("%s:%d", gw, DefaultHTTPPort)
 			if !ghost.existsInAddr(addr) {
 				ghost.addrs = append(ghost.addrs, addr)
 			}
@@ -1596,15 +1596,15 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	if len(args) >= 1 {
 		if strings.Index(args[0], ":") == -1 {
 			addrs = append(addrs,
-				fmt.Sprintf("%s:%d", args[0], DefaultHTTPPort),
-				fmt.Sprintf("%s:%d", args[0], DefaultHTTPSPort))
+				fmt.Sprintf("%s:%d", args[0], DefaultHTTPSPort),
+				fmt.Sprintf("%s:%d", args[0], DefaultHTTPPort))
 		} else {
 			addrs = append(addrs, args[0])
 		}
 	}
 	addrs = append(addrs,
-		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPPort),
-		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPSPort))
+		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPSPort),
+		fmt.Sprintf("127.0.0.1:%d", DefaultHTTPPort))
 
 	tlsSettings := newTLSSettings(tlsCertFile, verify)
 
