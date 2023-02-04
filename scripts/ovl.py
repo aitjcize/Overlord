@@ -77,7 +77,7 @@ The fingerprint for the TLS host certificate sent by the remote host is
 
 %s
 
-Do you want to trust this certificate and proceed? [Y/n] """
+Do you want to trust this certificate and proceed? [y/N] """
 
 _TLS_CERT_CHANGED_WARNING = """
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
@@ -300,6 +300,7 @@ class DaemonState:
     # No verify.
     if not self.ssl_verify:
       context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+      context.check_hostname = False
       context.verify_mode = ssl.CERT_NONE
       return context
 
@@ -402,7 +403,7 @@ class OverlordClientDaemon:
     except Exception:
       return False  # For whatever reason above failed, assume False
 
-  def _CheckTLSCertificate(self, check_hostname=True):
+  def _CheckTLSCertificate(self):
     """Check TLS certificate.
 
     Returns:
@@ -440,7 +441,7 @@ class OverlordClientDaemon:
 
     ssl_enabled = self._TLSEnabled()
     if ssl_enabled:
-      result = self._CheckTLSCertificate(ssl_check_hostname)
+      result = self._CheckTLSCertificate()
       if not result:
         if self._state.ssl_self_signed:
           return ('SSLCertificateChanged', ssl.get_server_certificate(
