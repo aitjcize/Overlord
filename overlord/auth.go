@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -38,6 +39,7 @@ type basicAuthHTTPHandlerDecorator struct {
 	handlerFunc http.HandlerFunc
 	blockedIps  map[string]time.Time
 	failedCount map[string]int
+	mutex       sync.Mutex
 }
 
 func (auth *basicAuthHTTPHandlerDecorator) Unauthorized(w http.ResponseWriter, r *http.Request,
@@ -89,6 +91,9 @@ func (auth *basicAuthHTTPHandlerDecorator) ResetFailCount(r *http.Request) {
 }
 
 func (auth *basicAuthHTTPHandlerDecorator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	auth.mutex.Lock()
+	defer auth.mutex.Unlock()
+
 	if auth.IsBlocked(r) {
 		http.Error(w, fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized),
 			"too many retries"), http.StatusUnauthorized)
@@ -166,7 +171,7 @@ func (auth *BasicAuth) WrapHandler(h http.Handler) http.Handler {
 		return h
 	}
 	return &basicAuthHTTPHandlerDecorator{auth, h, nil,
-		make(map[string]time.Time), make(map[string]int)}
+		make(map[string]time.Time), make(map[string]int), sync.Mutex{}}
 }
 
 // WrapHandlerFunc wraps an http.HanlderFunc and provide HTTP basic-auth.
@@ -175,7 +180,7 @@ func (auth *BasicAuth) WrapHandlerFunc(h http.HandlerFunc) http.Handler {
 		return h
 	}
 	return &basicAuthHTTPHandlerDecorator{auth, nil, h,
-		make(map[string]time.Time), make(map[string]int)}
+		make(map[string]time.Time), make(map[string]int), sync.Mutex{}}
 }
 
 // Authenticate authenticate an user with the provided user and passwd.
