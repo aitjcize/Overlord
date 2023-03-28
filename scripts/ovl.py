@@ -590,11 +590,12 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
         if self._stop.is_set():
           break
 
-        data = sys.stdin.read()
-        if not data:
-          self.send(_STDIN_CLOSED * 2)
-          break
-        self.send(data, binary=True)
+        if sys.stdin in rd:
+          data = sys.stdin.read()
+          if not data:
+            self.send(_STDIN_CLOSED * 2)
+            break
+          self.send(data, binary=True)
     except (KeyboardInterrupt, RuntimeError):
       pass
 
