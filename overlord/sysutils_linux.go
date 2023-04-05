@@ -7,11 +7,12 @@ package overlord
 import (
 	"bufio"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
+
+	uuid "github.com/satori/go.uuid"
 )
 
 // GetGateWayIP return the IPs of the gateways.
@@ -78,9 +79,15 @@ func GetMachineID() (string, error) {
 			}
 		}
 		mid = strings.Trim(mid, ";")
+
+		if mid == "" {
+			mid = uuid.NewV4().String()
+		}
 		return mid, nil
 	}
-	return "", errors.New("can't generate machine ID")
+
+	// Fallback to a random UUID.
+	return uuid.NewV4().String(), nil
 }
 
 // GetProcessWorkingDirectory returns the current working directory of a process.

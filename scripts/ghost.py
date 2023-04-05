@@ -48,7 +48,7 @@ _SEPARATOR = b'\r\n'
 _PING_TIMEOUT = 3
 _PING_INTERVAL = 5
 _REQUEST_TIMEOUT_SECS = 60
-_SHELL = os.getenv('SHELL', '/bin/bash')
+_SHELL = os.getenv('SHELL', '/bin/sh')
 _DEFAULT_BIND_ADDRESS = '127.0.0.1'
 
 _CONTROL_START = 128
@@ -235,7 +235,10 @@ class Ghost:
     self._mid = mid
     self._sock = None
     self._mode = mode
-    self._machine_id = self.GetMachineID()
+    if self._mid == Ghost.RANDOM_MID:
+      self._machine_id = str(uuid.uuid4())
+    else:
+        self._machine_id = self.GetMachineID()
     self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._terminal_session_id = terminal_sid
     self._ttyname_to_sid = {}
@@ -465,8 +468,6 @@ class Ghost:
     Darwin:
       All Darwin system should have the IOPlatformSerialNumber attribute.
     """
-    if self._mid == Ghost.RANDOM_MID:
-      return str(uuid.uuid4())
     if self._mid:
       return self._mid
 
@@ -508,7 +509,7 @@ class Ghost:
     except Exception:
       pass
 
-    raise RuntimeError("can't generate machine ID")
+    return str(uuid.uuid4())
 
   def GetProcessWorkingDirectory(self, pid):
     if self._platform == 'Linux':

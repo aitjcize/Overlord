@@ -40,7 +40,7 @@ import (
 var ghostRPCStubPort = GetenvInt("GHOST_RPC_PORT", 4499)
 
 const (
-	defaultShell         = "/bin/bash"
+	defaultShell         = "/bin/sh"
 	pingInterval         = 10 * time.Second
 	readTimeout          = 3 * time.Second
 	connectTimeout       = 10 * time.Second

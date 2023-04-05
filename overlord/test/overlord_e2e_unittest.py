@@ -63,23 +63,25 @@ class TestOverlord(unittest.TestCase):
     # set ports for overlord to bind
     overlord_http_port = FindUnusedPort()
     self.host = '%s:%d' % (_HOST, overlord_http_port)
-    env['OVERLORD_PORT'] = str(FindUnusedPort())
     env['OVERLORD_LD_PORT'] = str(FindUnusedPort())
-    env['OVERLORD_HTTP_PORT'] = str(overlord_http_port)
     env['GHOST_RPC_PORT'] = str(FindUnusedPort())
 
     # Launch overlord
-    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-no-auth'], env=env)
+    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-no-auth',
+                                 '-port', str(overlord_http_port)], env=env)
 
     # Launch go implementation of ghost
     self.goghost = subprocess.Popen(['%s/ghost' % bindir,
                                      '-mid=go', '-no-lan-disc',
-                                     '-no-rpc-server', '-tls=n'], env=env)
+                                     '-no-rpc-server', '-tls=n',
+                                     'localhost:%d' % overlord_http_port],
+                                    env=env)
 
     # Launch python implementation of ghost
     self.pyghost = subprocess.Popen(['%s/ghost.py' % scriptdir,
                                      '--mid=python', '--no-lan-disc',
-                                     '--no-rpc-server', '--tls=n'],
+                                     '--no-rpc-server', '--tls=n',
+                                     'localhost:%d' % overlord_http_port],
                                     env=env)
 
     def CheckClient():
