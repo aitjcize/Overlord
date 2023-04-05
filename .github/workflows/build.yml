@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:alpine
+    steps:
+      - uses: actions/checkout@v3
+      - name: install
+        run: |
+          apk update
+          apk add git python3 make gcc linux-headers libc-dev py-pip
+          pip install -r requirements.txt
+      - name: Fix permission
+        run: git config --global --add safe.directory $PWD
+      - name: test
+        run: go test -v ./...
+      - name: e2e_test
+        run: ./overlord/test/overlord_e2e_unittest.py
+
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build the Docker image
+        run: docker build -t aitjcize/overlord:latest .
+      - name: Push Docker image
+        run: docker push aitjcize/overlord:latest
