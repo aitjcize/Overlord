@@ -584,6 +584,9 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
     pass
 
   def _FeedInput(self):
+    # Make stdin read non-blocking.
+    fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, os.O_NONBLOCK)
+
     try:
       while True:
         rd, unused_w, unused_x = select.select([sys.stdin], [], [], 0.5)
@@ -595,7 +598,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
           if not data:
             self.send(_STDIN_CLOSED * 2)
             break
-          self.send(data, binary=True)
+          self.send(data.encode('utf-8'), binary=True)
     except (KeyboardInterrupt, RuntimeError):
       pass
 
