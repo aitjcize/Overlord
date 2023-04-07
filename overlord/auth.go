@@ -37,64 +37,11 @@ type basicAuthHTTPHandlerDecorator struct {
 	auth        *BasicAuth
 	handler     http.Handler
 	handlerFunc http.HandlerFunc
-	blockedIps  map[string]time.Time
-	failedCount map[string]int
-	mutex       sync.Mutex
 }
 
-func (auth *basicAuthHTTPHandlerDecorator) Unauthorized(w http.ResponseWriter, r *http.Request,
-	msg string, record bool) {
-
-	// Record failure
-	if record {
-		ip := getRequestIP(r)
-		if _, ok := auth.failedCount[ip]; !ok {
-			auth.failedCount[ip] = 0
-		}
-		if ip != "127.0.0.1" {
-			// Only count for non-trusted IP.
-			auth.failedCount[ip]++
-		}
-
-		log.Printf("BasicAuth: IP %s failed to login, count: %d\n", ip,
-			auth.failedCount[ip])
-
-		if auth.failedCount[ip] >= maxFailCount {
-			auth.blockedIps[ip] = time.Now()
-			log.Printf("BasicAuth: IP %s is blocked\n", ip)
-		}
-	}
-
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%s", auth.auth.Realm))
-	http.Error(w, fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized),
-		msg), http.StatusUnauthorized)
-}
-
-func (auth *basicAuthHTTPHandlerDecorator) IsBlocked(r *http.Request) bool {
-	ip := getRequestIP(r)
-
-	if t, ok := auth.blockedIps[ip]; ok {
-		if time.Now().Sub(t) < blockDuration {
-			log.Printf("BasicAuth: IP %s attempted to login, blocked\n", ip)
-			return true
-		}
-		// Unblock the user because of timeout
-		delete(auth.failedCount, ip)
-		delete(auth.blockedIps, ip)
-	}
-	return false
-}
-
-func (auth *basicAuthHTTPHandlerDecorator) ResetFailCount(r *http.Request) {
-	ip := getRequestIP(r)
-	delete(auth.failedCount, ip)
-}
-
-func (auth *basicAuthHTTPHandlerDecorator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	auth.mutex.Lock()
-	defer auth.mutex.Unlock()
-
-	if auth.IsBlocked(r) {
+// ServeHTTP implements the http.Handler interface.
+func (d *basicAuthHTTPHandlerDecorator) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if d.auth.IsBlocked(r) {
 		http.Error(w, fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized),
 			"too many retries"), http.StatusUnauthorized)
 		return
@@ -102,21 +49,21 @@ func (auth *basicAuthHTTPHandlerDecorator) ServeHTTP(w http.ResponseWriter, r *h
 
 	username, password, ok := r.BasicAuth()
 	if !ok {
-		auth.Unauthorized(w, r, "authorization failed", false)
+		d.auth.Unauthorized(w, r, "authorization failed", false)
 		return
 	}
 
-	pass, err := auth.auth.Authenticate(username, password)
+	pass, err := d.auth.Authenticate(username, password)
 	if !pass {
-		auth.Unauthorized(w, r, err.Error(), true)
+		d.auth.Unauthorized(w, r, err.Error(), true)
 		return
 	}
-	auth.ResetFailCount(r)
+	d.auth.ResetFailCount(r)
 
-	if auth.handler != nil {
-		auth.handler.ServeHTTP(w, r)
+	if d.handler != nil {
+		d.handler.ServeHTTP(w, r)
 	} else {
-		auth.handlerFunc(w, r)
+		d.handlerFunc(w, r)
 	}
 }
 
@@ -126,16 +73,29 @@ type BasicAuth struct {
 	Realm   string
 	secrets map[string]string
 	Disable bool // Disable basic auth function, pass through
+
+	blockedIps  map[string]time.Time
+	failedCount map[string]int
+	mutex       sync.RWMutex
 }
 
 // NewBasicAuth creates a BasicAuth object
-func NewBasicAuth(realm, htpasswd string, Disable bool) *BasicAuth {
+func NewBasicAuth(realm, htpasswd string, disable bool) *BasicAuth {
 	secrets := make(map[string]string)
+
+	auth := &BasicAuth{
+		Realm:       realm,
+		secrets:     secrets,
+		Disable:     disable,
+		blockedIps:  make(map[string]time.Time),
+		failedCount: make(map[string]int),
+	}
 
 	f, err := os.Open(htpasswd)
 	if err != nil {
 		log.Printf("Warning: %s", err.Error())
-		return &BasicAuth{realm, secrets, true}
+		auth.Disable = true
+		return auth
 	}
 
 	b := bufio.NewReader(f)
@@ -162,7 +122,7 @@ func NewBasicAuth(realm, htpasswd string, Disable bool) *BasicAuth {
 		secrets[parts[0]] = parts[1]
 	}
 
-	return &BasicAuth{realm, secrets, Disable}
+	return auth
 }
 
 // WrapHandler wraps an http.Hanlder and provide HTTP basic-auth.
@@ -170,8 +130,7 @@ func (auth *BasicAuth) WrapHandler(h http.Handler) http.Handler {
 	if auth.Disable {
 		return h
 	}
-	return &basicAuthHTTPHandlerDecorator{auth, h, nil,
-		make(map[string]time.Time), make(map[string]int), sync.Mutex{}}
+	return &basicAuthHTTPHandlerDecorator{auth, h, nil}
 }
 
 // WrapHandlerFunc wraps an http.HanlderFunc and provide HTTP basic-auth.
@@ -179,8 +138,7 @@ func (auth *BasicAuth) WrapHandlerFunc(h http.HandlerFunc) http.Handler {
 	if auth.Disable {
 		return h
 	}
-	return &basicAuthHTTPHandlerDecorator{auth, nil, h,
-		make(map[string]time.Time), make(map[string]int), sync.Mutex{}}
+	return &basicAuthHTTPHandlerDecorator{auth, nil, h}
 }
 
 // Authenticate authenticate an user with the provided user and passwd.
@@ -197,4 +155,71 @@ func (auth *BasicAuth) Authenticate(user, passwd string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// IsBlocked returns true if the given IP is blocked.
+func (auth *BasicAuth) IsBlocked(r *http.Request) bool {
+	ip := getRequestIP(r)
+
+	auth.mutex.RLock()
+	t, ok := auth.blockedIps[ip]
+	auth.mutex.RUnlock()
+	if !ok {
+		return false
+	}
+
+	if time.Now().Sub(t) < blockDuration {
+		log.Printf("BasicAuth: IP %s attempted to login, blocked\n", ip)
+		return true
+	}
+
+	// Unblock the user because of timeout
+	auth.mutex.Lock()
+	defer auth.mutex.Unlock()
+
+	delete(auth.failedCount, ip)
+	delete(auth.blockedIps, ip)
+
+	return false
+}
+
+// ResetFailCount resets the fail count for the given IP.
+func (auth *BasicAuth) ResetFailCount(r *http.Request) {
+	auth.mutex.Lock()
+	defer auth.mutex.Unlock()
+
+	ip := getRequestIP(r)
+	delete(auth.failedCount, ip)
+}
+
+// Unauthorized returns a 401 Unauthorized response.
+func (auth *BasicAuth) Unauthorized(w http.ResponseWriter, r *http.Request,
+	msg string, record bool) {
+
+	auth.mutex.Lock()
+	defer auth.mutex.Unlock()
+
+	// Record failure
+	if record {
+		ip := getRequestIP(r)
+		if _, ok := auth.failedCount[ip]; !ok {
+			auth.failedCount[ip] = 0
+		}
+		if ip != "127.0.0.1" {
+			// Only count for non-trusted IP.
+			auth.failedCount[ip]++
+		}
+
+		log.Printf("BasicAuth: IP %s failed to login, count: %d\n", ip,
+			auth.failedCount[ip])
+
+		if auth.failedCount[ip] >= maxFailCount {
+			auth.blockedIps[ip] = time.Now()
+			log.Printf("BasicAuth: IP %s is blocked\n", ip)
+		}
+	}
+
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf("Basic realm=%s", auth.Realm))
+	http.Error(w, fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized),
+		msg), http.StatusUnauthorized)
 }
