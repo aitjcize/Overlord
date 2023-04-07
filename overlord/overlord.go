@@ -400,15 +400,6 @@ func (a byMid) Less(i, j int) bool {
 	return a[i]["mid"].(string) < a[j]["mid"].(string)
 }
 
-func pingLoop(ws *websocket.Conn) {
-	for {
-		time.Sleep(10 * time.Second)
-		if err := ws.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-			break
-		}
-	}
-}
-
 // RegisterHTTPHandlers register handlers for http routes.
 func (ovl *Overlord) RegisterHTTPHandlers() {
 	var upgrader = websocket.Upgrader{
@@ -434,8 +425,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			log.Println(err)
 			return
 		}
-		// Ghost RPC protocol already has a ping/pong mechanism, so we don't need
-		// to send ping message to the client.
 
 		log.Printf("Incoming connection from %s", conn.UnderlyingConn().RemoteAddr())
 		cs := NewConnServer(ovl, conn.UnderlyingConn())
@@ -532,7 +521,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			log.Println(err)
 			return
 		}
-		go pingLoop(conn)
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
@@ -562,7 +550,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			log.Println(err)
 			return
 		}
-		go pingLoop(conn)
 
 		var ttyDevice string
 
@@ -598,7 +585,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			log.Println(err)
 			return
 		}
-		go pingLoop(conn)
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
@@ -864,7 +850,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			log.Println(err)
 			return
 		}
-		go pingLoop(conn)
 
 		var port int
 
