@@ -329,7 +329,7 @@ class Ghost:
       logging.error('Upgrade: %s: %s', e.__class__.__name__, e)
       return
     except Exception as e:
-      logging.exception('Upgrade: failed to download sha1sum file, abort')
+      logging.error('Upgrade: failed to download sha1sum file, abort')
       return
 
     if self.GetFileSha1(scriptpath) == sha1sum:
