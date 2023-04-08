@@ -112,11 +112,19 @@ type RPCCore struct {
 	Conn       net.Conn             // handle to the TCP connection
 	ReadBuffer string               // internal read buffer
 	responders map[string]Responder // response handlers
+
+	readChan    chan []byte
+	readErrChan chan error
 }
 
 // NewRPCCore creates the RPCCore object.
 func NewRPCCore(conn net.Conn) *RPCCore {
-	return &RPCCore{Conn: conn, responders: make(map[string]Responder)}
+	return &RPCCore{
+		Conn:        conn,
+		responders:  make(map[string]Responder),
+		readChan:    make(chan []byte),
+		readErrChan: make(chan error),
+	}
 }
 
 // SendMessage sends a message.
@@ -171,22 +179,40 @@ func (rpc *RPCCore) handleResponse(res *Response) error {
 // send the content from the socket, and the second channel send an error
 // object if there is one.
 func (rpc *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
-	readChan := make(chan []byte)
-	readErrChan := make(chan error)
 
 	go func() {
 		for {
 			buf := make([]byte, bufferSize)
 			n, err := rpc.Conn.Read(buf)
 			if err != nil {
-				readErrChan <- err
+				rpc.readErrChan <- err
 				return
 			}
-			readChan <- buf[:n]
+			rpc.readChan <- buf[:n]
 		}
 	}()
 
-	return readChan, readErrChan
+	return rpc.readChan, rpc.readErrChan
+}
+
+// StopConn stops the connection and terminates the reader goroutine.
+func (rpc *RPCCore) StopConn() {
+	rpc.Conn.Close()
+	rpc.Conn.Close()
+	rpc.Conn = nil
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Drain rpc.readChan and rpc.readErrChan so that the reader goroutine can
+	// exit.
+	for {
+		select {
+		case <-rpc.readChan:
+		case <-rpc.readErrChan:
+		default:
+			return
+		}
+	}
 }
 
 // ParseMessage parses a single JSON string into a Message object.

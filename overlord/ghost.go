@@ -796,7 +796,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 
 	var tty *os.File
 	var err error
-	stopConn := make(chan bool, 1)
+	stopConn := make(chan struct{})
 
 	defer func() {
 		ghost.quit = true
@@ -863,7 +863,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		go func() {
 			io.Copy(ghost.Conn, tty)
 			cmd.Wait()
-			stopConn <- true
+			close(stopConn)
 		}()
 	} else {
 		// Open a TTY device
@@ -890,7 +890,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 
 		go func() {
 			io.Copy(ghost.Conn, tty)
-			stopConn <- true
+			close(stopConn)
 		}()
 	}
 
@@ -952,10 +952,8 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 				return nil
 			}
 			return err
-		case s := <-stopConn:
-			if s {
-				return nil
-			}
+		case <-stopConn:
+			return nil
 		}
 	}
 }
@@ -1003,7 +1001,7 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 		return err
 	}
 
-	stopConn := make(chan bool, 1)
+	stopConn := make(chan struct{})
 
 	if ghost.ReadBuffer != "" {
 		stdin.Write([]byte(ghost.ReadBuffer))
@@ -1013,7 +1011,7 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	go io.Copy(ghost.Conn, stdout)
 	go func() {
 		io.Copy(ghost.Conn, stderr)
-		stopConn <- true
+		close(stopConn)
 	}()
 
 	if err = cmd.Start(); err != nil {
@@ -1055,10 +1053,8 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 			}
 			log.Printf("SpawnShellServer: %s\n", err)
 			return err
-		case s := <-stopConn:
-			if s {
-				return nil
-			}
+		case <-stopConn:
+			return nil
 		}
 	}
 }
@@ -1117,7 +1113,7 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 	}
 	defer conn.Close()
 
-	stopConn := make(chan bool, 1)
+	stopConn := make(chan struct{})
 
 	if ghost.ReadBuffer != "" {
 		conn.Write([]byte(ghost.ReadBuffer))
@@ -1126,7 +1122,7 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 
 	go func() {
 		io.Copy(ghost.Conn, conn)
-		stopConn <- true
+		close(stopConn)
 	}()
 
 	for {
@@ -1139,10 +1135,8 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 				return nil
 			}
 			return err
-		case s := <-stopConn:
-			if s {
-				return nil
-			}
+		case <-stopConn:
+			return nil
 		}
 	}
 }
@@ -1286,7 +1280,7 @@ func (ghost *Ghost) Listen() error {
 	ghost.readErrChan = readErrChan
 
 	defer func() {
-		ghost.Conn.Close()
+		ghost.StopConn()
 		ghost.pauseLanDisc = false
 	}()
 

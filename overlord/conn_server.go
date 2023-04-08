@@ -59,7 +59,7 @@ type ConnServer struct {
 	wsConn      *websocket.Conn        // WebSocket for Terminal and Shell
 	logcat      logcatContext          // Logcat context
 	Download    fileDownloadContext    // File download context
-	stopListen  chan bool              // Stop the Listen() loop
+	stopListen  chan struct{}          // Stop the Listen() loop
 	lastPing    int64                  // Last time the client pinged
 }
 
@@ -72,7 +72,7 @@ func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 		Response:   make(chan string),
 		Properties: make(map[string]interface{}),
 		ovl:        ovl,
-		stopListen: make(chan bool, 1),
+		stopListen: make(chan struct{}),
 		registered: false,
 		Download:   fileDownloadContext{Data: make(chan []byte)},
 	}
@@ -90,7 +90,7 @@ func (c *ConnServer) setProperties(prop map[string]interface{}) {
 
 // StopListen stops ConnServer's Listen loop.
 func (c *ConnServer) StopListen() {
-	c.stopListen <- true
+	close(c.stopListen)
 }
 
 // Terminate terminats the connection and perform cleanup.
@@ -98,9 +98,7 @@ func (c *ConnServer) Terminate() {
 	if c.registered {
 		c.ovl.Unregister(c)
 	}
-	if c.Conn != nil {
-		c.Conn.Close()
-	}
+	c.StopConn()
 	if c.wsConn != nil {
 		c.wsConn.WriteMessage(websocket.CloseMessage, []byte(""))
 		c.wsConn.Close()
@@ -118,9 +116,7 @@ func (c *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 
 // ModeForwards the input from Websocket to TCP socket.
 func (c *ConnServer) forwardWSInput() {
-	defer func() {
-		c.stopListen <- true
-	}()
+	defer c.StopListen()
 
 	for {
 		mt, payload, err := c.wsConn.ReadMessage()
@@ -146,7 +142,7 @@ func (c *ConnServer) forwardWSInput() {
 // ModeForward the stream output to WebSocket.
 func (c *ConnServer) forwardWSOutput(buffer string) {
 	if c.wsConn == nil {
-		c.stopListen <- true
+		c.StopListen()
 	}
 	c.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
 }
@@ -278,10 +274,8 @@ func (c *ConnServer) Listen() {
 				log.Printf("Client %s timeout\n", c.Mid)
 				return
 			}
-		case s := <-c.stopListen:
-			if s {
-				return
-			}
+		case <-c.stopListen:
+			return
 		}
 	}
 }
