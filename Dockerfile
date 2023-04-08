@@ -7,7 +7,7 @@ COPY . .
 
 RUN apk update && apk add make gcc linux-headers libc-dev
 
-RUN make
+RUN make STATIC=true
 
 FROM alpine:latest
 
