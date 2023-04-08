@@ -43,7 +43,7 @@ class TestOverlord(unittest.TestCase):
   def setUpClass(cls):
     # Build overlord, only do this once over all tests.
     gitroot = os.path.normpath(os.path.join(os.path.dirname(__file__),
-                               '../..'))
+                               '..'))
     cls.bindir = tempfile.mkdtemp()
     subprocess.call('make -C %s BIN=%s' % (gitroot, cls.bindir), shell=True)
 
@@ -55,7 +55,7 @@ class TestOverlord(unittest.TestCase):
   def setUp(self):
     self.basedir = os.path.dirname(__file__)
     bindir = self.__class__.bindir
-    scriptdir = os.path.normpath(os.path.join(self.basedir, '../../scripts'))
+    scriptdir = os.path.normpath(os.path.join(self.basedir, '../scripts'))
 
     env = os.environ.copy()
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')
@@ -123,7 +123,7 @@ class TestOverlord(unittest.TestCase):
 
   def testWebAPI(self):
     # Test /api/app/list
-    appdir = os.path.join(self.basedir, '../app')
+    appdir = os.path.join(self.basedir, '../overlord/app')
     specialApps = ['common', 'upgrade', 'third_party']
     apps = [x for x in os.listdir(appdir)
             if os.path.isdir(os.path.join(appdir, x)) and x not in specialApps]

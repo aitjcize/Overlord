@@ -23,7 +23,7 @@ jobs:
       - name: test
         run: go test -v ./...
       - name: e2e_test
-        run: ./overlord/test/overlord_e2e_unittest.py
+        run: ./test/overlord_e2e_unittest.py
 
   build:
     needs: test
