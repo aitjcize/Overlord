@@ -198,8 +198,6 @@ func (rpc *RPCCore) SpawnReaderRoutine() (chan []byte, chan error) {
 // StopConn stops the connection and terminates the reader goroutine.
 func (rpc *RPCCore) StopConn() {
 	rpc.Conn.Close()
-	rpc.Conn.Close()
-	rpc.Conn = nil
 
 	time.Sleep(200 * time.Millisecond)
 
