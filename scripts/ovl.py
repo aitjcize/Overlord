@@ -11,7 +11,7 @@ import functools
 import getpass
 import hashlib
 import http.client
-from io import StringIO
+from io import BytesIO
 import json
 import logging
 import os
@@ -584,9 +584,6 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
     pass
 
   def _FeedInput(self):
-    # Make stdin read non-blocking.
-    fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, os.O_NONBLOCK)
-
     try:
       while True:
         rd, unused_w, unused_x = select.select([sys.stdin], [], [], 0.5)
@@ -594,11 +591,11 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
           break
 
         if sys.stdin in rd:
-          data = sys.stdin.read()
+          data = sys.stdin.buffer.read()
           if not data:
             self.send(_STDIN_CLOSED * 2)
             break
-          self.send(data.encode('utf-8'), binary=True)
+          self.send(data, binary=True)
     except (KeyboardInterrupt, RuntimeError):
       pass
 
@@ -611,7 +608,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
 
   def received_message(self, message):
     if message.is_binary:
-      self._output.write(message.data.decode('utf-8'))
+      self._output.write(message.data)
       self._output.flush()
 
 
@@ -642,7 +639,6 @@ class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
       pass
     finally:
       self._sock.close()
-
 
   def opened(self):
     self._input_thread.start()
@@ -931,16 +927,16 @@ class OverlordCLIClient:
                                      self._state.password))
 
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
-    sio = StringIO()
+    bio = BytesIO()
     ws = ShellWebSocketClient(
-        self._state, sio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
+        self._state, bio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
             self._state.host, self._state.port,
             urllib.parse.quote(self._selected_mid),
             urllib.parse.quote(command)),
         headers=headers)
     ws.connect()
     ws.run()
-    return sio.getvalue()
+    return bio.getvalue().decode('utf-8')
 
   @Command('status', 'show Overlord connection status')
   def Status(self):
@@ -1165,7 +1161,7 @@ class OverlordCLIClient:
     if command:
       cmd = ' '.join(command)
       ws = ShellWebSocketClient(
-          self._state, sys.stdout,
+          self._state, sys.stdout.buffer,
           scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
               self._state.host, self._state.port,
               urllib.parse.quote(self._selected_mid), urllib.parse.quote(cmd)),
