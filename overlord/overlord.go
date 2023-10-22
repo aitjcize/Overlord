@@ -29,9 +29,8 @@ import (
 )
 
 const (
-	systemAppDir    = "../share/overlord"
-	ldInterval      = 5
-	keepAlivePeriod = 1
+	systemAppDir = "../share/overlord"
+	ldInterval   = 5
 )
 
 // SpawnTerminalCmd is an overlord intend to launch a terminal.
