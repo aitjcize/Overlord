@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	maxFailCount  = 5
-	blockDuration = 24 * time.Hour
+	maxFailCount  = 10
+	blockDuration = 30 * time.Minute
 )
 
 func getRequestIP(r *http.Request) string {
