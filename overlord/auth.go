@@ -215,7 +215,7 @@ func (auth *BasicAuth) Unauthorized(w http.ResponseWriter, r *http.Request,
 
 		if auth.failedCount[ip] >= maxFailCount {
 			auth.blockedIps[ip] = time.Now()
-			log.Printf("BasicAuth: IP %s is blocked\n", ip)
+			log.Printf("BasicAuth: IP %s (%s) is blocked\n", ip, r.UserAgent())
 		}
 	}
 
