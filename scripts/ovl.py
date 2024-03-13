@@ -1238,8 +1238,11 @@ class OverlordCLIClient:
           #   dest_dir/A
           dst_root = root if dst_exists else root[len(src):].lstrip('/')
           for name in files:
+            # trailing ../ for the src_dir name
+            relative_path = os.path.relpath(dst_root, f'{src}/../')
+            dst_filepath = f'{dst}/{name}' if relative_path == '.' else f'{dst}/{relative_path}/{name}'
             _push(os.path.join(root, name),
-                  os.path.join(dst, dst_root, name))
+                  dst_filepath)
       else:
         _push(src, dst)
 
