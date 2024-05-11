@@ -1236,7 +1236,7 @@ class OverlordCLIClient:
           # If dest_dir does not exist, the resulting directory structure should
           # be:
           #   dest_dir/A
-          dst_root = os.path.basename(root) if dst_exists else ''
+          dst_root = root if dst_exists else root[len(src):].lstrip('/')
           for name in files:
             _push(os.path.join(root, name),
                   os.path.join(dst, dst_root, name))
