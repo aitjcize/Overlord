@@ -24,6 +24,10 @@ jobs:
         run: git config --global --add safe.directory $PWD
       - name: test
         run: go test -v ./...
+      - name: unittest
+        run: |
+          source .venv/bin/activate
+          ./scripts/ovl_unittest.py
       - name: e2e_test
         run: |
           source .venv/bin/activate

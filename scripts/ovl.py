@@ -686,7 +686,7 @@ def ParseMethodSubCommands(cls):
 
 
 @ParseMethodSubCommands
-class OverlordCLIClient:
+class OverlordCliClient:
   """Overlord command line interface client."""
 
   SUBCOMMANDS = []
@@ -1182,50 +1182,63 @@ class OverlordCLIClient:
       else:
         raise
 
+  def _RemoteDirExists(self, path):
+    return ast.literal_eval(self.CheckOutput(
+      'stat %s >/dev/null 2>&1 && echo True || echo False' % path))
+
+  def _RemoteGetPathType(self, path):
+    return self.CheckOutput('stat \'%s\' --printf \'%%F\' '
+                            '2>/dev/null' % path).strip()
+
+  @AutoRetry('push', _RETRY_TIMES)
+  def _PushSingleFile(self, src, dst):
+    src_base = os.path.basename(src)
+
+    # Local file is a link
+    if os.path.islink(src):
+      pbar = ProgressBar(src_base)
+      link_path = os.readlink(src)
+      self.CheckOutput('mkdir -p %(dirname)s; '
+                       'if [ -d "%(dst)s" ]; then '
+                       'ln -sf "%(link_path)s" "%(dst)s/%(link_name)s"; '
+                       'else ln -sf "%(link_path)s" "%(dst)s"; fi' %
+                       dict(dirname=os.path.dirname(dst),
+                            link_path=link_path, dst=dst,
+                            link_name=src_base))
+      pbar.End()
+      return
+
+    mode = '0%o' % (0x1FF & os.stat(src).st_mode)
+    url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
+           (self._state.host, self._state.port,
+            urllib.parse.quote(self._selected_mid), dst, mode))
+    try:
+      UrlOpen(self._state, url + '&filename=%s' % src_base)
+    except urllib.error.HTTPError as e:
+      msg = json.loads(e.read()).get('error', None)
+      raise RuntimeError('push: %s' % msg) from None
+
+    pbar = ProgressBar(src_base)
+    self._HTTPPostFile(url, src, pbar.SetProgress,
+                       self._state.username, self._state.password)
+    pbar.End()
+
   @Command('push', 'push a file or directory to remote', [
       Arg('srcs', nargs='+', metavar='SOURCE'),
       Arg('dst', metavar='DESTINATION')])
   def Push(self, args):
     self.CheckClient()
 
-    @AutoRetry('push', _RETRY_TIMES)
-    def _push(src, dst):
-      src_base = os.path.basename(src)
-
-      # Local file is a link
-      if os.path.islink(src):
-        pbar = ProgressBar(src_base)
-        link_path = os.readlink(src)
-        self.CheckOutput('mkdir -p %(dirname)s; '
-                         'if [ -d "%(dst)s" ]; then '
-                         'ln -sf "%(link_path)s" "%(dst)s/%(link_name)s"; '
-                         'else ln -sf "%(link_path)s" "%(dst)s"; fi' %
-                         dict(dirname=os.path.dirname(dst),
-                              link_path=link_path, dst=dst,
-                              link_name=src_base))
-        pbar.End()
-        return
-
-      mode = '0%o' % (0x1FF & os.stat(src).st_mode)
-      url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
-             (self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid), dst, mode))
-      try:
-        UrlOpen(self._state, url + '&filename=%s' % src_base)
-      except urllib.error.HTTPError as e:
-        msg = json.loads(e.read()).get('error', None)
-        raise RuntimeError('push: %s' % msg) from None
-
-      pbar = ProgressBar(src_base)
-      self._HTTPPostFile(url, src, pbar.SetProgress,
-                         self._state.username, self._state.password)
-      pbar.End()
-
     def _push_single_target(src, dst):
       if os.path.isdir(src):
-        dst_exists = ast.literal_eval(self.CheckOutput(
-            'stat %s >/dev/null 2>&1 && echo True || echo False' % dst))
-        for root, unused_x, files in os.walk(src):
+        src = os.path.abspath(src)
+        base_dir_name = os.path.basename(src)
+        dst_exists = self._RemoteDirExists(dst)
+
+        if dst_exists and self._RemoteGetPathType(dst) != 'directory':
+          raise RuntimeError('push: %s: Not a directory' % dst)
+
+        for subpath, unused_x, files in os.walk(src):
           # If destination directory does not exist, we should strip the first
           # layer of directory. For example: src_dir contains a single file 'A'
           #
@@ -1236,16 +1249,16 @@ class OverlordCLIClient:
           # If dest_dir does not exist, the resulting directory structure should
           # be:
           #   dest_dir/A
-          dst_root = root if dst_exists else root[len(src):].lstrip('/')
+          dst_root = base_dir_name if dst_exists else ''
+          relpath = os.path.relpath(subpath, src)
           for name in files:
-            _push(os.path.join(root, name),
-                  os.path.join(dst, dst_root, name))
+            self._PushSingleFile(os.path.join(subpath, name),
+                  os.path.join(dst, dst_root, relpath, name))
       else:
-        _push(src, dst)
+        self._PushSingleFile(src, dst)
 
     if len(args.srcs) > 1:
-      dst_type = self.CheckOutput('stat \'%s\' --printf \'%%F\' '
-                                  '2>/dev/null' % args.dst).strip()
+      dst_type = self._RemoteGetPathType(args.dst)
       if not dst_type:
         raise RuntimeError('push: %s: No such file or directory' % args.dst)
       if dst_type != 'directory':
@@ -1446,7 +1459,7 @@ def main():
   handler.setFormatter(formatter)
   logger.addHandler(handler)
 
-  ovl = OverlordCLIClient()
+  ovl = OverlordCliClient()
   try:
     ovl.Main()
   except KeyboardInterrupt:
