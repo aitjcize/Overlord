@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -163,7 +162,7 @@ func (t *tlsSettings) updateContext() {
 		}
 		if t.tlsCertFile != "" {
 			log.Println("TLSSettings: using user-supplied ca-certificate")
-			cert, err := ioutil.ReadFile(t.tlsCertFile)
+			cert, err := os.ReadFile(t.tlsCertFile)
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -219,6 +218,7 @@ type Ghost struct {
 	fileOp          fileOperation          // File operation name
 	downloadQueue   chan downloadInfo      // Download queue
 	uploadContext   fileUploadContext      // File upload context
+	host            string                 // Host to forward
 	port            int                    // Port number to forward
 	tlsMode         int                    // TLS mode
 }
@@ -295,8 +295,9 @@ func (ghost *Ghost) SetFileOp(operation, filename string, perm int) *Ghost {
 	return ghost
 }
 
-// SetModeForwardPort sets the port to forward.
-func (ghost *Ghost) SetModeForwardPort(port int) *Ghost {
+// SetForwardTarget sets the host and port to forward.
+func (ghost *Ghost) SetForwardTarget(host string, port int) *Ghost {
+	ghost.host = host
 	ghost.port = port
 	return ghost
 }
@@ -321,7 +322,7 @@ func (ghost *Ghost) loadProperties() {
 		return
 	}
 
-	bytes, err := ioutil.ReadFile(ghost.propFile)
+	bytes, err := os.ReadFile(ghost.propFile)
 	if err != nil {
 		log.Printf("loadProperties: %s\n", err)
 		return
@@ -623,6 +624,7 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 func (ghost *Ghost) handleModeForwardRequest(req *Request) error {
 	type RequestParams struct {
 		Sid  string `json:"sid"`
+		Host string `json:"host"`
 		Port int    `json:"port"`
 	}
 
@@ -635,7 +637,7 @@ func (ghost *Ghost) handleModeForwardRequest(req *Request) error {
 		log.Printf("Received forward command, ModeForward agent %s spawned\n", params.Sid)
 		addrs := []string{ghost.connectedAddr}
 		g := NewGhost(addrs, ghost.tls, ModeForward, RandomMID).SetSid(
-			params.Sid).SetModeForwardPort(params.Port)
+			params.Sid).SetForwardTarget(params.Host, params.Port)
 		g.Start(false, false)
 	}()
 
@@ -958,7 +960,8 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 	}
 }
 
-// SpawnShellServer spawns a Shell server and forward input/output from/to the TCP socket.
+// SpawnShellServer spawns a Shell server and forward input/output from/to the
+// TCP socket.
 func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	log.Println("SpawnShellServer: started")
 
@@ -1023,9 +1026,9 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 
 		process := (*PollableProcess)(cmd.Process)
 		_, err = process.Poll()
-		// Check if the process is terminated. If not, send SIGlogcatTypeVT100 to the process,
-		// then wait for 1 second.  Send another SIGKILL to make sure the process is
-		// terminated.
+		// Check if the process is terminated. If not, send SIGlogcatTypeVT100 to
+		// the process, then wait for 1 second.  Send another SIGKILL to make sure
+		// the process is terminated.
 		if err != nil {
 			cmd.Process.Signal(syscall.SIGTERM)
 			time.Sleep(time.Second)
@@ -1090,10 +1093,10 @@ func (ghost *Ghost) InitiatefileOperation(res *Response) error {
 	return errors.New("InitiatefileOperation: unknown file operation, ignored")
 }
 
-// SpawnPortModeForwardServer spawns a port forwarding server and forward I/O to
+// SpawnPortForwardServer spawns a port forwarding server and forward I/O to
 // the TCP socket.
-func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
-	log.Println("SpawnPortModeForwardServer: started")
+func (ghost *Ghost) SpawnPortForwardServer(res *Response) error {
+	log.Println("SpawnPortForwardServer: started")
 
 	var err error
 
@@ -1103,11 +1106,11 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 			ghost.Conn.Write([]byte(err.Error() + "\n"))
 		}
 		ghost.Conn.Close()
-		log.Println("SpawnPortModeForwardServer: terminated")
+		log.Println("SpawnPortForwardServer: terminated")
 	}()
 
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", ghost.port),
-		connectTimeout)
+	conn, err := net.DialTimeout("tcp",
+		fmt.Sprintf("%s:%d", ghost.host, ghost.port), connectTimeout)
 	if err != nil {
 		return err
 	}
@@ -1131,7 +1134,7 @@ func (ghost *Ghost) SpawnPortModeForwardServer(res *Response) error {
 			conn.Write(buf)
 		case err := <-ghost.readErrChan:
 			if err == io.EOF {
-				log.Println("SpawnPortModeForwardServer: connection terminated")
+				log.Println("SpawnPortForwardServer: connection terminated")
 				return nil
 			}
 			return err
@@ -1236,7 +1239,7 @@ func (ghost *Ghost) Register() error {
 		case ModeFile:
 			handler = ghost.InitiatefileOperation
 		case ModeForward:
-			handler = ghost.SpawnPortModeForwardServer
+			handler = ghost.SpawnPortForwardServer
 		}
 		err = ghost.SendRequest(req, handler)
 		return nil
@@ -1485,7 +1488,8 @@ func (ghost *Ghost) Start(lanDisc bool, RPCServer bool) {
 	}
 }
 
-// Returns a ghostRPCStub client object which can be used to call ghostRPCStub methods.
+// Returns a ghostRPCStub client object which can be used to call ghostRPCStub
+// methods.
 func ghostRPCStubServer() (*rpc.Client, error) {
 	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", ghostRPCStubPort))
 	if err != nil {

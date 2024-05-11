@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -29,8 +28,9 @@ import (
 )
 
 const (
-	systemAppDir = "../share/overlord"
-	ldInterval   = 5
+	defaultForwardHost = "127.0.0.1"
+	ldInterval         = 5
+	systemAppDir       = "../share/overlord"
 )
 
 // SpawnTerminalCmd is an overlord intend to launch a terminal.
@@ -59,6 +59,7 @@ type SpawnFileCmd struct {
 // SpawnModeForwarderCmd is an overlord intend to perform port forwarding.
 type SpawnModeForwarderCmd struct {
 	Sid  string // Session ID
+	Host string // Host to forward
 	Port int    // Port to forward
 }
 
@@ -377,7 +378,7 @@ func (ovl *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 		return false
 	}
 
-	apps, err := ioutil.ReadDir(ovl.GetAppDir())
+	apps, err := os.ReadDir(ovl.GetAppDir())
 	if err != nil {
 		return nil, nil
 	}
@@ -850,10 +851,16 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			return
 		}
 
+		var host string = defaultForwardHost
 		var port int
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
+		// default thost to 127.0.0.1 if not specified
+		if _host, ok := r.URL.Query()["host"]; ok {
+			host = _host[0]
+		}
+
 		if _port, ok := r.URL.Query()["port"]; ok {
 			if port, err = strconv.Atoi(_port[0]); err != nil {
 				WebSocketSendError(conn, "invalid port")
@@ -869,7 +876,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			ovl.agentsMu.Unlock()
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
-			agent.Command <- SpawnModeForwarderCmd{wc.Sid, port}
+			agent.Command <- SpawnModeForwarderCmd{wc.Sid, host, port}
 			if res := <-agent.Response; res != "" {
 				WebSocketSendError(conn, res)
 			}

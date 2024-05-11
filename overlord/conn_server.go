@@ -194,7 +194,7 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 		c.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
 			v.Perm, v.CheckOnly)
 	case SpawnModeForwarderCmd:
-		c.SpawnModeForwarder(v.Sid, v.Port)
+		c.SpawnModeForwarder(v.Sid, v.Host, v.Port)
 	}
 }
 
@@ -459,9 +459,10 @@ func (c *ConnServer) SendClearToDownload() {
 
 // SpawnModeForwarder spawns a forwarder connection (a ghost with mode ModeForward).
 // sid is the session ID, which will be used as the session ID of the new ghost.
-func (c *ConnServer) SpawnModeForwarder(sid string, port int) {
+func (c *ConnServer) SpawnModeForwarder(sid string, host string, port int) {
 	req := NewRequest("forward", map[string]interface{}{
 		"sid":  sid,
+		"host": host,
 		"port": port,
 	})
 	c.SendRequest(req, c.getHandler("SpawnModeForwarder"))

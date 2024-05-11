@@ -1354,18 +1354,18 @@ class OverlordCLIClient:
           help='remove port forwarding for local port LOCAL_PORT'),
       Arg('--remove-all', dest='remove_all', action='store_true',
           default=False, help='remove all port forwarding'),
-      Arg('remote', metavar='REMOTE_PORT', type=int, nargs='?'),
-      Arg('local', metavar='LOCAL_PORT', type=int, nargs='?')])
+      Arg('remote', metavar='[HOST:]REMOTE_PORT', type=str, nargs='?'),
+      Arg('local_port', metavar='LOCAL_PORT', type=int, nargs='?')])
   def Forward(self, args):
     if args.list_all:
       max_len = 10
       if self._state.forwards:
         max_len = max([len(v[0]) for v in self._state.forwards.values()])
 
-      print('%-*s   %-8s  %-8s' % (max_len, 'Client', 'Remote', 'Local'))
+      print('%-*s   %-23s  %-8s' % (max_len, 'Client', 'Remote', 'Local'))
       for local in sorted(self._state.forwards.keys()):
         value = self._state.forwards[local]
-        print('%-*s   %-8s  %-8s' % (max_len, value[0], value[1], local))
+        print('%-*s   %-23s  %-8s' % (max_len, value[0], value[1], local))
       return
 
     if args.remove_all:
@@ -1379,12 +1379,24 @@ class OverlordCLIClient:
     self.CheckClient()
 
     if args.remote is None:
-      raise RuntimeError('remote port not specified')
+      raise RuntimeError('remote target not specified')
 
-    if args.local is None:
-      args.local = args.remote
-    remote = int(args.remote)
-    local = int(args.local)
+    remote_parts = args.remote.split(':')
+    if len(remote_parts) == 1:
+      try:
+        remote_port = int(remote_parts[0])
+      except ValueError:
+        raise RuntimeError('invalid remote port')
+    elif len(remote_parts) == 2:
+      remote_host = remote_parts[0]
+      remote_port = int(remote_parts[1])
+    else:
+      raise RuntimeError('invalid remote target')
+
+    if args.local_port is None:
+      args.local_port = remote_port
+
+    remote = remote_port
 
     def HandleConnection(conn):
       headers = []
@@ -1395,9 +1407,10 @@ class OverlordCLIClient:
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
           self._state, conn,
-          scheme + '%s:%d/api/agent/forward/%s?port=%d' % (
+          scheme + '%s:%d/api/agent/forward/%s?host=%s&port=%d' % (
               self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid), remote),
+              urllib.parse.quote(self._selected_mid),
+              remote_host, remote_port),
           headers=headers)
       try:
         ws.connect()
@@ -1409,7 +1422,7 @@ class OverlordCLIClient:
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('0.0.0.0', local))
+    server.bind(('0.0.0.0', args.local_port))
     server.listen(5)
 
     pid = os.fork()
@@ -1420,7 +1433,8 @@ class OverlordCLIClient:
         t.daemon = True
         t.start()
     else:
-      self._server.AddForward(self._selected_mid, remote, local, pid)
+      self._server.AddForward(self._selected_mid, args.remote, args.local_port,
+                              pid)
 
 
 def main():

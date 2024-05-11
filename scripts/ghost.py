@@ -45,7 +45,7 @@ _DEFAULT_HTTPS_PORT = 443
 _BUFSIZE = 8192
 _RETRY_INTERVAL = 2
 _SEPARATOR = b'\r\n'
-_PING_TIMEOUT = 3
+_PING_TIMEOUT = 10
 _PING_INTERVAL = 5
 _REQUEST_TIMEOUT_SECS = 60
 _SHELL = os.getenv('SHELL', '/bin/sh')
@@ -65,6 +65,8 @@ _STDIN_CLOSED = '##STDIN_CLOSED##'
 SUCCESS = 'success'
 FAILED = 'failed'
 DISCONNECTED = 'disconnected'
+
+_DEFAULT_FORWARD_HOST = '127.0.0.1'
 
 
 class PingTimeoutError(Exception):
@@ -198,7 +200,7 @@ class Ghost:
 
   def __init__(self, overlord_addrs, tls_settings=None, mode=AGENT, mid=None,
                sid=None, prop_file=None, terminal_sid=None, tty_device=None,
-               command=None, file_op=None, port=None, tls_mode=None):
+               command=None, file_op=None, host=None, port=None, tls_mode=None):
     """Constructor.
 
     Args:
@@ -259,6 +261,7 @@ class Ghost:
     self._shell_command = command
     self._file_op = file_op
     self._download_queue = queue.Queue()
+    self._host = host
     self._port = port
 
   def SetIgnoreChild(self, status):
@@ -390,7 +393,7 @@ class Ghost:
           pass
 
   def SpawnGhost(self, mode, sid=None, terminal_sid=None, tty_device=None,
-                 command=None, file_op=None, port=None):
+                 command=None, file_op=None, host=None, port=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
@@ -405,7 +408,7 @@ class Ghost:
       g = Ghost([self._connected_addr], tls_settings=self._tls_settings,
                 mode=mode, mid=Ghost.RANDOM_MID, sid=sid,
                 terminal_sid=terminal_sid, tty_device=tty_device,
-                command=command, file_op=file_op, port=port)
+                command=command, file_op=file_op, host=host, port=port)
       g.Start()
       sys.exit(0)
     else:
@@ -819,7 +822,7 @@ class Ghost:
     try:
       src_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       src_sock.settimeout(_CONNECT_TIMEOUT)
-      src_sock.connect(('127.0.0.1', self._port))
+      src_sock.connect((self._host, self._port))
 
       src_sock.send(self._sock.RecvBuf())
 
@@ -853,7 +856,7 @@ class Ghost:
         raise PingTimeoutError
 
     self._last_ping = self.Timestamp()
-    self.SendRequest('ping', {}, timeout_handler, 5)
+    self.SendRequest('ping', {}, timeout_handler, _PING_TIMEOUT)
 
   def HandleFileDownloadRequest(self, msg):
     params = msg['params']
@@ -939,7 +942,9 @@ class Ghost:
     elif command == 'file_upload':
       self.HandleFileUploadRequest(msg)
     elif command == 'forward':
-      self.SpawnGhost(self.FORWARD, params['sid'], port=params['port'])
+      self.SpawnGhost(self.FORWARD, params['sid'],
+                      host=params.get('host', _DEFAULT_FORWARD_HOST),
+                      port=params['port'])
       self.SendResponse(msg, SUCCESS)
 
   def HandleResponse(self, response):

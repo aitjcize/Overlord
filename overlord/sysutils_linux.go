@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -62,7 +61,7 @@ func GetMachineID() (string, error) {
 		}
 	}
 
-	interfaces, err := ioutil.ReadDir("/sys/class/net")
+	interfaces, err := os.ReadDir("/sys/class/net")
 	if err == nil {
 		mid := ""
 		for _, iface := range interfaces {
