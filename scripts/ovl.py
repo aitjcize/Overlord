@@ -1397,6 +1397,7 @@ class OverlordCliClient:
     remote_parts = args.remote.split(':')
     if len(remote_parts) == 1:
       try:
+        remote_host = '127.0.0.1'
         remote_port = int(remote_parts[0])
       except ValueError:
         raise RuntimeError('invalid remote port')
