@@ -182,7 +182,7 @@ func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		}
 		ovl.agents[conn.Mid] = conn
 		ovl.agentsMu.Unlock()
-		ovl.ioserver.BroadcastTo("monitor", "agent joined", string(msg))
+		ovl.BroadcastEvent("monitor", "agent joined", string(msg))
 	case ModeTerminal, ModeShell, ModeForward:
 		ovl.wsctxsMu.Lock()
 		ctx, ok := ovl.wsctxs[conn.Sid]
@@ -203,7 +203,7 @@ func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		}
 		ovl.logcats[conn.Mid][conn.Sid] = conn
 		ovl.logcatsMu.Unlock()
-		ovl.ioserver.BroadcastTo("monitor", "logcat joined", string(msg))
+		ovl.BroadcastEvent("monitor", "logcat joined", string(msg))
 	case ModeFile:
 		// Do nothing, we wait until 'request_to_download' call from client to
 		// send the message to the browser
@@ -236,14 +236,14 @@ func (ovl *Overlord) Unregister(conn *ConnServer) {
 
 	switch conn.Mode {
 	case ModeControl:
-		ovl.ioserver.BroadcastTo("monitor", "agent left", string(msg))
+		ovl.BroadcastEvent("monitor", "agent left", string(msg))
 		ovl.agentsMu.Lock()
 		delete(ovl.agents, conn.Mid)
 		ovl.agentsMu.Unlock()
 	case ModeLogcat:
 		ovl.logcatsMu.Lock()
 		if _, ok := ovl.logcats[conn.Mid]; ok {
-			ovl.ioserver.BroadcastTo("monitor", "logcat left", string(msg))
+			ovl.BroadcastEvent("monitor", "logcat left", string(msg))
 			delete(ovl.logcats[conn.Mid], conn.Sid)
 			if len(ovl.logcats[conn.Mid]) == 0 {
 				delete(ovl.logcats, conn.Mid)
@@ -289,7 +289,7 @@ func (ovl *Overlord) AddWebsocketContext(wc *webSocketContext) {
 func (ovl *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	// Use session ID as download session ID instead of machine ID, so a machine
 	// can have multiple download at the same time
-	ovl.ioserver.BroadcastTo(conn.TerminalSid, "file download", string(conn.Sid))
+	ovl.BroadcastEvent(conn.TerminalSid, "file download", conn.Sid)
 	ovl.downloadsMu.Lock()
 	ovl.downloads[conn.Sid] = conn
 	ovl.downloadsMu.Unlock()
@@ -299,7 +299,7 @@ func (ovl *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 func (ovl *Overlord) RegisterUploadRequest(conn *ConnServer) {
 	// Use session ID as upload session ID instead of machine ID, so a machine
 	// can have multiple upload at the same time
-	ovl.ioserver.BroadcastTo(conn.TerminalSid, "file upload", string(conn.Sid))
+	ovl.BroadcastEvent(conn.TerminalSid, "file upload", conn.Sid)
 	ovl.uploadsMu.Lock()
 	ovl.uploads[conn.Sid] = conn
 	ovl.uploadsMu.Unlock()
@@ -309,34 +309,42 @@ func (ovl *Overlord) RegisterUploadRequest(conn *ConnServer) {
 func (ovl *Overlord) handleConnection(conn net.Conn) {
 	handler := NewConnServer(ovl, conn)
 	go handler.Listen()
+	ovl.BroadcastEvent("monitor", "agent joined", handler.Mid)
 }
 
 // InitSocketIOServer initializes the Socket.io server.
 func (ovl *Overlord) InitSocketIOServer() {
-	server, err := socketio.NewServer(nil)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	server := socketio.NewServer(nil)
 
-	server.On("connection", func(so socketio.Socket) {
-		so.Join("monitor")
+	server.OnConnect("/", func(s socketio.Conn) error {
+		s.Join("monitor") // Join the monitor room by default
+		log.Printf("Client connected: %s", s.ID())
+		return nil
 	})
 
-	server.On("error", func(so socketio.Socket, err error) {
-		log.Println("error:", err)
+	server.OnError("/", func(s socketio.Conn, e error) {
+		log.Println("socket.io error:", e)
 	})
 
-	// Client initiated subscription
-	server.On("subscribe", func(so socketio.Socket, name string) {
-		so.Join(name)
+	server.OnEvent("/", "subscribe", func(s socketio.Conn, room string) {
+		s.Join(room)
 	})
 
-	// Client initiated unsubscription
-	server.On("unsubscribe", func(so socketio.Socket, name string) {
-		so.Leave(name)
+	server.OnEvent("/", "unsubscribe", func(s socketio.Conn, room string) {
+		s.Leave(room)
 	})
 
 	ovl.ioserver = server
+}
+
+// BroadcastEvent broadcasts an event to all clients in a room
+func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
+	ovl.ioserverMu.Lock()
+	defer ovl.ioserverMu.Unlock()
+
+	if ovl.ioserver != nil {
+		ovl.ioserver.BroadcastToRoom("", room, event, args...)
+	}
 }
 
 // GetAppDir returns the overlord application directory.

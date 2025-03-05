@@ -34,6 +34,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pkg/term/termios"
 	uuid "github.com/satori/go.uuid"
+	"golang.org/x/sys/unix"
 )
 
 var ghostRPCStubPort = GetenvInt("GHOST_RPC_PORT", 4499)
@@ -874,17 +875,17 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 			return err
 		}
 
-		var term syscall.Termios
+		var term unix.Termios
 		err := termios.Tcgetattr(tty.Fd(), &term)
 		if err != nil {
 			return nil
 		}
 
 		termios.Cfmakeraw(&term)
-		term.Iflag &= (syscall.IXON | syscall.IXOFF)
-		term.Cflag |= syscall.CLOCAL
-		term.Ispeed = syscall.B115200
-		term.Ospeed = syscall.B115200
+		term.Iflag &= (unix.IXON | unix.IXOFF)
+		term.Cflag |= unix.CLOCAL
+		term.Ispeed = unix.B115200
+		term.Ospeed = unix.B115200
 
 		if err = termios.Tcsetattr(tty.Fd(), termios.TCSANOW, &term); err != nil {
 			return err
