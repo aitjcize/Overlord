@@ -140,11 +140,11 @@ func (c *ConnServer) forwardWSInput() {
 }
 
 // ModeForward the stream output to WebSocket.
-func (c *ConnServer) forwardWSOutput(buffer string) {
+func (c *ConnServer) forwardWSOutput(buf []byte) {
 	if c.wsConn == nil {
 		c.StopListen()
 	}
-	c.wsConn.WriteMessage(websocket.BinaryMessage, []byte(buffer))
+	c.wsConn.WriteMessage(websocket.BinaryMessage, buf)
 }
 
 // ModeForward the logcat output to WebSocket.
@@ -209,14 +209,13 @@ func (c *ConnServer) Listen() {
 	for {
 		select {
 		case buf := <-readChan:
-			buffer := string(buf)
 			// Some modes completely ignore the RPC call, process them.
 			switch c.Mode {
 			case ModeTerminal, ModeShell, ModeForward:
-				c.forwardWSOutput(buffer)
+				c.forwardWSOutput(buf)
 				continue
 			case ModeLogcat:
-				c.forwardLogcatOutput(buffer)
+				c.forwardLogcatOutput(string(buf))
 				continue
 			case ModeFile:
 				if c.Download.Ready {
@@ -228,7 +227,7 @@ func (c *ConnServer) Listen() {
 			// Only Parse the first message if we are not registered, since
 			// if we are in logcat mode, we want to preserve the rest of the
 			// data and forward it to the websocket.
-			reqs = c.ParseRequests(buffer, !c.registered)
+			reqs = c.ParseRequests(buf, !c.registered)
 			if err := c.processRequests(reqs); err != nil {
 				if _, ok := err.(RegistrationFailedError); ok {
 					log.Printf("%s, abort\n", err)
@@ -246,9 +245,9 @@ func (c *ConnServer) Listen() {
 			case ModeLogcat:
 				// A logcat client does not wait for ACK before sending
 				// stream, so we need to forward the remaining content of the buffer
-				if c.ReadBuffer != "" {
-					c.forwardLogcatOutput(c.ReadBuffer)
-					c.ReadBuffer = ""
+				if len(c.ReadBuffer) > 0 {
+					c.forwardLogcatOutput(string(c.ReadBuffer))
+					c.ReadBuffer = nil
 				}
 			}
 		case err := <-readErrChan:

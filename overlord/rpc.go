@@ -5,11 +5,11 @@
 package overlord
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log"
 	"net"
-	"strings"
 	"time"
 
 	uuid "github.com/satori/go.uuid"
@@ -17,11 +17,13 @@ import (
 
 const (
 	debugRPC              = false
-	messageSeparator      = "\r\n"
+	messageSeparatorStr   = "\r\n"
 	bufferSize            = 8192
 	requestTimeoutSeconds = 60              // Number of seconds before request timeouts
 	timeoutCheckInterval  = 3 * time.Second // The time between checking for timeout
 )
+
+var messageSeparator = []byte(messageSeparatorStr)
 
 // Message is the interface which defines a sendable message.
 type Message interface {
@@ -110,7 +112,7 @@ type Responder struct {
 // RPCCore is the core implementation of the TCP-based 2-way RPC protocol.
 type RPCCore struct {
 	Conn       net.Conn             // handle to the TCP connection
-	ReadBuffer string               // internal read buffer
+	ReadBuffer []byte               // internal read buffer
 	responders map[string]Responder // response handlers
 
 	readChan    chan []byte
@@ -139,7 +141,7 @@ func (rpc *RPCCore) SendMessage(msg Message) error {
 		if debugRPC {
 			log.Printf("-----> %s\n", string(msgBytes))
 		}
-		_, err = rpc.Conn.Write(append(msgBytes, []byte(messageSeparator)...))
+		_, err = rpc.Conn.Write(append(msgBytes, messageSeparator...))
 	}
 	return err
 }
@@ -234,22 +236,22 @@ func (rpc *RPCCore) ParseMessage(msgJSON string) (Message, error) {
 }
 
 // ParseRequests parses a buffer from SpawnReaderRoutine into Request objects.
-// The response message is automatically handled by the RPCCore itrpc by
-// invoking the corresponding response handler.
-func (rpc *RPCCore) ParseRequests(buffer string, single bool) []*Request {
+// The response message is automatically handled by the RPCCore by invoking the
+// corresponding response handler.
+func (rpc *RPCCore) ParseRequests(buffer []byte, single bool) []*Request {
 	var reqs []*Request
-	var msgsJSON []string
+	var msgsJSON [][]byte
 
-	rpc.ReadBuffer += buffer
+	rpc.ReadBuffer = append(rpc.ReadBuffer, buffer...)
 	if single {
-		idx := strings.Index(rpc.ReadBuffer, messageSeparator)
+		idx := bytes.Index(rpc.ReadBuffer, messageSeparator)
 		if idx == -1 {
 			return nil
 		}
-		msgsJSON = []string{rpc.ReadBuffer[:idx]}
-		rpc.ReadBuffer = rpc.ReadBuffer[idx+2:]
+		msgsJSON = [][]byte{rpc.ReadBuffer[:idx]}
+		rpc.ReadBuffer = rpc.ReadBuffer[idx+len(messageSeparator):]
 	} else {
-		msgs := strings.Split(rpc.ReadBuffer, messageSeparator)
+		msgs := bytes.Split(rpc.ReadBuffer, messageSeparator)
 		if len(msgs) == 1 {
 			return nil
 		}
@@ -259,9 +261,9 @@ func (rpc *RPCCore) ParseRequests(buffer string, single bool) []*Request {
 
 	for _, msgJSON := range msgsJSON {
 		if debugRPC {
-			log.Printf("<----- " + msgJSON)
+			log.Printf("<----- %s", string(msgJSON))
 		}
-		if msg, err := rpc.ParseMessage(msgJSON); err != nil {
+		if msg, err := rpc.ParseMessage(string(msgJSON)); err != nil {
 			log.Printf("Message parse failed: %s\n", err)
 			continue
 		} else {

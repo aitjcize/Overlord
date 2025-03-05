@@ -921,7 +921,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		return nil
 	}
 
-	feedInput([]byte(ghost.ReadBuffer))
+	feedInput(ghost.ReadBuffer)
 
 	for {
 		select {
@@ -987,9 +987,9 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 
 	stopConn := make(chan struct{})
 
-	if ghost.ReadBuffer != "" {
-		stdin.Write([]byte(ghost.ReadBuffer))
-		ghost.ReadBuffer = ""
+	if len(ghost.ReadBuffer) > 0 {
+		stdin.Write(ghost.ReadBuffer)
+		ghost.ReadBuffer = nil
 	}
 
 	go io.Copy(ghost.Conn, stdout)
@@ -1099,9 +1099,9 @@ func (ghost *Ghost) SpawnPortForwardServer(res *Response) error {
 
 	stopConn := make(chan struct{})
 
-	if ghost.ReadBuffer != "" {
-		conn.Write([]byte(ghost.ReadBuffer))
-		ghost.ReadBuffer = ""
+	if len(ghost.ReadBuffer) > 0 {
+		conn.Write(ghost.ReadBuffer)
+		ghost.ReadBuffer = nil
 	}
 
 	go func() {
@@ -1272,15 +1272,15 @@ func (ghost *Ghost) Listen() error {
 		select {
 		case buffer := <-readChan:
 			if ghost.uploadContext.Ready {
-				if ghost.ReadBuffer != "" {
+				if len(ghost.ReadBuffer) > 0 {
 					// Write the leftover from previous ReadBuffer
-					ghost.uploadContext.Data <- []byte(ghost.ReadBuffer)
-					ghost.ReadBuffer = ""
+					ghost.uploadContext.Data <- ghost.ReadBuffer
+					ghost.ReadBuffer = nil
 				}
 				ghost.uploadContext.Data <- buffer
 				continue
 			}
-			reqs := ghost.ParseRequests(string(buffer), ghost.RegisterStatus != Success)
+			reqs := ghost.ParseRequests(buffer, ghost.RegisterStatus != Success)
 			if ghost.quit {
 				return nil
 			}
