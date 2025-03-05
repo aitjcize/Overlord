@@ -59,26 +59,27 @@ var App = React.createClass({
     this.addOnNewClientHandler(this.onNewClient);
   },
   componentDidMount: function () {
-    var socket = io(window.location.protocol + "//" + window.location.host,
-                    {path: "/api/socket.io/"});
-    socket.on("agent joined", function (msg) {
+    // Initialize WebSocket monitor
+    this.monitor = new MonitorWebSocket();
+
+    // Subscribe to agent events
+    this.monitor.on("agent joined", function (msg) {
       var obj = JSON.parse(msg);
       this.addClient(obj);
     }.bind(this));
 
-    socket.on("agent left", function (msg) {
+    this.monitor.on("agent left", function (msg) {
       var obj = JSON.parse(msg);
       this.removeClient(obj);
     }.bind(this));
 
     // Initiate a file download
-    socket.on("file download", function (sid) {
+    this.monitor.on("file download", function (sid) {
       var url = window.location.protocol + "//" + window.location.host +
                 "/api/file/download/" + sid;
       $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
         "</iframe>").appendTo('body');
     });
-    this.socket = socket;
   },
   computePageSize: function () {
     // compute how many clients we can put in the screen

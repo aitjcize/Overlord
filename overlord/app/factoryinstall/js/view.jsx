@@ -20,7 +20,7 @@ var App = React.createClass({
   },
   saveCookies: function (key, value) {
     // Set cookies expire 10 year later
-    reactCookie.save(key, value, {maxAge: 10 * 365 * 86400});
+    reactCookie.save(key, value, {maxAge: 10 * 365 * 24 * 60 * 60});
   },
   loadClientsFromServer: function () {
     if (this.state.locked) {
@@ -106,21 +106,21 @@ var App = React.createClass({
         boot_timeout_secs: this.loadCookies("boot_timeout_secs", 60)};
   },
   componentDidMount: function () {
-    this.onLayoutDialogSaveClicked();
-    this.loadClientsFromServer();
-    setInterval(this.loadClientsFromServer, this.props.pollInterval);
+    // Initialize WebSocket monitor
+    this.monitor = new MonitorWebSocket();
 
-    var socket = io(window.location.protocol + "//" + window.location.host,
-                    {path: "/api/socket.io/"});
-    socket.on("logcat joined", function (msg) {
+    // Subscribe to agent events
+    this.monitor.on("agent joined", function (msg) {
       var obj = JSON.parse(msg);
 
+      // Update status if client exists
       if (typeof(this.refs["client-" + obj.mid]) != "undefined") {
         this.refs["client-" + obj.mid].updateStatus("in-progress");
       }
 
-      this.setState(function (state, props) {
-        var client = state.clients.find(function (event, index, arr) {
+      // Update client state
+      this.setState(function(state, props) {
+        var client = state.clients.find(function(event, index, arr) {
           return event.mid == obj.mid;
         });
         if (typeof(client) == "undefined") {
@@ -134,20 +134,40 @@ var App = React.createClass({
         }
       });
     }.bind(this));
-    socket.on("logcat left", function (msg) {
+
+    this.monitor.on("agent left", function (msg) {
       var obj = JSON.parse(msg);
 
-      if (this.state.locked) {
+      // Update status if client exists and is locked
+      if (this.state.locked && typeof(this.refs["client-" + obj.mid]) != "undefined") {
         this.refs["client-" + obj.mid].updateStatus("disconnected");
       }
-      this.setState(function (state, props) {
+
+      // Remove client from state
+      this.setState(function(state, props) {
         this.removeClientFromList(state.clients, obj);
       });
     }.bind(this));
+
+    // Initiate a file download
+    this.monitor.on("file download", function (sid) {
+      var url = window.location.protocol + "//" + window.location.host +
+                "/api/file/download/" + sid;
+      $("<iframe id='" + sid + "' src='" + url + "' style='display:none'>" +
+        "</iframe>").appendTo('body');
+    });
+
+    // Start polling for client list
+    setInterval(this.loadClientsFromServer, 5000);
+    this.loadClientsFromServer();
   },
   render: function() {
     var lock_btn_class = this.state.locked ? "btn-danger" : "btn-primary";
     var lock_btn_text = this.state.locked ? "Unlock" : "Lock";
+    var onCloseClicked = function(event) {
+      var el = document.getElementById(this.props.id);
+      $(el).css("display", "none");
+    };
     return (
       <div id="main">
         <NavBar name="Factory Install Dashboard" url="/api/apps/list" />
@@ -278,14 +298,13 @@ var ClientInfo = React.createClass({
     var onMessage = function (data) {
       if (data.indexOf("Factory Installer Complete") != -1) {
         this.props.client.updateStatus("done");
-      } else if (data.indexOf("\033[1;31m") != -1) {
+      } else if (data.indexOf("\x1b[1;31m") != -1) {
         this.props.client.updateStatus("error");
       }
     };
 
     var onCloseClicked = function (event) {
-      var el = document.getElementById(this.props.id);
-      $(el).css("display", "none");
+      this.props.app.removeTerminal(this.props.id);
     };
 
     var mid = this.props.data.mid;

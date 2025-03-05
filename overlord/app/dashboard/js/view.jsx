@@ -93,11 +93,11 @@ var App = React.createClass({
     return {cameras: [], fixtures: [], recentclients: [], terminals: {}};
   },
   componentDidMount: function () {
-    var socket = io(window.location.protocol + "//" + window.location.host,
-                    {path: "/api/socket.io/"});
-    this.socket = socket;
+    // Initialize WebSocket monitor
+    this.monitor = new MonitorWebSocket();
 
-    socket.on("agent joined", function (msg) {
+    // Subscribe to agent events
+    this.monitor.on("agent joined", function (msg) {
       var client = JSON.parse(msg);
       this.addClient(client);
 
@@ -105,7 +105,7 @@ var App = React.createClass({
       this.state.recentclients = this.state.recentclients.slice(0, 5);
     }.bind(this));
 
-    socket.on("agent left", function (msg) {
+    this.monitor.on("agent left", function (msg) {
       var client = JSON.parse(msg);
 
       this.removeClientFromList(this.state.clients, client);
@@ -114,7 +114,7 @@ var App = React.createClass({
     }.bind(this));
 
     // Initiate a file download
-    socket.on("file download", function (sid) {
+    this.monitor.on("file download", function (sid) {
       var url = window.location.protocol + "//" + window.location.host +
                 "/api/file/download/" + sid;
       $("<iframe src='" + url + "' style='display:none'>" +
@@ -295,12 +295,10 @@ var Windows = React.createClass({
     var onTerminalControl = function (control) {
       if (control.type == "sid") {
         this.terminal_sid = control.data;
-        this.props.app.socket.emit("subscribe", control.data);
       }
     };
     var onTerminalCloseClicked = function (event) {
       this.props.app.removeTerminal(this.props.id);
-      this.props.app.socket.emit("unsubscribe", this.terminal_sid);
     };
     var onCameraCloseClicked = function (event) {
       this.props.app.removeCamera(this.props.id);

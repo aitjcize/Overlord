@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	socketio "github.com/googollee/go-socket.io"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	uuid "github.com/satori/go.uuid"
@@ -93,6 +92,19 @@ type TLSCerts struct {
 	Key  string // key.pem filename
 }
 
+// BroadcastMessage represents a message to be broadcast
+type BroadcastMessage struct {
+	Event string      `json:"event"`
+	Room  string      `json:"room"`
+	Data  interface{} `json:"data"`
+}
+
+// WebSocketClient represents a connected websocket client
+type WebSocketClient struct {
+	conn     *websocket.Conn
+	sendChan chan []byte
+}
+
 // Overlord type is the main context for storing the overlord server state.
 type Overlord struct {
 	bindAddr         string                            // Bind address
@@ -108,13 +120,13 @@ type Overlord struct {
 	wsctxs           map[string]*webSocketContext      // (sid, webSocketContext) mapping
 	downloads        map[string]*ConnServer            // Download file agents
 	uploads          map[string]*ConnServer            // Upload file agents
-	ioserver         *socketio.Server                  // SocketIO server handle
+	monitorClients   map[*WebSocketClient]bool         // Connected monitor WebSocket clients
 	agentsMu         sync.Mutex                        // Mutex for agents
 	logcatsMu        sync.Mutex                        // Mutex for logcats
 	wsctxsMu         sync.Mutex                        // Mutex for wsctxs
 	downloadsMu      sync.Mutex                        // Mutex for downloads
 	uploadsMu        sync.Mutex                        // Mutex for uploads
-	ioserverMu       sync.Mutex                        // Mutex for ioserver
+	monitorClientsMu sync.RWMutex                      // Mutex for monitorClients
 }
 
 // NewOverlord creates an Overlord object.
@@ -158,6 +170,7 @@ func NewOverlord(
 		wsctxs:           make(map[string]*webSocketContext),
 		downloads:        make(map[string]*ConnServer),
 		uploads:          make(map[string]*ConnServer),
+		monitorClients:   make(map[*WebSocketClient]bool),
 	}
 }
 
@@ -312,39 +325,30 @@ func (ovl *Overlord) handleConnection(conn net.Conn) {
 	ovl.BroadcastEvent("monitor", "agent joined", handler.Mid)
 }
 
-// InitSocketIOServer initializes the Socket.io server.
-func (ovl *Overlord) InitSocketIOServer() {
-	server := socketio.NewServer(nil)
-
-	server.OnConnect("/", func(s socketio.Conn) error {
-		s.Join("monitor") // Join the monitor room by default
-		log.Printf("Client connected: %s", s.ID())
-		return nil
-	})
-
-	server.OnError("/", func(s socketio.Conn, e error) {
-		log.Println("socket.io error:", e)
-	})
-
-	server.OnEvent("/", "subscribe", func(s socketio.Conn, room string) {
-		s.Join(room)
-	})
-
-	server.OnEvent("/", "unsubscribe", func(s socketio.Conn, room string) {
-		s.Leave(room)
-	})
-
-	ovl.ioserver = server
-}
-
-// BroadcastEvent broadcasts an event to all clients in a room
+// BroadcastEvent broadcasts an event to all monitor clients
 func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
-	ovl.ioserverMu.Lock()
-	defer ovl.ioserverMu.Unlock()
-
-	if ovl.ioserver != nil {
-		ovl.ioserver.BroadcastToRoom("", room, event, args...)
+	msg := BroadcastMessage{
+		Event: event,
+		Room:  room,
+		Data:  args,
 	}
+
+	jsonMsg, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("Failed to marshal broadcast message: %v", err)
+		return
+	}
+
+	ovl.monitorClientsMu.RLock()
+	for client := range ovl.monitorClients {
+		select {
+		case client.sendChan <- jsonMsg:
+		default:
+			close(client.sendChan)
+			delete(ovl.monitorClients, client)
+		}
+	}
+	ovl.monitorClientsMu.RUnlock()
 }
 
 // GetAppDir returns the overlord application directory.
@@ -894,9 +898,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		}
 	}
 
-	// Initialize socket IO server
-	ovl.InitSocketIOServer()
-
 	appDir := ovl.GetAppDir()
 
 	// HTTP basic auth
@@ -926,8 +927,10 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// File methods
 	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
 
+	// WebSocket monitor endpoint
+	r.HandleFunc("/api/monitor", ovl.handleMonitor)
+
 	http.Handle("/api/", auth.WrapHandler(r))
-	http.Handle("/api/socket.io/", auth.WrapHandler(ovl.ioserver))
 
 	// /upgrade/ does not need authenticiation
 	http.Handle("/upgrade/", http.StripPrefix("/upgrade/",
@@ -953,6 +956,82 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		prefix := fmt.Sprintf("/%s/", app)
 		http.Handle(prefix, http.StripPrefix(prefix,
 			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
+	}
+}
+
+func (ovl *Overlord) handleMonitor(w http.ResponseWriter, r *http.Request) {
+	conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
+	if err != nil {
+		log.Printf("Failed to upgrade connection: %v", err)
+		return
+	}
+
+	client := &WebSocketClient{
+		conn:     conn,
+		sendChan: make(chan []byte, 256),
+	}
+
+	ovl.monitorClientsMu.Lock()
+	ovl.monitorClients[client] = true
+	ovl.monitorClientsMu.Unlock()
+
+	// Start client read/write pumps
+	go client.writePump()
+	go client.readPump(ovl)
+}
+
+func (c *WebSocketClient) writePump() {
+	ticker := time.NewTicker(time.Second * 30)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+
+	for {
+		select {
+		case message, ok := <-c.sendChan:
+			if !ok {
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			err := c.conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				return
+			}
+
+		case <-ticker.C:
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *WebSocketClient) readPump(ovl *Overlord) {
+	defer func() {
+		ovl.monitorClientsMu.Lock()
+		delete(ovl.monitorClients, c)
+		ovl.monitorClientsMu.Unlock()
+		close(c.sendChan)
+		c.conn.Close()
+	}()
+
+	c.conn.SetReadLimit(512)
+	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		return nil
+	})
+
+	for {
+		_, _, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error: %v", err)
+			}
+			break
+		}
 	}
 }
 
