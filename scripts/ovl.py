@@ -56,10 +56,6 @@ _RETRY_TIMES = 3
 # echo -n overlord | md5sum
 _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
 
-# Terminal resize control
-_CONTROL_START = 128
-_CONTROL_END = 129
-
 # Stream control
 _STDIN_CLOSED = '##STDIN_CLOSED##'
 
@@ -502,38 +498,34 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     self._escape = escape
     self._stdin_fd = sys.stdin.fileno()
     self._old_termios = None
+    self._last_size = None
+    self._old_sigwinch_handler = None
 
   def handshake_ok(self):
     pass
 
+  def _handle_sigwinch(self, signum, frame):
+    """Handle terminal resize events."""
+    rows, cols = GetTerminalSize()
+    if self._last_size != (rows, cols):
+      self._last_size = (rows, cols)
+      self.send(f"\x1b[8;{rows};{cols}t")
+
   def opened(self):
-    nonlocals = {'size': (80, 40)}
-
-    def _ResizeWindow():
-      size = GetTerminalSize()
-      if size != nonlocals['size']:  # Size not changed, ignore
-        control = {'command': 'resize', 'params': list(size)}
-        payload = (_CONTROL_START.to_bytes(1, 'big') +
-                   json.dumps(control).encode('utf-8') +
-                   _CONTROL_END.to_bytes(1, 'big'))
-        nonlocals['size'] = size
-        try:
-          self.send(payload, binary=True)
-        except Exception as e:
-          logging.exception(e)
-
     def _FeedInput():
       self._old_termios = termios.tcgetattr(self._stdin_fd)
       tty.setraw(self._stdin_fd)
+
+      # Send initial terminal size
+      rows, cols = GetTerminalSize()
+      self._last_size = (rows, cols)
+      self.send(f"\x1b[8;{rows};{cols}t")
 
       READY, ENTER_PRESSED, ESCAPE_PRESSED = range(3)
 
       try:
         state = READY
         while True:
-          # Check if terminal is resized
-          _ResizeWindow()
-
           ch = sys.stdin.read(1)
 
           # Scan for escape sequence
@@ -557,9 +549,16 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     t.daemon = True
     t.start()
 
+    # Set up SIGWINCH handler
+    self._old_sigwinch_handler = signal.signal(signal.SIGWINCH, self._handle_sigwinch)
+
   def closed(self, code, reason=None):
     del code, reason  # Unused.
+    # Restore original terminal settings
     termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
+    # Restore original signal handler
+    if self._old_sigwinch_handler:
+      signal.signal(signal.SIGWINCH, self._old_sigwinch_handler)
     print('\nConnection to %s closed.' % self._mid)
 
   def received_message(self, message):

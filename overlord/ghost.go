@@ -747,42 +747,50 @@ func (ghost *Ghost) Ping() error {
 	return ghost.SendRequest(req, pingHandler)
 }
 
-func (ghost *Ghost) handleTTYControl(tty *os.File, controlString string) error {
-	// Terminal Command for ghost
-	// Implements the Message interface.
-	type TerminalCommand struct {
-		Command string          `json:"command"`
-		Params  json.RawMessage `json:"params"`
-	}
+func (ghost *Ghost) handleTTYControl(tty *os.File, data []byte) (bool, error) {
+	// Parse ANSI escape sequences
+	if len(data) > 2 && data[0] == 0x1b && data[1] == '[' {
+		// Find the terminating character
+		for i := 2; i < len(data); i++ {
+			if data[i] == 't' {
+				// Parse window operation command
+				params := strings.Split(string(data[2:i]), ";")
+				if len(params) >= 3 && params[0] == "8" {
+					// Window size in characters
+					rows, _ := strconv.Atoi(params[1])
+					cols, _ := strconv.Atoi(params[2])
 
-	// winsize stores the Height and Width of a terminal.
-	type winsize struct {
-		height uint16
-		width  uint16
-	}
+					log.Printf("Terminal resize request received: rows=%d, cols=%d", rows, cols)
 
-	var control TerminalCommand
-	err := json.Unmarshal([]byte(controlString), &control)
-	if err != nil {
-		log.Println("mal-formed JSON request, ignored")
-		return nil
-	}
+					ws := &struct {
+						Row    uint16
+						Col    uint16
+						Xpixel uint16
+						Ypixel uint16
+					}{
+						Row:    uint16(rows),
+						Col:    uint16(cols),
+						Xpixel: 0,
+						Ypixel: 0,
+					}
 
-	command := control.Command
-	if command == "resize" {
-		var params []int
-		err := json.Unmarshal([]byte(control.Params), &params)
-		if err != nil || len(params) != 2 {
-			log.Println("mal-formed JSON request, ignored")
-			return nil
+					ret, _, err := syscall.Syscall(
+						syscall.SYS_IOCTL,
+						tty.Fd(),
+						syscall.TIOCSWINSZ,
+						uintptr(unsafe.Pointer(ws)),
+					)
+					if ret == ^uintptr(0) {
+						log.Printf("handleTTYControl: TIOCSWINSZ failed: %v", err)
+						return true, err
+					}
+					return true, nil
+				}
+				break
+			}
 		}
-		ws := &winsize{width: uint16(params[1]), height: uint16(params[0])}
-		syscall.Syscall(syscall.SYS_IOCTL, tty.Fd(),
-			uintptr(syscall.TIOCSWINSZ), uintptr(unsafe.Pointer(ws)))
-	} else {
-		return errors.New("Invalid request command " + command)
 	}
-	return nil
+	return false, nil
 }
 
 func (ghost *Ghost) getTTYName() (string, error) {
@@ -897,57 +905,29 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		}()
 	}
 
-	var controlBuffer bytes.Buffer
-	var writeBuffer bytes.Buffer
-	controlState := controlNone
-
-	processBuffer := func(buffer []byte) error {
-		writeBuffer.Reset()
-		for len(buffer) > 0 {
-			if controlState != controlNone {
-				index := bytes.IndexByte(buffer, controlEnd)
-				if index != -1 {
-					controlBuffer.Write(buffer[:index])
-					err := ghost.handleTTYControl(tty, controlBuffer.String())
-					controlState = controlNone
-					controlBuffer.Reset()
-					if err != nil {
-						return err
-					}
-					buffer = buffer[index+1:]
-				} else {
-					controlBuffer.Write(buffer)
-					buffer = buffer[0:0]
-				}
-			} else {
-				index := bytes.IndexByte(buffer, controlStart)
-				if index != -1 {
-					controlState = controlStart
-					writeBuffer.Write(buffer[:index])
-					buffer = buffer[index+1:]
-				} else {
-					writeBuffer.Write(buffer)
-					buffer = buffer[0:0]
-				}
-			}
+	feedInput := func(buffer []byte) error {
+		handled, err := ghost.handleTTYControl(tty, buffer)
+		if err != nil {
+			log.Printf("SpawnTTYServer: Error handling TTY control: %v", err)
+			return err
 		}
-		if writeBuffer.Len() != 0 {
-			tty.Write(writeBuffer.Bytes())
+		if !handled {
+			_, err = tty.Write(buffer)
+			if err != nil {
+				log.Printf("SpawnTTYServer: Error writing to TTY: %v", err)
+				return err
+			}
 		}
 		return nil
 	}
 
-	if ghost.ReadBuffer != "" {
-		processBuffer([]byte(ghost.ReadBuffer))
-		ghost.ReadBuffer = ""
-	}
+	feedInput([]byte(ghost.ReadBuffer))
 
 	for {
 		select {
 		case buffer := <-ghost.readChan:
-			err := processBuffer(buffer)
-			if err != nil {
-				log.Println("SpawnTTYServer:", err)
+			if err := feedInput(buffer); err != nil {
+				return err
 			}
 		case err := <-ghost.readErrChan:
 			if err == io.EOF {

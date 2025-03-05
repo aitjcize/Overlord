@@ -51,9 +51,6 @@ _REQUEST_TIMEOUT_SECS = 60
 _SHELL = os.getenv('SHELL', '/bin/sh')
 _DEFAULT_BIND_ADDRESS = '127.0.0.1'
 
-_CONTROL_START = 128
-_CONTROL_END = 129
-
 _BLOCK_SIZE = 4096
 _CONNECT_TIMEOUT = 3
 
@@ -562,17 +559,26 @@ class Ghost:
     self.SendMessage(msg)
 
   def HandleTTYControl(self, fd, control_str):
-    msg = json.loads(control_str)
-    command = msg['command']
-    params = msg['params']
-    if command == 'resize':
-      # some error happened on websocket
-      if len(params) != 2:
-        return
-      winsize = struct.pack('HHHH', params[0], params[1], 0, 0)
-      fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-    else:
-      logging.warning('Invalid request command "%s"', command)
+    """Handle terminal control sequences.
+
+    Args:
+      fd: File descriptor of the terminal
+      control_str: Control string to process
+    """
+    try:
+      # Check for ANSI escape sequence for window size
+      if control_str.startswith('\x1b[') and control_str.endswith('t'):
+        # Remove ESC[ prefix and 't' suffix
+        params = control_str[2:-1].split(';')
+        if len(params) >= 3 and params[0] == '8':
+          # Window size in characters (rows;cols)
+          rows = int(params[1])
+          cols = int(params[2])
+          logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
+          winsize = struct.pack('HHHH', rows, cols, 0, 0)
+          fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+    except Exception as e:
+      logging.warning('Error handling terminal control: %s', e)
 
   def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
@@ -620,39 +626,38 @@ class Ghost:
         attr[5] = termios.B115200
         termios.tcsetattr(fd, termios.TCSANOW, attr)
 
-      nonlocals = {
-          'control_state': None,
-          'control_str': b''
-      }
-
       def _ProcessBuffer(buf):
+        if buf == b'\x04':
+          raise RuntimeError('connection terminated')
+
         write_buffer = b''
-        while buf:
-          if nonlocals['control_state']:
-            if _CONTROL_END in buf:
-              index = buf.index(_CONTROL_END)
-              nonlocals['control_str'] += buf[:index]
-              self.HandleTTYControl(
-                      fd, nonlocals['control_str'].decode('utf-8'))
-              nonlocals['control_state'] = None
-              nonlocals['control_str'] = b''
-              buf = buf[index+1:]
-            else:
-              nonlocals['control_str'] += buf
-              buf = b''
+        i = 0
+        while i < len(buf):
+          # Check for ESC sequence
+          if buf[i:i+2] == b'\x1b[':
+            # Look for the 't' terminator
+            sequence_found = False
+            for j in range(i+2, len(buf)):
+              if buf[j:j+1] == b't':
+                # Found a complete escape sequence
+                control_seq = buf[i:j+1].decode('utf-8', errors='ignore')
+                self.HandleTTYControl(fd, control_seq)
+                # Skip the processed sequence
+                i = j + 1
+                sequence_found = True
+                break
+            if not sequence_found:
+              # No terminator found, treat as regular data
+              write_buffer += buf[i:i+1]
+              i += 1
           else:
-            if _CONTROL_START in buf:
-              nonlocals['control_state'] = _CONTROL_START
-              index = buf.index(_CONTROL_START)
-              write_buffer += buf[:index]
-              buf = buf[index+1:]
-            else:
-              write_buffer += buf
-              buf = b''
+            write_buffer += buf[i:i+1]
+            i += 1
 
         if write_buffer:
           os.write(fd, write_buffer)
 
+      # Initial buffer processing
       _ProcessBuffer(self._sock.RecvBuf())
 
       while True:
@@ -663,11 +668,9 @@ class Ghost:
 
         if self._sock in rd:
           buf = self._sock.Recv(_BUFSIZE)
-          if not buf:
-            raise RuntimeError('connection terminated')
           _ProcessBuffer(buf)
     except Exception as e:
-      logging.error('SpawnTTYServer: %s', e, exc_info=True)
+      logging.error('SpawnTTYServer: %s', e)
     finally:
       self._sock.Close()
 
