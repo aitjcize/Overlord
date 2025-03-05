@@ -45,7 +45,8 @@ class TestOverlord(unittest.TestCase):
     gitroot = os.path.normpath(os.path.join(os.path.dirname(__file__),
                                '..'))
     cls.bindir = tempfile.mkdtemp()
-    subprocess.call('make -C %s BIN=%s' % (gitroot, cls.bindir), shell=True)
+    subprocess.call('make -C %s BIN=%s overlordd ghost' %
+                    (gitroot, cls.bindir), shell=True)
 
   @classmethod
   def tearDownClass(cls):
@@ -123,10 +124,8 @@ class TestOverlord(unittest.TestCase):
 
   def testWebAPI(self):
     # Test /api/app/list
-    appdir = os.path.join(self.basedir, '../overlord/app')
-    specialApps = ['common', 'upgrade', 'third_party']
-    apps = [x for x in os.listdir(appdir)
-            if os.path.isdir(os.path.join(appdir, x)) and x not in specialApps]
+    appsdir = os.path.join(self.basedir, '../webroot/apps')
+    apps = os.listdir(appsdir)
     res = self._GetJSON('/api/apps/list')
     assert len(res['apps']) == len(apps)
 

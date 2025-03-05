@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, sans-serif;
+  }
+}
+
+@layer components {
+  .window-header {
+    @apply bg-base-200 border-b border-base-300 p-3 flex justify-between items-center;
+  }
+
+  .window-title {
+    @apply font-semibold text-sm;
+  }
+
+  .window-subtitle {
+    @apply text-xs text-base-content/70;
+  }
+
+  .window-content {
+    @apply bg-base-100 p-4;
+  }
+}
+
+/* Terminal specific styles */
+.xterm {
+  height: 100%;
+}
+
+.xterm-viewport {
+  background-color: theme("colors.neutral") !important;
+}

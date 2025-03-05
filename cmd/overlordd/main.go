@@ -24,7 +24,7 @@ var tlsCerts = flag.String("tls", "",
 	"TLS certificates in the form of 'cert.pem,key.pem'. Empty to disable.")
 var noLinkTLS = flag.Bool("no-link-tls", false,
 	"disable TLS between ghost and overlord. Only valid when TLS is enabled.")
-var htpasswdPath = flag.String("htpasswd-path", "app/overlord.htpasswd",
+var htpasswdPath = flag.String("htpasswd-path", "webroot/overlord.htpasswd",
 	"the path to the .htpasswd file.")
 
 func usage() {

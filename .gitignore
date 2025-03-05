@@ -1,0 +1,10 @@
+bin/ghost
+bin/ghost.py.bin
+bin/overlordd
+bin/ovl.py.bin
+bin/webroot
+build
+webroot/apps
+webroot/index.html
+node_modules
+.vite

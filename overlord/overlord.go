@@ -29,7 +29,9 @@ import (
 const (
 	defaultForwardHost = "127.0.0.1"
 	ldInterval         = 5
-	systemAppDir       = "../share/overlord"
+	usrShareDir        = "../share/overlord"
+	webRootDirName     = "webroot"
+	appsDirName        = "apps"
 )
 
 // SpawnTerminalCmd is an overlord intend to launch a terminal.
@@ -351,44 +353,41 @@ func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
 	ovl.monitorClientsMu.RUnlock()
 }
 
-// GetAppDir returns the overlord application directory.
-func (ovl *Overlord) GetAppDir() string {
+func (ovl *Overlord) GetWebRoot() string {
 	execPath, err := os.Executable()
 	if err != nil {
 		log.Fatalln(err)
 	}
 	execDir := filepath.Dir(execPath)
 
-	appDir, err := filepath.Abs(filepath.Join(execDir, "app"))
-	if err != nil {
-		log.Fatalln(err)
-	}
+	webroot, err := filepath.Abs(filepath.Join(execDir, webRootDirName))
 
-	if _, err := os.Stat(appDir); err != nil {
+	if _, err := os.Stat(webroot); err != nil {
 		// Try system install directory
-		appDir, err = filepath.Abs(filepath.Join(execDir, systemAppDir, "app"))
+		webroot, err = filepath.Abs(
+			filepath.Join(execDir, usrShareDir, webRootDirName))
 		if err != nil {
 			log.Fatalln(err)
 		}
-		if _, err := os.Stat(appDir); err != nil {
-			log.Fatalln("Can not find app directory")
+		if _, err := os.Stat(webroot); err != nil {
+			log.Fatalln("Can not find webroot directory")
 		}
+	}
+	return webroot
+}
+
+// GetAppDir returns the overlord application directory.
+func (ovl *Overlord) GetAppDir() string {
+	appDir, err := filepath.Abs(filepath.Join(ovl.GetWebRoot(), appsDirName))
+	if err != nil {
+		log.Fatalln(err)
 	}
 	return appDir
 }
 
 // GetAppNames return the name of overlord apps.
-func (ovl *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
+func (ovl *Overlord) GetAppNames() ([]string, error) {
 	var appNames []string
-
-	isSpecial := func(target string) bool {
-		for _, name := range []string{"common", "upgrade", "third_party"} {
-			if name == target {
-				return true
-			}
-		}
-		return false
-	}
 
 	apps, err := os.ReadDir(ovl.GetAppDir())
 	if err != nil {
@@ -396,7 +395,7 @@ func (ovl *Overlord) GetAppNames(ignoreSpecial bool) ([]string, error) {
 	}
 
 	for _, app := range apps {
-		if !app.IsDir() || (ignoreSpecial && isSpecial(app.Name())) {
+		if !app.IsDir() {
 			continue
 		}
 		appNames = append(appNames, app.Name())
@@ -447,7 +446,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	AppsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		apps, err := ovl.GetAppNames(true)
+		apps, err := ovl.GetAppNames()
 		if err != nil {
 			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
 		}
@@ -898,7 +897,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		}
 	}
 
-	appDir := ovl.GetAppDir()
+	webRootDir := ovl.GetWebRoot()
 
 	// HTTP basic auth
 	auth := NewBasicAuth("Overlord", ovl.htpasswdPath, !ovl.auth)
@@ -933,30 +932,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	http.Handle("/api/", auth.WrapHandler(r))
 
 	// /upgrade/ does not need authenticiation
-	http.Handle("/upgrade/", http.StripPrefix("/upgrade/",
-		http.FileServer(http.Dir(filepath.Join(appDir, "upgrade")))))
-	http.Handle("/vendor/", auth.WrapHandler(http.FileServer(
-		http.Dir(filepath.Join(appDir, "common")))))
-	http.Handle("/", auth.WrapHandler(http.FileServer(
-		http.Dir(filepath.Join(appDir, "dashboard")))))
-
-	// Serve all apps
-	appNames, err := ovl.GetAppNames(false)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	for _, app := range appNames {
-		if app == "upgrade" {
-			continue
-		}
-		if app != "common" && app != "third_party" {
-			log.Printf("App `%s' registered\n", app)
-		}
-		prefix := fmt.Sprintf("/%s/", app)
-		http.Handle(prefix, http.StripPrefix(prefix,
-			auth.WrapHandler(http.FileServer(http.Dir(filepath.Join(appDir, app))))))
-	}
+	http.Handle("/", http.StripPrefix("/",
+		http.FileServer(http.Dir(webRootDir))))
 }
 
 func (ovl *Overlord) handleMonitor(w http.ResponseWriter, r *http.Request) {

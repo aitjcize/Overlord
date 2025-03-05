@@ -447,7 +447,7 @@ class OverlordClientDaemon:
 
     try:
       self._state.ssl = ssl_enabled
-      UrlOpen(self._state, '%s:%d' % (host, port))
+      UrlOpen(self._state, '%s:%d/api/agents/list' % (host, port))
     except urllib.error.HTTPError as e:
       return ('HTTPError', e.getcode(), str(e), e.read().strip())
     except Exception as e:
