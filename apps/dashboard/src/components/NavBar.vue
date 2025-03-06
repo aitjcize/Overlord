@@ -29,12 +29,53 @@
       <!-- Removed Dashboard link -->
     </div>
 
-    <div class="navbar-end gap-2"></div>
+    <div class="navbar-end gap-2">
+      <!-- User info and logout button -->
+      <div class="dropdown dropdown-end">
+        <label tabindex="0" class="btn btn-ghost btn-circle avatar">
+          <div
+            class="w-10 rounded-full bg-emerald-600 flex items-center justify-center"
+          >
+            <span
+              class="text-white text-lg font-bold flex items-center justify-center h-full w-full"
+            >
+              {{ authStore.user?.username?.charAt(0).toUpperCase() || "U" }}
+            </span>
+          </div>
+        </label>
+        <ul
+          tabindex="0"
+          class="mt-3 p-2 shadow menu menu-compact dropdown-content bg-slate-800 rounded-box w-52 border border-slate-700"
+        >
+          <li>
+            <div class="text-slate-300 pointer-events-none">
+              <span>Signed in as</span>
+              <span class="font-bold">{{
+                authStore.user?.username || "User"
+              }}</span>
+            </div>
+          </li>
+          <li>
+            <a @click="handleLogout" class="text-red-400 hover:text-red-300"
+              >Logout</a
+            >
+          </li>
+        </ul>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-// No imports needed
+import { useAuthStore } from "@/stores/authStore";
+
+const authStore = useAuthStore();
+
+const handleLogout = () => {
+  authStore.logout();
+  // Reload the page to ensure clean state
+  window.location.reload();
+};
 </script>
 
 <style lang="scss" scoped>

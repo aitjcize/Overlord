@@ -15,7 +15,7 @@ RUN mkdir /config /overlord
 
 COPY --from=builder /src/bin/overlordd /overlord
 COPY --from=builder /src/bin/ghost /overlord
-COPY --from=builder /src/overlord/app /overlord/app
+COPY --from=builder /src/overlord/webroot /overlord/webroot
 COPY --from=builder /src/scripts/start_overlordd.sh /overlord
 
 COPY --from=builder /src/bin/ghost /overlord/app/upgrade/ghost.linux.amd64

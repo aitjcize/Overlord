@@ -1,5 +1,10 @@
 <template>
+  <!-- Show login form if not authenticated -->
+  <LoginForm v-if="!authStore.isAuthenticated" />
+
+  <!-- Show dashboard if authenticated -->
   <div
+    v-else
     class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800"
   >
     <SideBar>
@@ -30,44 +35,86 @@
 </template>
 
 <script setup>
-import { onMounted } from "vue";
+import { onMounted, watch } from "vue";
 import { monitorService } from "@/services/monitor";
 import NavBar from "@/components/NavBar.vue";
 import SideBar from "@/components/SideBar.vue";
 import TerminalWindow from "@/components/TerminalWindow.vue";
 import CameraWindow from "@/components/CameraWindow.vue";
 import UploadProgressWidget from "@/components/UploadProgressWidget.vue";
+import LoginForm from "@/components/LoginForm.vue";
 import { useClientStore } from "@/stores/clientStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useUploadProgressStore } from "@/stores/uploadProgressStore";
+import { useAuthStore } from "@/stores/authStore";
 
 const clientStore = useClientStore();
 const terminalStore = useTerminalStore();
 const uploadProgressStore = useUploadProgressStore();
+const authStore = useAuthStore();
 
 onMounted(async () => {
-  // Load initial clients
-  await clientStore.loadInitialClients();
+  // Initialize authentication
+  authStore.initAuth();
 
-  // Set up WebSocket event handlers
-  monitorService.on("agent joined", (msg) => {
-    const client = JSON.parse(msg);
-    clientStore.addClient(client);
-  });
-
-  monitorService.on("agent left", (msg) => {
-    const client = JSON.parse(msg);
-    clientStore.removeClient(client.mid);
-  });
-
-  monitorService.on("file download", (sid) => {
-    const url = `${window.location.protocol}//${window.location.host}/api/file/download/${sid}`;
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.src = url;
-    document.body.appendChild(iframe);
-  });
+  // Only load data and set up WebSocket if authenticated
+  if (authStore.isAuthenticated) {
+    initializeDashboard();
+  }
 });
+
+// Watch for authentication state changes
+watch(
+  () => authStore.isAuthenticated,
+  (isAuthenticated) => {
+    if (isAuthenticated) {
+      // Start dashboard when authenticated
+      initializeDashboard();
+    } else {
+      // Stop monitor service when logged out
+      monitorService.stop();
+    }
+  },
+);
+
+// Function to initialize dashboard data and WebSocket
+const initializeDashboard = async () => {
+  try {
+    // Load initial clients
+    await clientStore.loadInitialClients();
+
+    // Start the monitor service
+    monitorService.start();
+
+    // Set up WebSocket event handlers
+    monitorService.on("agent joined", (msg) => {
+      const client = JSON.parse(msg);
+      clientStore.addClient(client);
+    });
+
+    monitorService.on("agent left", (msg) => {
+      const client = JSON.parse(msg);
+      clientStore.removeClient(client.mid);
+    });
+
+    monitorService.on("file download", (sid) => {
+      const token = localStorage.getItem("token");
+      const url = `${window.location.protocol}//${window.location.host}/api/file/download/${sid}?token=${token}`;
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+    });
+  } catch (error) {
+    console.error("Error initializing dashboard:", error);
+
+    // Check if the error is due to authentication failure
+    if (error.response && error.response.status === 401) {
+      console.log("Authentication error during dashboard initialization");
+      // The axios interceptor will handle the logout
+    }
+  }
+};
 </script>
 
 <style>

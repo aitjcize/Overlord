@@ -73,7 +73,7 @@ export const useUploadProgressStore = defineStore("uploadProgress", () => {
             }
           },
         })
-        .then((response) => {
+        .then(() => {
           const progressBar = document.getElementById(id);
           if (progressBar) {
             progressBar.style.width = "100%";

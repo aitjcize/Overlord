@@ -113,7 +113,7 @@ type Overlord struct {
 	port             int                               // Port number to listen to
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
 	lanDisc          bool                              // Enable LAN discovery broadcasting
-	auth             bool                              // Enable HTTP basic authentication
+	jwtSecretPath    string                            // Path to the file containing the JWT secret
 	certs            *TLSCerts                         // TLS certificate
 	linkTLS          bool                              // Enable TLS between ghost and overlord
 	htpasswdPath     string                            // Path to .htpasswd file
@@ -135,8 +135,9 @@ type Overlord struct {
 func NewOverlord(
 	bindAddr string, port int,
 	lanDiscInterface string,
-	lanDisc bool, auth bool,
-	certsString string, linkTLS bool, htpasswdPath string) *Overlord {
+	lanDisc bool,
+	certsString string, linkTLS bool,
+	htpasswdPath string, jwtSecretPath string) *Overlord {
 
 	var certs *TLSCerts
 	if certsString != "" {
@@ -147,7 +148,7 @@ func NewOverlord(
 			certs = &TLSCerts{parts[0], parts[1]}
 		}
 	}
-	if !filepath.IsAbs(htpasswdPath) {
+	if !filepath.IsAbs(htpasswdPath) && htpasswdPath != "" {
 		execPath, err := os.Executable()
 		if err != nil {
 			log.Fatalln(err)
@@ -158,12 +159,23 @@ func NewOverlord(
 			log.Fatalln(err)
 		}
 	}
+	if !filepath.IsAbs(jwtSecretPath) && jwtSecretPath != "" {
+		execPath, err := os.Executable()
+		if err != nil {
+			log.Fatalln(err)
+		}
+		execDir := filepath.Dir(execPath)
+		jwtSecretPath, err = filepath.Abs(filepath.Join(execDir, jwtSecretPath))
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}
 	return &Overlord{
 		bindAddr:         bindAddr,
 		port:             port,
 		lanDiscInterface: lanDiscInterface,
 		lanDisc:          lanDisc,
-		auth:             auth,
+		jwtSecretPath:    jwtSecretPath,
 		certs:            certs,
 		linkTLS:          linkTLS,
 		htpasswdPath:     htpasswdPath,
@@ -556,6 +568,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// command to Overlord to client to spawn a terminal connection.
 	AgentTtyHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Terminal request from %s\n", r.RemoteAddr)
+
+		// Upgrade the connection to WebSocket
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
@@ -591,6 +605,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	ModeShellHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Shell request from %s\n", r.RemoteAddr)
 
+		// Upgrade the connection to WebSocket
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println(err)
@@ -599,18 +614,16 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
+		command := r.URL.Query().Get("command")
+
 		ovl.agentsMu.Lock()
 		if agent, ok := ovl.agents[mid]; ok {
 			ovl.agentsMu.Unlock()
-			if command, ok := r.URL.Query()["command"]; ok {
-				wc := newWebsocketContext(conn)
-				ovl.AddWebsocketContext(wc)
-				agent.Command <- SpawnShellCmd{wc.Sid, command[0]}
-				if res := <-agent.Response; res != "" {
-					WebSocketSendError(conn, res)
-				}
-			} else {
-				WebSocketSendError(conn, "No command specified for shell request "+mid)
+			wc := newWebsocketContext(conn)
+			ovl.AddWebsocketContext(wc)
+			agent.Command <- SpawnShellCmd{wc.Sid, command}
+			if res := <-agent.Response; res != "" {
+				WebSocketSendError(conn, res)
 			}
 		} else {
 			ovl.agentsMu.Unlock()
@@ -897,64 +910,95 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		}
 	}
 
+	// WebSocket monitor endpoint
+	MonitorHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Monitor request from %s\n", r.RemoteAddr)
+
+		// Upgrade the connection to WebSocket
+		conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
+		if err != nil {
+			log.Printf("Failed to upgrade connection: %v", err)
+			return
+		}
+
+		client := &WebSocketClient{
+			conn:     conn,
+			sendChan: make(chan []byte, 256),
+		}
+
+		ovl.monitorClientsMu.Lock()
+		ovl.monitorClients[client] = true
+		ovl.monitorClientsMu.Unlock()
+
+		// Start client read/write pumps
+		go client.writePump()
+		go client.readPump(ovl)
+	}
+
 	webRootDir := ovl.GetWebRoot()
 
-	// HTTP basic auth
-	auth := NewBasicAuth("Overlord", ovl.htpasswdPath, !ovl.auth)
+	// JWT Auth
+	jwtConfig := &JWTConfig{
+		SecretPath:   ovl.jwtSecretPath,
+		HtpasswdPath: ovl.htpasswdPath,
+	}
+	jwtAuth, err := NewJWTAuth(jwtConfig)
+	if err != nil {
+		log.Fatalf("Failed to initialize JWT authentication: %v", err)
+	}
 
 	http.HandleFunc("/connect", GhostConnectHandler)
 
-	// Register the request handlers.
-	r := mux.NewRouter()
+	// Create a single router for all API endpoints
+	apiRouter := mux.NewRouter()
 
-	r.HandleFunc("/api/apps/list", AppsListHandler)
-	r.HandleFunc("/api/agents/list", AgentsListHandler)
-	r.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler)
-	r.HandleFunc("/api/logcats/list", LogcatsListHandler)
+	// Add login endpoint for JWT authentication (public)
+	apiRouter.HandleFunc("/api/auth/login", jwtAuth.Login).Methods("POST")
+
+	// Protected endpoints
+	apiRouter.HandleFunc("/api/apps/list", AppsListHandler)
+	apiRouter.HandleFunc("/api/agents/list", AgentsListHandler)
+	apiRouter.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler)
+	apiRouter.HandleFunc("/api/logcats/list", LogcatsListHandler)
 
 	// Logcat methods
-	r.HandleFunc("/api/log/{mid}/{sid}", LogcatHandler)
+	apiRouter.HandleFunc("/api/log/{mid}/{sid}", LogcatHandler)
 
 	// Agent methods
-	r.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
-	r.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
-	r.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
-	r.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
-	r.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
-	r.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)
+	apiRouter.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
+	apiRouter.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
+	apiRouter.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
+	apiRouter.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
+	apiRouter.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
+	apiRouter.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)
 
 	// File methods
-	r.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
+	apiRouter.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
 
-	// WebSocket monitor endpoint
-	r.HandleFunc("/api/monitor", ovl.handleMonitor)
+	// Monitor
+	apiRouter.HandleFunc("/api/monitor", MonitorHandler)
 
-	http.Handle("/api/", auth.WrapHandler(r))
+	// Create a middleware that conditionally applies authentication based on the path
+	conditionalAuthMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip authentication for login endpoint only
+			if strings.HasPrefix(r.URL.Path, "/api/auth/login") {
+				log.Printf("Auth: Skipping authentication for login endpoint: %s", r.URL.Path)
+				next.ServeHTTP(w, r)
+				return
+			}
 
-	// /upgrade/ does not need authenticiation
+			// Apply JWT authentication for all other API endpoints
+			jwtAuth.Middleware(next).ServeHTTP(w, r)
+		})
+	}
+
+	// Register the API router with conditional authentication
+	http.Handle("/api/", conditionalAuthMiddleware(apiRouter))
+
+	// /upgrade/ does not need authentication
 	http.Handle("/", http.StripPrefix("/",
 		http.FileServer(http.Dir(webRootDir))))
-}
-
-func (ovl *Overlord) handleMonitor(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
-	if err != nil {
-		log.Printf("Failed to upgrade connection: %v", err)
-		return
-	}
-
-	client := &WebSocketClient{
-		conn:     conn,
-		sendChan: make(chan []byte, 256),
-	}
-
-	ovl.monitorClientsMu.Lock()
-	ovl.monitorClients[client] = true
-	ovl.monitorClientsMu.Unlock()
-
-	// Start client read/write pumps
-	go client.writePump()
-	go client.readPump(ovl)
 }
 
 func (c *WebSocketClient) writePump() {
@@ -1128,9 +1172,8 @@ func (ovl *Overlord) Serv() {
 }
 
 // StartOverlord starts the overlord server.
-func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool, auth bool,
-	certsString string, linkTLS bool, htpasswdPath string) {
-	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, auth,
-		certsString, linkTLS, htpasswdPath)
+func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool,
+	certsString string, linkTLS bool, htpasswdPath string, jwtSecretPath string) {
+	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, certsString, linkTLS, htpasswdPath, jwtSecretPath)
 	ovl.Serv()
 }

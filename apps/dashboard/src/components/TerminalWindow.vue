@@ -191,9 +191,11 @@ import "xterm/css/xterm.css";
 import { nextTick } from "vue";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useUploadProgressStore } from "@/stores/uploadProgressStore";
+import { useAuthStore } from "@/stores/authStore";
 
 const terminalStore = useTerminalStore();
 const uploadProgressStore = useUploadProgressStore();
+const authStore = useAuthStore();
 
 // Inject the sidebar width from SideBar component
 const injectedSidebarWidth = inject("sidebarWidth", ref(320));
@@ -241,6 +243,9 @@ const terminalContainer = ref(null);
 const titleElement = ref(null);
 const terminalEl = ref(null);
 const isFullscreen = ref(false);
+// Controls whether the terminal should be teleported to the body element
+// This is useful for floating windows that need to break out of their container
+const shouldTeleport = ref(true);
 let xterm = null;
 let fitAddon = null;
 let ws = null;
@@ -769,9 +774,20 @@ const setupWebSocket = () => {
     return null;
   }
 
-  // Create a new WebSocket connection
+  // Get auth token from the auth store
+  const token = authStore.token;
+
+  if (!token) {
+    console.error("Terminal: No authentication token available");
+    if (xterm) {
+      xterm.write("\x1b[1;31mError: Authentication required\x1b[0m\r\n");
+    }
+    return null;
+  }
+
+  // Create a new WebSocket connection with token
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/api/agent/tty/${props.terminal.mid}`;
+  const wsUrl = `${protocol}//${window.location.host}/api/agent/tty/${props.terminal.mid}?token=${encodeURIComponent(token)}`;
   const newWs = new WebSocket(wsUrl);
 
   newWs.onopen = () => {
@@ -800,15 +816,11 @@ const setupWebSocket = () => {
     } else {
       // Handle text data
       try {
-        // Debug: Log the raw message to see its structure
-        console.log("WebSocket message received:", event.data);
-
         const data = JSON.parse(event.data);
         if (data.type === "sid") {
           // Session ID received - use data.data as the SID (matches React implementation)
           // Store in our local ref instead of mutating the prop directly
           terminalSid.value = data.data;
-          console.log("Terminal session ID received:", data.data);
         } else {
           // If JSON but not a SID message, write to terminal
           xterm.write(event.data);
@@ -883,8 +895,11 @@ const ensureProperDOMParent = () => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   try {
+    // Initialize shouldTeleport based on screen size and terminal state
+    shouldTeleport.value = isLargeScreen.value || isMinimized.value;
+
     updateScreenSize(); // Initial check
 
     // Call our function to ensure proper DOM parent
@@ -1108,6 +1123,17 @@ onMounted(() => {
         }
       }
     });
+
+    // Add a watch effect to update shouldTeleport based on screen size and terminal state
+    watch(
+      [isLargeScreen, isMinimized],
+      ([largeScreen, minimized]) => {
+        // Enable teleport for large screens or minimized terminals
+        // This ensures the terminal is properly positioned in the DOM
+        shouldTeleport.value = largeScreen || minimized;
+      },
+      { immediate: true },
+    );
   } catch (error) {
     console.error("Error in terminal mounting:", error);
   }
@@ -1536,8 +1562,6 @@ const updateTitle = () => {
 watch(terminalSid, (newSid) => {
   // This is where you would emit an event to the parent if needed
   // emit('update:sid', newSid);
-
-  console.log(`Terminal SID updated: ${newSid}`);
 
   // If we need to update the parent terminal object, we can do so via the store
   if (props.terminal && newSid) {

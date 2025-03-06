@@ -4,6 +4,7 @@
 # found in the LICENSE file.
 
 from contextlib import closing
+import bcrypt
 import json
 import os
 import shutil
@@ -67,29 +68,74 @@ class TestOverlord(unittest.TestCase):
     env['OVERLORD_LD_PORT'] = str(FindUnusedPort())
     env['GHOST_RPC_PORT'] = str(FindUnusedPort())
 
-    # Launch overlord
-    self.ovl = subprocess.Popen(['%s/overlordd' % bindir, '-no-auth',
-                                 '-port', str(overlord_http_port)], env=env)
+    # Create temporary auth files
+    self.temp_dir = tempfile.mkdtemp()
+
+    # Create JWT secret file
+    self.jwt_secret_path = os.path.join(self.temp_dir, 'jwt-secret')
+    with open(self.jwt_secret_path, 'w') as f:
+      f.write('test-secret-key-for-jwt-authentication')
+
+    # Create htpasswd file with test user
+    self.htpasswd_path = os.path.join(self.temp_dir, 'overlord.htpasswd')
+    password = 'testpassword'
+
+    # Create a bcrypt hash with a supported prefix (2b) and then manually replace it with 2y
+    # Use a low cost factor (5) for faster tests
+    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=5)).decode('utf-8')
+    # Replace the prefix with $2y$ which is what the server expects
+    hashed = hashed.replace('$2b$', '$2y$')
+
+    with open(self.htpasswd_path, 'w') as f:
+      f.write(f'testuser:{hashed}\n')
+
+    # Store test credentials
+    self.test_username = 'testuser'
+    self.test_password = 'testpassword'
+
+    # Launch overlord with proper authentication parameters
+    self.ovl = subprocess.Popen([
+        '%s/overlordd' % bindir,
+        '-port', str(overlord_http_port),
+        '-htpasswd-path', self.htpasswd_path,
+        '-jwt-secret-path', self.jwt_secret_path,
+        '-no-lan-disc'  # Disable LAN discovery to avoid network issues
+    ], env=env)
+
+    # Wait for the server to start
+    time.sleep(2)
 
     # Launch go implementation of ghost
-    self.goghost = subprocess.Popen(['%s/ghost' % bindir,
-                                     '-mid=go', '-no-lan-disc',
-                                     '-no-rpc-server', '-tls=n',
-                                     'localhost:%d' % overlord_http_port],
-                                    env=env)
+    self.goghost = subprocess.Popen([
+        '%s/ghost' % bindir,
+        '-mid=go',
+        '-no-lan-disc',
+        '-no-rpc-server',
+        '-tls=n',
+        'localhost:%d' % overlord_http_port
+    ], env=env)
 
     # Launch python implementation of ghost
-    self.pyghost = subprocess.Popen(['%s/ghost.py' % scriptdir,
-                                     '--mid=python', '--no-lan-disc',
-                                     '--no-rpc-server', '--tls=n',
-                                     'localhost:%d' % overlord_http_port],
-                                    env=env)
+    self.pyghost = subprocess.Popen([
+        '%s/ghost.py' % scriptdir,
+        '--mid=python',
+        '--no-lan-disc',
+        '--no-rpc-server',
+        '--tls=n',
+        'localhost:%d' % overlord_http_port
+    ], env=env)
+
+    # Get JWT token for authentication
+    self.token = self._GetJWTToken()
+    if not self.token:
+        self.fail("Failed to get authentication token")
 
     def CheckClient():
       try:
         clients = self._GetJSON('/api/agents/list')
         return len(clients) == 2
-      except IOError:
+      except Exception as e:
+        print(f"Error checking clients: {e}")
         # overlordd is not ready yet.
         return False
 
@@ -103,6 +149,35 @@ class TestOverlord(unittest.TestCase):
     except Exception:
       self.tearDown()
       raise
+
+  def _GetJWTToken(self):
+    """Get JWT token for authentication."""
+    auth_data = json.dumps({
+      'username': self.test_username,
+      'password': self.test_password
+    }).encode('utf-8')
+
+    headers = {
+      'Content-Type': 'application/json'
+    }
+
+    req = urllib.request.Request(
+      f'http://{self.host}/api/auth/login',
+      data=auth_data,
+      headers=headers
+    )
+
+    try:
+      with urllib.request.urlopen(req) as response:
+        result = json.loads(response.read().decode('utf-8'))
+        return result.get('token')
+    except urllib.error.HTTPError as e:
+      print(f"Authentication failed: {e}")
+      print(e.read().decode('utf-8'))
+      return None
+    except Exception as e:
+      print(f"Error during authentication: {e}")
+      return None
 
   def tearDown(self):
     self.goghost.kill()
@@ -118,9 +193,15 @@ class TestOverlord(unittest.TestCase):
     self.ovl.kill()
     self.ovl.wait()
 
+    # Clean up temp directory
+    shutil.rmtree(self.temp_dir)
+
   def _GetJSON(self, path):
-    return json.loads(urllib.request.urlopen(
-        'http://' + self.host + path).read())
+    req = urllib.request.Request(
+      'http://' + self.host + path,
+      headers={'Authorization': f'Bearer {self.token}'}
+    )
+    return json.loads(urllib.request.urlopen(req).read())
 
   def testWebAPI(self):
     # Test /api/app/list
@@ -159,7 +240,7 @@ class TestOverlord(unittest.TestCase):
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/shell/%s' %
                       urllib.parse.quote(client['mid']) + '?command=' +
-                      urllib.parse.quote('uname -r'))
+                      urllib.parse.quote('uname -r') + '&token=' + self.token)
       ws.connect()
       ws.run()
       self.assertEqual(ws.message, answer)
@@ -215,7 +296,7 @@ class TestOverlord(unittest.TestCase):
 
     for client in clients:
       ws = TestClient('ws://' + self.host + '/api/agent/tty/%s' %
-                      urllib.parse.quote(client['mid']))
+                      urllib.parse.quote(client['mid']) + '?token=' + self.token)
       ws.connect()
       try:
         ws.run()

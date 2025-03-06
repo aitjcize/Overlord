@@ -9,6 +9,7 @@ fi
 
 if [ -e "${CONFIG_DIR}/overlord.htpasswd" ]; then
   OPTS="$OPTS -htpasswd-path=${CONFIG_DIR}/overlord.htpasswd"
+  OPTS="$OPTS -jwt-secret-path=${CONFIG_DIR}/jwt-secret"
 fi
 
 echo "Starting overlrodd with args: $OPTS ..."

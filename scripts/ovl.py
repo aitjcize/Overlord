@@ -111,17 +111,24 @@ def GetTLSCertPath(host):
   return os.path.join(_CERT_DIR, '%s.cert' % host)
 
 
-def UrlOpen(state, url):
-  """Wrapper for urllib.request.urlopen.
+def MakeRequestUrl(state, url):
+  """Create a full URL with the correct protocol and host."""
+  if url.startswith('http://') or url.startswith('https://'):
+    return url
 
-  It selects correct HTTP scheme according to self._state.ssl, add HTTP
-  basic auth headers, and add specify correct SSL context.
-  """
-  url = MakeRequestUrl(state, url)
-  request = urllib.request.Request(url)
-  if state.username is not None and state.password is not None:
-    request.add_header(*BasicAuthHeader(state.username, state.password))
+  return 'http%s://%s:%d%s' % (
+      's' if state.ssl else '',
+      state.host,
+      state.port,
+      url if url.startswith('/') else '/' + url)
+
+
+def UrlOpen(state, url):
+  """Open URL with proper authentication headers."""
+  full_url = MakeRequestUrl(state, url)
+  request = urllib.request.Request(full_url)
   request.add_header('User-Agent', _USER_AGENT)
+  request.add_header(*JWTAuthHeader(state.jwt_token))
   return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
                                 context=state.SSLContext())
 
@@ -163,11 +170,9 @@ def AutoRetry(action_name, retries):
   return Wrap
 
 
-def BasicAuthHeader(user, password):
-  """Return HTTP basic auth header."""
-  credential = base64.b64encode(
-      b'%s:%s' % (user.encode('utf-8'), password.encode('utf-8')))
-  return ('Authorization', 'Basic %s' % credential.decode('utf-8'))
+def JWTAuthHeader(token):
+  """Return HTTP JWT auth header."""
+  return ('Authorization', 'Bearer %s' % token)
 
 
 def GetTerminalSize():
@@ -176,10 +181,6 @@ def GetTerminalSize():
   ws = fcntl.ioctl(0, termios.TIOCGWINSZ, ws)
   lines, columns, unused_x, unused_y = struct.unpack('HHHH', ws)
   return lines, columns
-
-
-def MakeRequestUrl(state, url):
-  return 'http%s://%s' % ('s' if state.ssl else '', url)
 
 
 class ProgressBar:
@@ -287,6 +288,7 @@ class DaemonState:
     self.ssh_pid = None
     self.username = None
     self.password = None
+    self.jwt_token = None
     self.selected_mid = None
     self.forwards = {}
     self.listing = []
@@ -375,9 +377,9 @@ class OverlordClientDaemon:
   def GetPid(self):
     return os.getpid()
 
-  def _GetJSON(self, path):
-    url = '%s:%d%s' % (self._state.host, self._state.port, path)
-    return json.loads(UrlOpen(self._state, url).read())
+  def _GetJSON(self, url):
+    response = UrlOpen(self._state, url)
+    return json.loads(response.read())
 
   def _TLSEnabled(self):
     """Determine if TLS is enabled on given server address."""
@@ -420,6 +422,39 @@ class OverlordClientDaemon:
 
     return _DoConnect(self._state.SSLContext())
 
+  def GetJWTToken(self):
+    """Get JWT token from server.
+
+    Returns:
+      JWT token string or None if authentication fails.
+    """
+    url = '/api/auth/login'
+    data = json.dumps({
+      'username': self._state.username,
+      'password': self._state.password
+    }).encode('utf-8')
+
+    headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': _USER_AGENT
+    }
+
+    full_url = MakeRequestUrl(self._state, url)
+    request = urllib.request.Request(full_url, data=data, headers=headers)
+
+    try:
+      context = self._state.SSLContext()
+      with urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
+                                  context=context) as response:
+        result = json.loads(response.read().decode('utf-8'))
+        return result.get('token')
+    except urllib.error.HTTPError as e:
+      if e.code == 401:
+        raise RuntimeError('Authentication failed')
+      else:
+        raise RuntimeError('Error getting JWT token: %s' % e)
+      return None
+
   def Connect(self, host, port, ssh_pid=None,
               username=None, password=None, orig_host=None,
               ssl_verify=True, ssl_check_hostname=True):
@@ -447,7 +482,8 @@ class OverlordClientDaemon:
 
     try:
       self._state.ssl = ssl_enabled
-      UrlOpen(self._state, '%s:%d/api/agents/list' % (host, port))
+      self._state.jwt_token = self.GetJWTToken()
+      self._GetJSON('/api/agents/list')
     except urllib.error.HTTPError as e:
       return ('HTTPError', e.getcode(), str(e), e.read().strip())
     except Exception as e:
@@ -814,9 +850,8 @@ class OverlordCliClient:
     h.putrequest('POST', post_path)
     h.putheader('Content-Length', content_length)
     h.putheader('Content-Type', 'multipart/form-data; boundary=%s' % boundary)
+    h.putheader(*JWTAuthHeader(self._state.jwt_token))
 
-    if user and passwd:
-      h.putheader(*BasicAuthHeader(user, passwd))
     h.endheaders()
     h.send(part_header.encode('utf-8'))
 
@@ -920,19 +955,15 @@ class OverlordCliClient:
       raise RuntimeError('client %s disappeared' % self._selected_mid)
 
   def CheckOutput(self, command):
-    headers = []
-    if self._state.username is not None and self._state.password is not None:
-      headers.append(BasicAuthHeader(self._state.username,
-                                     self._state.password))
-
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     bio = BytesIO()
     ws = ShellWebSocketClient(
-        self._state, bio, scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
+        self._state, bio,
+        scheme + '%s:%d/api/agent/shell/%s?command=%s&token=%s' % (
             self._state.host, self._state.port,
             urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(command)),
-        headers=headers)
+            urllib.parse.quote(command),
+            urllib.parse.quote(self._state.jwt_token)))
     ws.connect()
     ws.run()
     return bio.getvalue().decode('utf-8')
@@ -991,15 +1022,13 @@ class OverlordCliClient:
 
     username_provided = args.user is not None
     password_provided = args.passwd is not None
-    prompt = False
 
     for unused_i in range(3):  # pylint: disable=too-many-nested-blocks
       try:
-        if prompt:
-          if not username_provided:
-            args.user = input('Username: ')
-          if not password_provided:
-            args.passwd = getpass.getpass('Password: ')
+        if not username_provided:
+          args.user = input('Username: ')
+        if not password_provided:
+          args.passwd = getpass.getpass('Password: ')
 
         ret = self._server.Connect(host, args.port, ssh_pid, args.user,
                                    args.passwd, orig_host,
@@ -1034,9 +1063,9 @@ class OverlordCliClient:
             logging.error('%s; %s', except_str, body)
 
         if ret is not True:
-          print('can not connect to %s: %s' % (host, ret))
+          print('\nFailed not connect to %s: %s' % (host, ret))
         else:
-          print('connection to %s:%d established.' % (host, args.port))
+          print('\nConnection to %s:%d established.' % (host, args.port))
       except Exception as e:
         logging.error(e)
       else:
@@ -1151,27 +1180,23 @@ class OverlordCliClient:
       command = []
     self.CheckClient()
 
-    headers = []
-    if self._state.username is not None and self._state.password is not None:
-      headers.append(BasicAuthHeader(self._state.username,
-                                     self._state.password))
-
     scheme = 'ws%s://' % ('s' if self._state.ssl else '')
     if command:
       cmd = ' '.join(command)
       ws = ShellWebSocketClient(
           self._state, sys.stdout.buffer,
-          scheme + '%s:%d/api/agent/shell/%s?command=%s' % (
+          scheme + '%s:%d/api/agent/shell/%s?command=%s&token=%s' % (
               self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid), urllib.parse.quote(cmd)),
-          headers=headers)
+              urllib.parse.quote(self._selected_mid),
+              urllib.parse.quote(cmd),
+              urllib.parse.quote(self._state.jwt_token)))
     else:
       ws = TerminalWebSocketClient(
           self._state, self._selected_mid, self._escape,
-          scheme + '%s:%d/api/agent/tty/%s' % (
+          scheme + '%s:%d/api/agent/tty/%s?token=%s' % (
               self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid)),
-          headers=headers)
+              urllib.parse.quote(self._selected_mid),
+              urllib.parse.quote(self._state.jwt_token)))
     try:
       ws.connect()
       ws.run()
@@ -1208,9 +1233,8 @@ class OverlordCliClient:
       return
 
     mode = '0%o' % (0x1FF & os.stat(src).st_mode)
-    url = ('%s:%d/api/agent/upload/%s?dest=%s&perm=%s' %
-           (self._state.host, self._state.port,
-            urllib.parse.quote(self._selected_mid), dst, mode))
+    url = ('/api/agent/upload/%s?dest=%s&perm=%s' %
+           (urllib.parse.quote(self._selected_mid), dst, mode))
     try:
       UrlOpen(self._state, url + '&filename=%s' % src_base)
     except urllib.error.HTTPError as e:
@@ -1296,9 +1320,8 @@ class OverlordCliClient:
         pbar.End()
         return
 
-      url = ('%s:%d/api/agent/download/%s?filename=%s' %
-             (self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid), urllib.parse.quote(src)))
+      url = ('/api/agent/download/%s?filename=%s' %
+             (urllib.parse.quote(self._selected_mid), urllib.parse.quote(src)))
       try:
         h = UrlOpen(self._state, url)
       except urllib.error.HTTPError as e:
@@ -1412,19 +1435,14 @@ class OverlordCliClient:
     remote = remote_port
 
     def HandleConnection(conn):
-      headers = []
-      if self._state.username is not None and self._state.password is not None:
-        headers.append(BasicAuthHeader(self._state.username,
-                                       self._state.password))
-
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
           self._state, conn,
-          scheme + '%s:%d/api/agent/forward/%s?host=%s&port=%d' % (
+          scheme + '%s:%d/api/agent/forward/%s?host=%s&port=%d&token=%s' % (
               self._state.host, self._state.port,
               urllib.parse.quote(self._selected_mid),
-              remote_host, remote_port),
-          headers=headers)
+              remote_host, remote_port,
+              urllib.parse.quote(self._state.jwt_token)))
       try:
         ws.connect()
         ws.run()

@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/creack/pty v1.1.24
+	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/term v1.1.0

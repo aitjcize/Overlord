@@ -19,13 +19,14 @@ var lanDiscInterface = flag.String("lan-disc-iface", "",
 	"the network interface used for broadcasting LAN discovery packets")
 var noLanDisc = flag.Bool("no-lan-disc", false,
 	"disable LAN discovery broadcasting")
-var noAuth = flag.Bool("no-auth", false, "disable authentication")
 var tlsCerts = flag.String("tls", "",
 	"TLS certificates in the form of 'cert.pem,key.pem'. Empty to disable.")
 var noLinkTLS = flag.Bool("no-link-tls", false,
 	"disable TLS between ghost and overlord. Only valid when TLS is enabled.")
-var htpasswdPath = flag.String("htpasswd-path", "webroot/overlord.htpasswd",
-	"the path to the .htpasswd file.")
+var htpasswdPath = flag.String("htpasswd-path", "overlord.htpasswd",
+	"the path to the .htpasswd file. Required for authentication.")
+var jwtSecretPath = flag.String("jwt-secret-path", "jwt-secret",
+	"Path to the file containing the JWT secret. Required for authentication.")
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: overlordd [OPTIONS]\n")
@@ -37,6 +38,16 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
+	// Validate required flags
+	if *htpasswdPath == "" {
+		fmt.Fprintf(os.Stderr, "Error: -htpasswd-path is required\n")
+		usage()
+	}
+	if *jwtSecretPath == "" {
+		fmt.Fprintf(os.Stderr, "Error: -jwt-secret-path is required\n")
+		usage()
+	}
+
 	overlord.StartOverlord(*bindAddr, *port, *lanDiscInterface, !*noLanDisc,
-		!*noAuth, *tlsCerts, !*noLinkTLS, *htpasswdPath)
+		*tlsCerts, !*noLinkTLS, *htpasswdPath, *jwtSecretPath)
 }
