@@ -365,6 +365,7 @@ func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
 	ovl.monitorClientsMu.RUnlock()
 }
 
+// GetWebRoot returns the absolute path to the webroot directory.
 func (ovl *Overlord) GetWebRoot() string {
 	execPath, err := os.Executable()
 	if err != nil {

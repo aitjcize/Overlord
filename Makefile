@@ -10,13 +10,14 @@ STATIC?=false
 LDFLAGS=
 WEBROOT_DIR=$(CURDIR)/webroot
 APPS_DIR=$(WEBROOT_DIR)/apps
+GO_DIRS=./overlord/... ./cmd/...
 
 ifeq ($(STATIC), true)
 	LDFLAGS=-a -tags netgo -installsuffix netgo \
 		-ldflags '-extldflags "-static"'
 endif
 
-.PHONY: all build build-bin build-apps clean clean-apps install
+.PHONY: all build build-bin build-apps clean clean-apps install go-fmt go-lint
 
 all: build
 
@@ -54,6 +55,17 @@ py-bin:
 	mv $(BUILD)/dist/ghost $(BIN)/ghost.py.bin
 
 build-bin: overlordd ghost py-bin
+
+go-fmt:
+	$(GO) fmt $(GO_DIRS)
+
+go-lint:
+	$(GO) vet $(GO_DIRS)
+	@if ! command -v golint > /dev/null; then \
+		echo "Installing golint..."; \
+		$(GO) install golang.org/x/lint/golint@latest; \
+	fi
+	golint -set_exit_status $(GO_DIRS)
 
 # Build all apps that have a package.json
 build-apps:

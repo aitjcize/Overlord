@@ -1005,9 +1005,9 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	defer func() {
 		time.Sleep(100 * time.Millisecond) // Wait for process to terminate
 
-		process := (*PollableProcess)(cmd.Process)
+		process := NewPollableProcess(cmd.Process)
 		_, err = process.Poll()
-		// Check if the process is terminated. If not, send SIGlogcatTypeVT100 to
+		// Check if the process is terminated. If not, send SIGTERM to
 		// the process, then wait for 1 second.  Send another SIGKILL to make sure
 		// the process is terminated.
 		if err != nil {

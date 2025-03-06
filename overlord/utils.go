@@ -43,14 +43,21 @@ func GetFileSha1(filename string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// NewPollableProcess creates a new PollableProcess from an os.Process.
+func NewPollableProcess(p *os.Process) *PollableProcess {
+	return &PollableProcess{Process: p}
+}
+
 // PollableProcess is a os.Process which supports the polling for it's status.
-type PollableProcess os.Process
+type PollableProcess struct {
+	*os.Process
+}
 
 // Poll polls the process for it's execution status.
 func (p *PollableProcess) Poll() (uint32, error) {
 	var wstatus syscall.WaitStatus
-	pid, err := syscall.Wait4(p.Pid, &wstatus, syscall.WNOHANG, nil)
-	if err == nil && p.Pid == pid {
+	pid, err := syscall.Wait4(p.Process.Pid, &wstatus, syscall.WNOHANG, nil)
+	if err == nil && p.Process.Pid == pid {
 		return uint32(wstatus), nil
 	}
 	return 0, errors.New("Wait4 failed")
