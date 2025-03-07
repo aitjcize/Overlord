@@ -26,8 +26,8 @@ build: build-bin build-apps
 deps:
 	mkdir -p $(BIN)
 	if $(DEPS); then \
-		cd $(CURDIR)/overlord; \
-		$(GO) get -d .; \
+		cd $(CURDIR); \
+		$(GO) get ./...; \
 	fi
 
 overlordd: deps
@@ -38,7 +38,9 @@ overlordd: deps
 ghost: deps
 	GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
-py-bin:
+build-go: overlordd ghost
+
+build-bin:
 	mkdir -p $(BUILD)
 	# Create virtualenv environment
 	rm -rf $(BUILD)/.venv
@@ -54,7 +56,6 @@ py-bin:
 	mv $(BUILD)/dist/ovl $(BIN)/ovl.py.bin
 	mv $(BUILD)/dist/ghost $(BIN)/ghost.py.bin
 
-build-bin: overlordd ghost py-bin
 
 go-fmt:
 	$(GO) fmt $(GO_DIRS)
@@ -69,21 +70,21 @@ go-lint:
 
 # Build all apps that have a package.json
 build-apps:
-	@echo "Building apps..."
+	@echo "Building apps ..."
 	@mkdir -p $(APPS_DIR)
 	@cd apps && \
 	for dir in */; do \
 		if [ ! -f "$$dir/package.json" ]; then \
 			continue; \
 		fi; \
-		echo "Building $$dir..."; \
+		echo "Building $$dir ..."; \
 		(cd "$$dir" && npm install && npm run build); \
 		if [ -d "$$dir/dist" ]; then \
-			echo "Copying $$dir dist to apps directory..."; \
+			echo "Copying $$dir dist to apps directory ..."; \
 			mkdir -p $(APPS_DIR)/"$${dir%/}"; \
 			cp -r "$$dir/dist/"* $(APPS_DIR)/"$${dir%/}"/; \
 			if [ "$$dir" = "dashboard/" ]; then \
-				echo "Copying dashboard to webroot..."; \
+				echo "Copying dashboard to webroot ..."; \
 				cp $(APPS_DIR)/dashboard/index.html \
 					$(CURDIR)/webroot/index.html; \
 			fi; \

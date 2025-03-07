@@ -16,7 +16,7 @@ jobs:
       - name: install
         run: |
           apk update
-          apk add git python3 make gcc linux-headers libc-dev py-pip
+          apk add git python3 make gcc linux-headers libc-dev py-pip node npm
           python3 -m venv .venv
           source .venv/bin/activate
           pip install -r requirements.txt

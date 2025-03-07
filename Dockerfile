@@ -1,29 +1,43 @@
-FROM golang:alpine AS builder
+# Build go app.
+FROM golang:alpine AS gobuilder
 
 RUN mkdir -p /src
 WORKDIR /src
-
 COPY . .
 
 RUN apk update && apk add make gcc linux-headers libc-dev
+RUN make STATIC=true build-go
 
-RUN make STATIC=true
 
+# Build node app.
+FROM node:23-alpine AS nodebuilder
+
+RUN mkdir -p /src
+WORKDIR /src
+COPY . .
+
+RUN apk update && apk add make
+RUN make build-apps
+
+
+# Build final image.
 FROM alpine:latest
 
-RUN mkdir /config /overlord
+RUN mkdir -p /config /app /app/webroot/upgrade
+WORKDIR /app
 
-COPY --from=builder /src/bin/overlordd /overlord
-COPY --from=builder /src/bin/ghost /overlord
-COPY --from=builder /src/overlord/webroot /overlord/webroot
-COPY --from=builder /src/scripts/start_overlordd.sh /overlord
+COPY --from=gobuilder /src/bin/overlordd /app
+COPY --from=gobuilder /src/bin/ghost /app
+COPY --from=gobuilder /src/scripts/start_overlordd.sh /app
+COPY --from=gobuilder /src/bin/ghost /app/webroot/upgrade/ghost.linux.amd64
 
-COPY --from=builder /src/bin/ghost /overlord/app/upgrade/ghost.linux.amd64
-RUN sha1sum /overlord/app/upgrade/ghost.linux.amd64 | \
-	awk '{ print $1 }' > /overlord/app/upgrade/ghost.linux.amd64.sha1
+RUN sha1sum /app/webroot/upgrade/ghost.linux.amd64 | \
+	awk '{ print $1 }' > /app/webroot/upgrade/ghost.linux.amd64.sha1
+
+COPY --from=nodebuilder /src/webroot /app/webroot
 
 ENV SHELL=/bin/sh
 
 EXPOSE 4456 80
 
-CMD ["/overlord/start_overlordd.sh"]
+CMD ["/app/start_overlordd.sh"]
