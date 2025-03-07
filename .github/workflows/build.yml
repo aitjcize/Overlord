@@ -47,5 +47,36 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Build the Docker image
         run: docker build -t aitjcize/overlord:latest .
+      - name: Download Mac Binaries
+        run: |
+          mkdir -p bin
+          curl -L -o bin/ghost.mac.tar.gz https://github.com/aitjcize/Overlord/releases/download/$(date '+%Y-%m-%d')
+          ls -alh bin/ghost.mac.*
+          cp bin/ghost.mac.* webroot/upgrade/
+      - name: e2e_test
+        run: |
+          source .venv/bin/activate
+          mkdir -p webroot/apps/test
+          ./test/overlord_e2e_unittest.py
+
       - name: Push Docker image
         run: docker push aitjcize/overlord:latest
+
+  build-mac:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: install
+        run: |
+          brew update
+          brew install git python3 make
+      - name: Fix permission
+        run: git config --global --add safe.directory $PWD
+      - name: build mac binary
+        run: |
+          make build-go
+          ls -alh bin/ghost.*
+          mkdir -p bin
+          cp bin/ghost.mac.* webroot/upgrade/

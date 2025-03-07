@@ -15,6 +15,8 @@ GO_DIRS=./overlord/... ./cmd/...
 # Supported architectures for ghost binary
 GHOST_ARCHS=amd64 386 arm64 arm
 GHOST_BINS=$(addprefix $(BIN)/ghost.linux., $(GHOST_ARCHS))
+GHOST_MAC_ARCHS=amd64 arm64
+GHOST_MAC_BINS=$(addprefix $(BIN)/ghost.mac., $(GHOST_MAC_ARCHS))
 
 # Get list of apps with package.json
 APP_DIRS=$(shell find apps -maxdepth 1 -mindepth 1 \
@@ -57,15 +59,15 @@ ghost: deps
 	$(call cmd_msg,GO,cmd/$@)
 	@GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
-$(BIN)/ghost.linux.%:
+$(BIN)/ghost.mac.%:
 	$(call cmd_msg,GO,$(notdir $@))
-	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
+	@GOOS=darwin GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
-$(BIN)/ghost.linux.%.sha1: $(BIN)/ghost.linux.%
+$(BIN)/ghost.mac.%.sha1: $(BIN)/ghost.mac.%
 	$(call cmd_msg,SHA1,$(notdir $<))
 	@cd $(BIN) && sha1sum $(notdir $<) > $(notdir $@)
 
-ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1)
+ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1) $(GHOST_MAC_BINS) $(GHOST_MAC_BINS:=.sha1)
 
 build-go: overlordd ghost ghost-all
 

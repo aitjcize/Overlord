@@ -39,6 +39,8 @@ COPY --from=gobuilder /src/bin/overlordd /app
 COPY --from=gobuilder /src/scripts/start_overlordd.sh /app
 COPY --from=gobuilder /src/bin/ghost.* /app/webroot/upgrade/
 COPY --from=pybuilder /src/bin/ghost.* /app/webroot/upgrade/
+COPY --from=gobuilder /src/bin/ghost.mac.* /app/webroot/upgrade/
+
 COPY --from=pybuilder /src/bin/ovl.* /app/webroot/upgrade/
 
 COPY --from=nodebuilder /src/webroot /app/webroot
