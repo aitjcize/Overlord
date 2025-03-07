@@ -1,0 +1,35 @@
+disabled_rules: # rule identifiers to exclude from running
+  - trailing_whitespace
+  - vertical_whitespace
+  - opening_brace
+
+included: # paths to include during linting
+  - overlord-app-ios
+
+excluded: # paths to ignore during linting
+  - DerivedData
+  - Pods
+  - build
+
+line_length:
+  warning: 120
+  error: 160
+
+file_length:
+  warning: 1000
+
+type_body_length:
+  warning: 300
+  error: 400
+
+function_body_length:
+  warning: 70
+  error: 150
+
+type_name:
+  min_length: 3
+  max_length: 40
+
+identifier_name:
+  min_length: 2
+  max_length: 40 

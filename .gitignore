@@ -2,7 +2,7 @@ bin/ghost
 bin/ghost.*.linux*
 bin/ghost.py*
 bin/overlordd
-bin/ovl.py.bin
+bin/*.pybin*
 bin/webroot
 build
 webroot/apps
@@ -10,3 +10,4 @@ webroot/index.html
 node_modules
 .vite
 dist
+UserInterfaceState.xcuserstate
