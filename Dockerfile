@@ -8,6 +8,15 @@ COPY . .
 RUN apk update && apk add make gcc linux-headers libc-dev
 RUN make STATIC=true build-go
 
+FROM python:alpine AS pybuilder
+
+RUN mkdir -p /src
+WORKDIR /src
+COPY . .
+
+RUN apk update && apk add make git binutils
+RUN make build-py
+
 
 # Build node app.
 FROM node:23-alpine AS nodebuilder
@@ -29,6 +38,8 @@ WORKDIR /app
 COPY --from=gobuilder /src/bin/overlordd /app
 COPY --from=gobuilder /src/scripts/start_overlordd.sh /app
 COPY --from=gobuilder /src/bin/ghost.* /app/webroot/upgrade/
+COPY --from=pybuilder /src/bin/ghost.* /app/webroot/upgrade/
+COPY --from=pybuilder /src/bin/ovl.* /app/webroot/upgrade/
 
 COPY --from=nodebuilder /src/webroot /app/webroot
 
