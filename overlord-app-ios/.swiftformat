@@ -1,0 +1,16 @@
+--exclude DerivedData,Pods,build
+--indent 4
+--allman false
+--wraparguments before-first
+--wrapcollections before-first
+--maxwidth 120
+--header strip
+--swiftversion 5.0
+--elseposition same-line
+--commas inline
+--semicolons never
+--trimwhitespace always
+--stripunusedargs closure-only
+--self remove
+--importgrouping alphabetized
+--xcodeindentation enabled 

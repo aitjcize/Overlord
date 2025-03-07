@@ -136,3 +136,8 @@ clean: clean-apps
 	@rm -rf $(BIN)/ghost* $(BIN)/overlordd $(BUILD) \
 		$(BIN)/ghost.pybin $(BIN)/ovl.pybin \
 		$(DIST_APPS_DIR)
+
+# Lint Swift code
+lint: install-tools
+	@echo "Linting Swift code..."
+	swiftlint lint --quiet --config .swiftlint.yml
