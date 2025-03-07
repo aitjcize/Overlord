@@ -1,0 +1,50 @@
+/* Fix for mobile Safari viewport height issue */
+:root {
+  --vh: 1vh;
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+}
+
+/* Apply the custom viewport height to elements using min-h-screen */
+.min-h-screen {
+  min-height: 100vh; /* Fallback */
+  min-height: calc(var(--vh, 1vh) * 100);
+}
+
+/* Apply to drawer component for full height */
+.drawer,
+.drawer-side {
+  height: 100vh; /* Fallback */
+  height: calc(var(--vh, 1vh) * 100);
+}
+
+/* Apply to any other fixed height elements that use vh units */
+.floating-windows {
+  bottom: 0;
+  bottom: var(--safe-area-inset-bottom, 0px);
+  height: calc(100vh - 4rem); /* Fallback */
+  height: calc(
+    calc(var(--vh, 1vh) * 100) - 4rem - var(--safe-area-inset-bottom, 0px)
+  );
+}
+
+/* Add padding to the top navbar for iOS notch */
+.navbar {
+  padding-top: calc(0.5rem + var(--safe-area-inset-top, 0px));
+  padding-left: calc(1rem + var(--safe-area-inset-left, 0px));
+  padding-right: calc(1rem + var(--safe-area-inset-right, 0px));
+}
+
+/* Add padding to the bottom of the main content for iOS home indicator */
+main {
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
+}
+
+/* Adjust sidebar padding for safe areas */
+.drawer-side > div {
+  padding-top: calc(1rem + var(--safe-area-inset-top, 0px));
+  padding-left: calc(1rem + var(--safe-area-inset-left, 0px));
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, 0px));
+}
