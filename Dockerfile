@@ -27,12 +27,8 @@ RUN mkdir -p /config /app /app/webroot/upgrade
 WORKDIR /app
 
 COPY --from=gobuilder /src/bin/overlordd /app
-COPY --from=gobuilder /src/bin/ghost /app
 COPY --from=gobuilder /src/scripts/start_overlordd.sh /app
-COPY --from=gobuilder /src/bin/ghost /app/webroot/upgrade/ghost.linux.amd64
-
-RUN sha1sum /app/webroot/upgrade/ghost.linux.amd64 | \
-	awk '{ print $1 }' > /app/webroot/upgrade/ghost.linux.amd64.sha1
+COPY --from=gobuilder /src/bin/ghost.* /app/webroot/upgrade/
 
 COPY --from=nodebuilder /src/webroot /app/webroot
 

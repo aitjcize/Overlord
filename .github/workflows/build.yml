@@ -16,7 +16,7 @@ jobs:
       - name: install
         run: |
           apk update
-          apk add git python3 make gcc linux-headers libc-dev py-pip node npm
+          apk add git python3 make gcc linux-headers libc-dev py-pip
           python3 -m venv .venv
           source .venv/bin/activate
           pip install -r requirements.txt
@@ -24,8 +24,6 @@ jobs:
         run: git config --global --add safe.directory $PWD
       - name: test
         run: go test -v ./...
-      - name: build-apps
-        run: make build-apps
       - name: unittest
         run: |
           source .venv/bin/activate
@@ -33,6 +31,7 @@ jobs:
       - name: e2e_test
         run: |
           source .venv/bin/activate
+          mkdir -p webroot/apps/test
           ./test/overlord_e2e_unittest.py
 
   build:

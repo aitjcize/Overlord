@@ -9,103 +9,120 @@ DEPS?=true
 STATIC?=false
 LDFLAGS=
 WEBROOT_DIR=$(CURDIR)/webroot
-APPS_DIR=$(WEBROOT_DIR)/apps
+DIST_APPS_DIR=$(WEBROOT_DIR)/apps
 GO_DIRS=./overlord/... ./cmd/...
+
+# Supported architectures for ghost binary
+GHOST_ARCHS=amd64 386 arm64 arm
+GHOST_BINS=$(addprefix $(BIN)/ghost., $(addsuffix .linux,$(GHOST_ARCHS)))
+
+# Get list of apps with package.json
+APP_DIRS=$(shell find apps -maxdepth 1 -mindepth 1 \
+	   -type d -exec test -f '{}/package.json' \; -print | sed 's|apps/||')
+APP_TARGETS=$(addprefix $(DIST_APPS_DIR)/,$(APP_DIRS))
+
+# Output formatting
+cmd_msg = @echo "  $(1)  $(2)"
 
 ifeq ($(STATIC), true)
 	LDFLAGS=-a -tags netgo -installsuffix netgo \
 		-ldflags '-extldflags "-static"'
 endif
 
-.PHONY: all build build-bin build-apps clean clean-apps install go-fmt go-lint
+.PHONY: all \
+	build build-go build-py build-apps \
+	ghost ghost-all overlordd \
+	go-fmt go-lint \
+	clean clean-apps \
+	install
 
 all: build
 
-build: build-bin build-apps
+build: build-go build-py build-apps
 
 deps:
-	mkdir -p $(BIN)
-	if $(DEPS); then \
+	@mkdir -p $(BIN)
+	@if $(DEPS); then \
 		cd $(CURDIR); \
 		$(GO) get ./...; \
 	fi
 
 overlordd: deps
-	GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
-	rm -f $(BIN)/webroot
-	ln -s $(WEBROOT_DIR) $(BIN)/webroot
+	$(call cmd_msg,GO,cmd/$@)
+	@GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
+	@rm -f $(BIN)/webroot
+	@ln -s $(WEBROOT_DIR) $(BIN)/webroot
 
 ghost: deps
-	GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
+	$(call cmd_msg,GO,cmd/$@)
+	@GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
-build-go: overlordd ghost
+$(BIN)/ghost.%.linux:
+	$(call cmd_msg,GO,$(notdir $@))
+	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
-build-bin:
-	mkdir -p $(BUILD)
-	# Create virtualenv environment
-	rm -rf $(BUILD)/.venv
-	python -m venv $(BUILD)/.venv
-	# Build ovl binary with pyinstaller
-	cd $(BUILD); \
+$(BIN)/ghost.%.linux.sha1: $(BIN)/ghost.%.linux
+	$(call cmd_msg,SHA1,$(notdir $<))
+	@cd $(BIN) && sha1sum $(notdir $<) > $(notdir $@)
+
+ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1)
+
+build-go: overlordd ghost ghost-all
+
+build-py:
+	@ln -sf ../scripts/ghost.py bin
+	@mkdir -p $(BUILD)
+	$(call cmd_msg,VENV,creating virtualenv)
+	@rm -rf $(BUILD)/.venv
+	@python -m venv $(BUILD)/.venv
+	$(call cmd_msg,PIP,installing requirements)
+	@cd $(BUILD); \
 	. $(BUILD)/.venv/bin/activate; \
-	pip install -r $(CURDIR)/requirements.txt; \
-	pip install pyinstaller; \
-	pyinstaller --onefile $(CURDIR)/scripts/ovl.py; \
-	pyinstaller --onefile $(CURDIR)/scripts/ghost.py
-	# Move built binary to bin
-	mv $(BUILD)/dist/ovl $(BIN)/ovl.py.bin
-	mv $(BUILD)/dist/ghost $(BIN)/ghost.py.bin
-
+	pip install -q -r $(CURDIR)/requirements.txt; \
+	pip install -q pyinstaller; \
+	$(call cmd_msg,GEN,ovl.py.bin); \
+	pyinstaller --onefile $(CURDIR)/scripts/ovl.py > /dev/null; \
+	$(call cmd_msg,GEN,ghost.py.bin); \
+	pyinstaller --onefile $(CURDIR)/scripts/ghost.py > /dev/null
+	$(call cmd_msg,MV,binaries to $(BIN))
+	@mv $(BUILD)/dist/ovl $(BIN)/ovl.py.bin
+	@mv $(BUILD)/dist/ghost $(BIN)/ghost.py.bin
 
 go-fmt:
-	$(GO) fmt $(GO_DIRS)
+	$(call cmd_msg,FMT,$(GO_DIRS))
+	@$(GO) fmt $(GO_DIRS)
 
 go-lint:
-	$(GO) vet $(GO_DIRS)
-	@if ! command -v golint > /dev/null; then \
-		echo "Installing golint..."; \
-		$(GO) install golang.org/x/lint/golint@latest; \
-	fi
-	golint -set_exit_status $(GO_DIRS)
+	$(call cmd_msg,VET,$(GO_DIRS))
+	@$(GO) vet $(GO_DIRS)
+	$(call cmd_msg,GO,installing golint)
+	@$(GO) install golang.org/x/lint/golint@latest
+	$(call cmd_msg,LINT,$(GO_DIRS))
+	@golint -set_exit_status $(GO_DIRS)
 
-# Build all apps that have a package.json
-build-apps:
-	@echo "Building apps ..."
-	@mkdir -p $(APPS_DIR)
-	@cd apps && \
-	for dir in */; do \
-		if [ ! -f "$$dir/package.json" ]; then \
-			continue; \
-		fi; \
-		echo "Building $$dir ..."; \
-		(cd "$$dir" && npm install && npm run build); \
-		if [ -d "$$dir/dist" ]; then \
-			echo "Copying $$dir dist to apps directory ..."; \
-			mkdir -p $(APPS_DIR)/"$${dir%/}"; \
-			cp -r "$$dir/dist/"* $(APPS_DIR)/"$${dir%/}"/; \
-			if [ "$$dir" = "dashboard/" ]; then \
-				echo "Copying dashboard to webroot ..."; \
-				cp $(APPS_DIR)/dashboard/index.html \
-					$(CURDIR)/webroot/index.html; \
-			fi; \
-		else \
-			echo "Error: No dist directory found for $$dir"; \
-			exit 1; \
-		fi; \
-	done
+# Pattern rule for building individual apps
+$(DIST_APPS_DIR)/%:
+	$(call cmd_msg,NPM,$*)
+	@mkdir -p $(DIST_APPS_DIR)
+	@cd apps/$* && npm install --silent && npm run build --silent
+	@cp -r apps/$*/dist $(DIST_APPS_DIR)/$*
+
+build-apps: $(APP_TARGETS)
+	@cp $(DIST_APPS_DIR)/dashboard/index.html $(WEBROOT_DIR)
 
 # Install the built apps to the system directory
 install: build
-	@echo "Installing apps..."
-	mkdir -p /usr/local/share/overlord/apps
-	cp -r $(APPS_DIR)/* /usr/local/share/overlord/apps/
-	@echo "Installation complete"
+	$(call cmd_msg,CP,apps to system)
+	@mkdir -p /usr/local/share/overlord/apps
+	@cp -r $(DIST_APPS_DIR)/* /usr/local/share/overlord/apps/
 
 clean-apps:
-	rm -rf $(APPS_DIR)
-	rm -rf $(WEBROOT_DIR)/index.html
+	$(call cmd_msg,RM,apps)
+	@rm -rf $(DIST_APPS_DIR)
+	@rm -rf $(WEBROOT_DIR)/index.html
 
 clean: clean-apps
-	rm -rf $(BIN)/ghost $(BIN)/overlordd $(BUILD) \
+	$(call cmd_msg,RM,build artifacts)
+	@rm -rf $(BIN)/ghost* $(BIN)/overlordd $(BUILD) \
 		$(BIN)/ghost.py.bin $(BIN)/ovl.py.bin \
-		$(APPS_DIR)
+		$(DIST_APPS_DIR)

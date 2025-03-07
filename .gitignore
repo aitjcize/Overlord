@@ -1,5 +1,6 @@
 bin/ghost
-bin/ghost.py.bin
+bin/ghost.*.linux*
+bin/ghost.py*
 bin/overlordd
 bin/ovl.py.bin
 bin/webroot
@@ -8,3 +9,4 @@ webroot/apps
 webroot/index.html
 node_modules
 .vite
+dist
