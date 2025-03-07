@@ -39,7 +39,11 @@
             <span
               class="text-white text-lg font-bold flex items-center justify-center h-full w-full"
             >
-              {{ authStore.user?.username?.charAt(0).toUpperCase() || "U" }}
+              {{
+                authStore.user && authStore.user.username
+                  ? authStore.user.username.charAt(0).toUpperCase()
+                  : "U"
+              }}
             </span>
           </div>
         </label>

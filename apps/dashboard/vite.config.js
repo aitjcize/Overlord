@@ -3,9 +3,7 @@ import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
 
 // Get API server configuration from environment variables or use defaults
-const API_HOST = process.env.VITE_API_HOST || "localhost";
-const API_PORT = process.env.VITE_API_PORT || "9000";
-const API_SERVER = `http://${API_HOST}:${API_PORT}`;
+const API_URL = process.env.VITE_API_URL || "http://localhost:9000";
 
 export default defineConfig({
   plugins: [vue()],
@@ -18,7 +16,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: API_SERVER,
+        target: API_URL,
         changeOrigin: true,
         ws: true, // Enable WebSocket proxy
       },

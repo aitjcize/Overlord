@@ -86,10 +86,23 @@ export const useAuthStore = defineStore("auth", {
       if (token) {
         this.token = token;
 
-        // You could also verify the token with the server here
-        // or decode the JWT to get user info
+        try {
+          // Extract user info from JWT token
+          // JWT tokens are in the format: header.payload.signature
+          const payload = token.split(".")[1];
+          if (payload) {
+            // Decode the base64 payload
+            const decodedPayload = JSON.parse(atob(payload));
+            if (decodedPayload.username) {
+              this.user = { username: decodedPayload.username };
+              return;
+            }
+          }
+        } catch (error) {
+          console.error("Error decoding JWT token:", error);
+        }
 
-        // For simplicity, we'll just set a basic user object
+        // Fallback to default user if token parsing fails
         this.user = { username: "User" };
       }
     },
