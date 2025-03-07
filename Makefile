@@ -14,7 +14,7 @@ GO_DIRS=./overlord/... ./cmd/...
 
 # Supported architectures for ghost binary
 GHOST_ARCHS=amd64 386 arm64 arm
-GHOST_BINS=$(addprefix $(BIN)/ghost., $(addsuffix .linux,$(GHOST_ARCHS)))
+GHOST_BINS=$(addprefix $(BIN)/ghost.linux., $(GHOST_ARCHS))
 
 # Get list of apps with package.json
 APP_DIRS=$(shell find apps -maxdepth 1 -mindepth 1 \
@@ -57,11 +57,11 @@ ghost: deps
 	$(call cmd_msg,GO,cmd/$@)
 	@GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
-$(BIN)/ghost.%.linux:
+$(BIN)/ghost.linux.%:
 	$(call cmd_msg,GO,$(notdir $@))
 	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
-$(BIN)/ghost.%.linux.sha1: $(BIN)/ghost.%.linux
+$(BIN)/ghost.linux.%.sha1: $(BIN)/ghost.linux.%
 	$(call cmd_msg,SHA1,$(notdir $<))
 	@cd $(BIN) && sha1sum $(notdir $<) > $(notdir $@)
 
@@ -71,6 +71,9 @@ build-go: overlordd ghost ghost-all
 
 build-py:
 	@ln -sf ../scripts/ghost.py bin
+	$(call cmd_msg,SHA1,ghost.py)
+	@sha1sum scripts/ghost.py > bin/ghost.py.sha1
+
 	@mkdir -p $(BUILD)
 	$(call cmd_msg,VENV,creating virtualenv)
 	@rm -rf $(BUILD)/.venv
@@ -79,14 +82,21 @@ build-py:
 	@cd $(BUILD); \
 	. $(BUILD)/.venv/bin/activate; \
 	pip install -q -r $(CURDIR)/requirements.txt; \
-	pip install -q pyinstaller; \
-	$(call cmd_msg,GEN,ovl.py.bin); \
-	pyinstaller --onefile $(CURDIR)/scripts/ovl.py > /dev/null; \
-	$(call cmd_msg,GEN,ghost.py.bin); \
+	pip install -q pyinstaller
+
+	$(call cmd_msg,GEN,ovl.pybin)
+	@cd $(BUILD); . $(BUILD)/.venv/bin/activate; \
+	pyinstaller --onefile $(CURDIR)/scripts/ovl.py > /dev/null;
+	@mv $(BUILD)/dist/ovl $(BIN)/ovl.pybin
+	$(call cmd_msg,SHA1,ovl.pybin)
+	@cd $(BIN) && sha1sum ovl.pybin > ovl.pybin.sha1
+
+	$(call cmd_msg,GEN,ghost.pybin)
+	@cd $(BUILD); . $(BUILD)/.venv/bin/activate; \
 	pyinstaller --onefile $(CURDIR)/scripts/ghost.py > /dev/null
-	$(call cmd_msg,MV,binaries to $(BIN))
-	@mv $(BUILD)/dist/ovl $(BIN)/ovl.py.bin
-	@mv $(BUILD)/dist/ghost $(BIN)/ghost.py.bin
+	@mv $(BUILD)/dist/ghost $(BIN)/ghost.pybin
+	$(call cmd_msg,SHA1,ghost.pybin)
+	@cd $(BIN) && sha1sum ghost.pybin > ghost.pybin.sha1
 
 go-fmt:
 	$(call cmd_msg,FMT,$(GO_DIRS))
@@ -124,5 +134,5 @@ clean-apps:
 clean: clean-apps
 	$(call cmd_msg,RM,build artifacts)
 	@rm -rf $(BIN)/ghost* $(BIN)/overlordd $(BUILD) \
-		$(BIN)/ghost.py.bin $(BIN)/ovl.py.bin \
+		$(BIN)/ghost.pybin $(BIN)/ovl.pybin \
 		$(DIST_APPS_DIR)
