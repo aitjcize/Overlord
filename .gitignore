@@ -10,4 +10,5 @@ webroot/index.html
 node_modules
 .vite
 dist
-UserInterfaceState.xcuserstate
+.swiftpm
+xcuserdata
