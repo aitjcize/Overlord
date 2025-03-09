@@ -25,12 +25,10 @@ import (
 )
 
 const (
-	maxFailCount  = 10
-	blockDuration = 30 * time.Minute
-	// JWT token expiration time
-	tokenExpirationTime = 24 * time.Hour
-	// JWT issuer claim
-	jwtIssuer = "overlord"
+	maxFailCount        = 10
+	blockDuration       = 30 * time.Minute
+	tokenExpirationTime = 7 * 24 * time.Hour
+	jwtIssuer           = "overlord"
 )
 
 // JWTConfig holds the JWT configuration
