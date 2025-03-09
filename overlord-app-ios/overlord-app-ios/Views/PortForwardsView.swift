@@ -11,7 +11,7 @@ struct PortForwardsView: View {
     @State private var showURLBar: Bool = false
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
-    @State private var navigationStateTimer: Timer? = nil
+    @State private var navigationStateTimer: Timer?
 
     var body: some View {
         ZStack {
@@ -225,7 +225,14 @@ struct WebView: UIViewRepresentable {
         _ = configuration.websiteDataStore.httpCookieStore
 
         // Enable cookies
-        configuration.preferences.javaScriptEnabled = true
+        if #available(iOS 14.0, *) {
+            let preferences = WKWebpagePreferences()
+            preferences.allowsContentJavaScript = true
+            configuration.defaultWebpagePreferences = preferences
+        } else {
+            // Fallback for iOS 13 and earlier
+            configuration.preferences.javaScriptEnabled = true
+        }
 
         // Enable developer extras for debugging
         if #available(iOS 16.4, *) {
@@ -419,7 +426,7 @@ struct WebViewContainer: View {
     @State private var showURLBar: Bool = false
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
-    @State private var navigationStateTimer: Timer? = nil
+    @State private var navigationStateTimer: Timer?
 
     var body: some View {
         NavigationView {
@@ -470,7 +477,8 @@ struct WebViewContainer: View {
                             // Check if the app was in background and restart the TCP server if needed
                             if OverlordAppIOS.wasInBackground {
                                 print(
-                                    "WebViewContainer: App was in background, restarting TCP server for port forward \(portForward.id)"
+                                    "WebViewContainer: App was in background, " +
+                                    "restarting TCP server for port forward \(portForward.id)"
                                 )
                                 viewModel.restartTCPServerIfNeeded(for: portForward.id)
                             }
@@ -488,7 +496,7 @@ struct WebViewContainer: View {
                             navigationStateTimer?.invalidate()
                             navigationStateTimer = nil
                         }
-                        .onChange(of: currentURL) { newURL in
+                        .onChange(of: currentURL) { _, newURL in
                             if let newURL = newURL {
                                 urlString = newURL.absoluteString
                             }

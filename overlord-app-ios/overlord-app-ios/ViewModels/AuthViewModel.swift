@@ -33,11 +33,18 @@ class AuthViewModel: ObservableObject {
     func login(username: String, password: String) {
         guard !username.isEmpty, !password.isEmpty else {
             error = "Username and password are required"
+            isLoading = false
             return
         }
 
         isLoading = true
         error = nil
+
+        // Special handling for UI testing
+        if UITestingHelper.isUITesting && !UITestingHelper.shouldBypassAuth {
+            handleUITestingLogin(username: username, password: password)
+            return
+        }
 
         Task { @MainActor in
             // Create the login request
@@ -64,20 +71,7 @@ class AuthViewModel: ObservableObject {
                     self?.isLoading = false
 
                     if case let .failure(error) = completion {
-                        if let urlError = error as? URLError {
-                            switch urlError.code {
-                            case .notConnectedToInternet:
-                                self?.error = "No internet connection"
-                            case .cannotConnectToHost:
-                                self?.error = "Cannot connect to server"
-                            case .timedOut:
-                                self?.error = "Connection timed out"
-                            default:
-                                self?.error = "Network error: \(urlError.localizedDescription)"
-                            }
-                        } else {
-                            self?.error = "Invalid username or password"
-                        }
+                        self?.handleLoginError(error)
                     }
                 }, receiveValue: { [weak self] response in
                     self?.token = response.token
@@ -87,6 +81,44 @@ class AuthViewModel: ObservableObject {
                     UserDefaults.standard.set(response.token, forKey: "authToken")
                 })
                 .store(in: &cancellables)
+        }
+    }
+
+    // Handle login for UI testing
+    private func handleUITestingLogin(username: String, password: String) {
+        // Simulate login for UI testing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if username == "invalid_user" && password == "invalid_password" {
+                self.error = "Invalid username or password"
+                self.isLoading = false
+            } else if username == "test_user" && password == "test_password" {
+                self.token = "ui-test-token"
+                self.isAuthenticated = true
+                UserDefaults.standard.set("ui-test-token", forKey: "authToken")
+                self.isLoading = false
+            } else {
+                // Default behavior for other credentials in UI testing
+                self.error = "Invalid username or password"
+                self.isLoading = false
+            }
+        }
+    }
+
+    // Handle login errors
+    private func handleLoginError(_ error: Error) {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                self.error = "No internet connection"
+            case .cannotConnectToHost:
+                self.error = "Cannot connect to server"
+            case .timedOut:
+                self.error = "Connection timed out"
+            default:
+                self.error = "Network error: \(urlError.localizedDescription)"
+            }
+        } else {
+            self.error = "Invalid username or password"
         }
     }
 

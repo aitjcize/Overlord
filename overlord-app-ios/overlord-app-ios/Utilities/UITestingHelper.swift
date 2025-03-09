@@ -10,6 +10,8 @@ enum UITestingHelper {
 
     /// Check if authentication should be bypassed for UI testing
     static var shouldBypassAuth: Bool {
+        // For UI tests that test the login screen, we don't want to bypass auth
+        // For UI tests that test post-login functionality, we do want to bypass auth
         ProcessInfo.processInfo.arguments.contains("UI_TESTING_BYPASS_AUTH")
     }
 
@@ -21,13 +23,20 @@ enum UITestingHelper {
     /// Setup mock data for UI testing
     static func setupMockData() {
         if isUITesting {
+            print("Setting up mock data for UI testing")
+
+            // Set a default server address for all UI tests
+            UserDefaults.standard.set("http://localhost:8080", forKey: "serverAddress")
+
             // Set up any mock data needed for UI tests
             if shouldBypassAuth {
+                print("Bypassing authentication for UI testing")
                 // Store a mock token to bypass authentication
                 UserDefaults.standard.set(mockToken, forKey: "authToken")
-
-                // Set a default server address
-                UserDefaults.standard.set("http://localhost:8080", forKey: "serverAddress")
+            } else {
+                print("Not bypassing authentication for UI testing")
+                // Clear any existing token to ensure login screen is shown
+                UserDefaults.standard.removeObject(forKey: "authToken")
             }
         }
     }

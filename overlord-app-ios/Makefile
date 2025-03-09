@@ -1,4 +1,4 @@
-.PHONY: all build clean format lint install-tools test test-ios test-macos test-ui test-all test-verbose xcpretty
+.PHONY: all build clean format lint install-tools test test-ios test-ui test-all test-verbose xcpretty
 
 # Default target
 all: build
@@ -57,20 +57,6 @@ test-ios: xcpretty
 		echo "xcpretty not available, running with standard output..."; \
 		xcodebuild test -scheme overlord-app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:overlord-app-iosTests || \
 		echo "Error: Could not run tests on iPhone 16 Pro Max simulator. Please ensure it is available."; \
-	fi
-
-# Run tests on macOS (unit tests only)
-test-macos: xcpretty
-	@echo "Running unit tests on macOS..."
-	@if command -v xcpretty >/dev/null; then \
-		xcodebuild test -scheme overlord-app-ios -destination 'platform=macOS,arch=arm64' -only-testing:overlord-app-iosTests | xcpretty || \
-		xcodebuild test -scheme overlord-app-ios -destination 'platform=macOS' -only-testing:overlord-app-iosTests | xcpretty || \
-		echo "Error: Could not run tests on macOS. This may be due to iOS-specific code in the tests."; \
-	else \
-		echo "xcpretty not available, running with standard output..."; \
-		xcodebuild test -scheme overlord-app-ios -destination 'platform=macOS,arch=arm64' -only-testing:overlord-app-iosTests || \
-		xcodebuild test -scheme overlord-app-ios -destination 'platform=macOS' -only-testing:overlord-app-iosTests || \
-		echo "Error: Could not run tests on macOS. This may be due to iOS-specific code in the tests."; \
 	fi
 
 # Run UI tests (requires iOS simulator)

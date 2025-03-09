@@ -71,7 +71,7 @@ final class AuthViewModelTests: XCTestCase {
 
     func testLoginValidation() {
         // Given
-        let expectation = XCTestExpectation(description: "Error should be set")
+        // No setup needed
 
         // When - empty username
         authViewModel.login(username: "", password: "password")

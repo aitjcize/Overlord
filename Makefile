@@ -120,12 +120,6 @@ $(DIST_APPS_DIR)/%:
 build-apps: $(APP_TARGETS)
 	@cp $(DIST_APPS_DIR)/dashboard/index.html $(WEBROOT_DIR)
 
-# Install the built apps to the system directory
-install: build
-	$(call cmd_msg,CP,apps to system)
-	@mkdir -p /usr/local/share/overlord/apps
-	@cp -r $(DIST_APPS_DIR)/* /usr/local/share/overlord/apps/
-
 clean-apps:
 	$(call cmd_msg,RM,apps)
 	@rm -rf $(DIST_APPS_DIR)

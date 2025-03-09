@@ -11,19 +11,22 @@ struct CustomTextField: UIViewRepresentable {
     let keyboardType: UIKeyboardType
     let returnKeyType: UIReturnKeyType
     let isSecure: Bool
+    let accessibilityIdentifier: String
 
     init(
         text: Binding<String>,
         placeholder: String,
         keyboardType: UIKeyboardType = .default,
         returnKeyType: UIReturnKeyType = .default,
-        isSecure: Bool = false
+        isSecure: Bool = false,
+        accessibilityIdentifier: String = ""
     ) {
         _text = text
         self.placeholder = placeholder
         self.keyboardType = keyboardType
         self.returnKeyType = returnKeyType
         self.isSecure = isSecure
+        self.accessibilityIdentifier = accessibilityIdentifier
     }
 
     func makeUIView(context: Context) -> UITextField {
@@ -38,6 +41,7 @@ struct CustomTextField: UIViewRepresentable {
         textField.textColor = .white
         textField.font = UIFont.systemFont(ofSize: 16) // Set appropriate font size
         textField.backgroundColor = .clear // Make background clear
+        textField.accessibilityIdentifier = accessibilityIdentifier
 
         // Set placeholder color to a subtle gray that works well on dark backgrounds
         textField.attributedPlaceholder = NSAttributedString(
@@ -118,7 +122,8 @@ struct LoginView: View {
                         text: $serverHost,
                         placeholder: "Server Host (e.g. example.com:9000)",
                         keyboardType: .URL,
-                        returnKeyType: .next
+                        returnKeyType: .next,
+                        accessibilityIdentifier: "Server Address"
                     )
                     .frame(height: 44) // Control the height
                     .padding(.horizontal, 12)
@@ -128,7 +133,8 @@ struct LoginView: View {
                     CustomTextField(
                         text: $username,
                         placeholder: "Username",
-                        returnKeyType: .next
+                        returnKeyType: .next,
+                        accessibilityIdentifier: "Username"
                     )
                     .frame(height: 44) // Control the height
                     .padding(.horizontal, 12)
@@ -139,7 +145,8 @@ struct LoginView: View {
                         text: $password,
                         placeholder: "Password",
                         returnKeyType: .done,
-                        isSecure: true
+                        isSecure: true,
+                        accessibilityIdentifier: "Password"
                     )
                     .frame(height: 44) // Control the height
                     .padding(.horizontal, 12)
@@ -150,6 +157,7 @@ struct LoginView: View {
                         Text(error)
                             .foregroundColor(.red)
                             .font(.caption)
+                            .accessibilityIdentifier("ErrorMessage")
                     }
 
                     Button(
@@ -189,6 +197,7 @@ struct LoginView: View {
                             .cornerRadius(8)
                         }
                     )
+                    .accessibilityIdentifier("Login")
                     .disabled(authViewModel.isLoading)
                 }
                 .padding(.horizontal, 30)
