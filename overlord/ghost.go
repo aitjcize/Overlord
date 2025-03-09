@@ -467,13 +467,13 @@ func (ghost *Ghost) Upgrade() error {
 }
 
 func (ghost *Ghost) handleTerminalRequest(req *Request) error {
-	type RequestParams struct {
+	type RequestPayload struct {
 		Sid       string `json:"sid"`
 		TtyDevice string `json:"tty_device"`
 	}
 
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
 		return err
 	}
 
@@ -492,18 +492,19 @@ func (ghost *Ghost) handleTerminalRequest(req *Request) error {
 }
 
 func (ghost *Ghost) handleShellRequest(req *Request) error {
-	type RequestParams struct {
+	type RequestPayload struct {
 		Sid string `json:"sid"`
 		Cmd string `json:"command"`
 	}
 
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
 		return err
 	}
 
 	go func() {
-		log.Printf("Received shell command: %s, Shell agent %s spawned\n", params.Cmd, params.Sid)
+		log.Printf("Received shell command: %s, Shell agent %s spawned\n",
+			params.Cmd, params.Sid)
 		addrs := []string{ghost.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
@@ -516,14 +517,88 @@ func (ghost *Ghost) handleShellRequest(req *Request) error {
 	return ghost.SendResponse(res)
 }
 
+func (ghost *Ghost) handleListTreeRequest(req *Request) error {
+	type RequestPayload struct {
+		Path string `json:"path"`
+	}
+
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, "invalid_params"))
+	}
+
+	if !filepath.IsAbs(params.Path) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+		}
+		params.Path = filepath.Join(home, params.Path)
+	}
+
+	entries, err := ghost.ListTree(params.Path)
+	if err != nil {
+		log.Printf("ListTree: %s\n", err)
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+	return ghost.SendResponse(
+		NewResponse(req.Rid, Success, map[string]interface{}{
+			"entries": entries,
+		}))
+}
+
+func (ghost *Ghost) handleFstatRequest(req *Request) error {
+	type RequestPayload struct {
+		Path string `json:"path"`
+	}
+
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, "invalid_params"))
+	}
+
+	if !filepath.IsAbs(params.Path) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+		}
+		params.Path = filepath.Join(home, params.Path)
+	}
+
+	fileInfo, err := os.Stat(params.Path)
+	result := map[string]interface{}{
+		"exists": err == nil,
+	}
+	if err == nil {
+		result["is_dir"] = fileInfo.IsDir()
+		result["mode"] = fileInfo.Mode()
+		result["size"] = fileInfo.Size()
+		result["mod_time"] = fileInfo.ModTime().Unix()
+		isSymlink := (fileInfo.Mode() & os.ModeSymlink) != 0
+		result["is_symlink"] = isSymlink
+
+		if isSymlink {
+			target, err := os.Readlink(params.Path)
+			if err == nil {
+				result["link_target"] = target
+			}
+		}
+	} else if os.IsNotExist(err) {
+		// File doesn't exist, but this is not an error condition
+		// We already set exists: false
+	} else {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+	return ghost.SendResponse(NewResponse(req.Rid, Success, result))
+}
+
 func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
-	type RequestParams struct {
+	type RequestPayload struct {
 		Sid      string `json:"sid"`
 		Filename string `json:"filename"`
 	}
 
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
 		return err
 	}
 
@@ -538,7 +613,7 @@ func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
 
 	f, err := os.Open(filename)
 	if err != nil {
-		res := NewResponse(req.Rid, err.Error(), nil)
+		res := NewErrorResponse(req.Rid, err.Error())
 		return ghost.SendResponse(res)
 	}
 	f.Close()
@@ -556,7 +631,7 @@ func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
 }
 
 func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
-	type RequestParams struct {
+	type RequestPayload struct {
 		Sid         string `json:"sid"`
 		TerminalSid string `json:"terminal_sid"`
 		Filename    string `json:"filename"`
@@ -565,8 +640,8 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 		CheckOnly   bool   `json:"check_only"`
 	}
 
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
 		return err
 	}
 
@@ -601,7 +676,7 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 
 	f, err := os.Create(destPath)
 	if err != nil {
-		res := NewResponse(req.Rid, err.Error(), nil)
+		res := NewErrorResponse(req.Rid, err.Error())
 		return ghost.SendResponse(res)
 	}
 	f.Close()
@@ -623,14 +698,14 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 }
 
 func (ghost *Ghost) handleModeForwardRequest(req *Request) error {
-	type RequestParams struct {
+	type RequestPayload struct {
 		Sid  string `json:"sid"`
 		Host string `json:"host"`
 		Port int    `json:"port"`
 	}
 
-	var params RequestParams
-	if err := json.Unmarshal(req.Params, &params); err != nil {
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
 		return err
 	}
 
@@ -710,6 +785,10 @@ func (ghost *Ghost) handleRequest(req *Request) error {
 		err = ghost.handleTerminalRequest(req)
 	case "shell":
 		err = ghost.handleShellRequest(req)
+	case "list_tree":
+		err = ghost.handleListTreeRequest(req)
+	case "fstat":
+		err = ghost.handleFstatRequest(req)
 	case "file_download":
 		err = ghost.handleFileDownloadRequest(req)
 	case "clear_to_download":
@@ -1195,8 +1274,8 @@ func (ghost *Ghost) Register() error {
 			if res == nil {
 				ghost.reset = true
 				return errors.New("Register request timeout")
-			} else if res.Response != Success {
-				log.Println("Register:", res.Response)
+			} else if res.Status != Success {
+				log.Println("Register:", res.Status)
 			} else {
 				log.Printf("Registered with Overlord at %s", addr)
 				ghost.connectedAddr = addr
@@ -1205,7 +1284,7 @@ func (ghost *Ghost) Register() error {
 				}
 				ghost.pauseLanDisc = true
 			}
-			ghost.RegisterStatus = res.Response
+			ghost.RegisterStatus = res.Status
 			return nil
 		}
 
@@ -1332,6 +1411,43 @@ func (ghost *Ghost) RegisterSession(sesssionID, pidStr string) {
 // AddToDownloadQueue adds a downloadInfo to the download queue
 func (ghost *Ghost) AddToDownloadQueue(ttyName, filename string) {
 	ghost.downloadQueue <- downloadInfo{ttyName, filename}
+}
+
+// ListTree returns a recursive list of all files and directories under the given path
+func (ghost *Ghost) ListTree(path string) ([]map[string]interface{}, error) {
+	entries := []map[string]interface{}{}
+	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(path, filePath)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+		isSymlink := (info.Mode() & os.ModeSymlink) != 0
+		entry := map[string]interface{}{
+			"name":       info.Name(),
+			"path":       filePath,
+			"size":       info.Size(),
+			"mode":       info.Mode(),
+			"mod_time":   info.ModTime().Unix(),
+			"is_dir":     info.IsDir(),
+			"is_symlink": isSymlink,
+		}
+		if isSymlink {
+			target, err := os.Readlink(filePath)
+			if err == nil {
+				entry["link_target"] = target
+			}
+		}
+		entries = append(entries, entry)
+		return nil
+	})
+	return entries, err
 }
 
 // StartLanDiscovery starts listening to LAN discovery message.

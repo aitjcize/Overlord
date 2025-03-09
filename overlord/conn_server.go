@@ -49,7 +49,7 @@ type ConnServer struct {
 	*RPCCore
 	Mode        int                    // Client mode, see constants.go
 	Command     chan interface{}       // Channel for overlord command
-	Response    chan string            // Channel for reponsing overlord command
+	Response    chan *Response         // Channel for reponsing overlord command
 	Sid         string                 // Session ID
 	Mid         string                 // Machine ID
 	TerminalSid string                 // Associated terminal session ID
@@ -69,7 +69,7 @@ func NewConnServer(ovl *Overlord, conn net.Conn) *ConnServer {
 		RPCCore:    NewRPCCore(conn),
 		Mode:       ModeNone,
 		Command:    make(chan interface{}),
-		Response:   make(chan string),
+		Response:   make(chan *Response),
 		Properties: make(map[string]interface{}),
 		ovl:        ovl,
 		stopListen: make(chan struct{}),
@@ -186,6 +186,10 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 		c.SpawnTerminal(v.Sid, v.TtyDevice)
 	case SpawnShellCmd:
 		c.SpawnShell(v.Sid, v.Command)
+	case ListTreeCmd:
+		c.ListTree(v.Path)
+	case FstatCmd:
+		c.Fstat(v.Path)
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
 		c.writeLogToWS(v.Conn, c.logcat.History)
@@ -283,8 +287,7 @@ func (c *ConnServer) Listen() {
 
 func (c *ConnServer) handlePingRequest(req *Request) error {
 	c.lastPing = time.Now().Unix()
-	res := NewResponse(req.Rid, "pong", nil)
-	return c.SendResponse(res)
+	return c.SendResponse(NewResponse(req.Rid, Success, nil))
 }
 
 func (c *ConnServer) handleRegisterRequest(req *Request) error {
@@ -297,7 +300,7 @@ func (c *ConnServer) handleRegisterRequest(req *Request) error {
 	}
 
 	var args RequestArgs
-	if err := json.Unmarshal(req.Params, &args); err != nil {
+	if err := json.Unmarshal(req.Payload, &args); err != nil {
 		return err
 	}
 	if len(args.Mid) == 0 {
@@ -316,8 +319,7 @@ func (c *ConnServer) handleRegisterRequest(req *Request) error {
 
 	c.wsConn, err = c.ovl.Register(c)
 	if err != nil {
-		res := NewResponse(req.Rid, err.Error(), nil)
-		c.SendResponse(res)
+		c.SendResponse(NewErrorResponse(req.Rid, err.Error()))
 		return RegistrationFailedError(errors.New("Register: " + err.Error()))
 	}
 
@@ -333,8 +335,7 @@ func (c *ConnServer) handleRegisterRequest(req *Request) error {
 
 	c.registered = true
 	c.lastPing = time.Now().Unix()
-	res := NewResponse(req.Rid, Success, nil)
-	return c.SendResponse(res)
+	return c.SendResponse(NewResponse(req.Rid, Success, nil))
 }
 
 func (c *ConnServer) handleDownloadRequest(req *Request) error {
@@ -345,7 +346,7 @@ func (c *ConnServer) handleDownloadRequest(req *Request) error {
 	}
 
 	var args RequestArgs
-	if err := json.Unmarshal(req.Params, &args); err != nil {
+	if err := json.Unmarshal(req.Payload, &args); err != nil {
 		return err
 	}
 
@@ -355,9 +356,7 @@ func (c *ConnServer) handleDownloadRequest(req *Request) error {
 	c.Download.Size = args.Size
 
 	c.ovl.RegisterDownloadRequest(c)
-
-	res := NewResponse(req.Rid, Success, nil)
-	return c.SendResponse(res)
+	return c.SendResponse(NewResponse(req.Rid, Success, nil))
 }
 
 func (c *ConnServer) handleClearToUploadRequest(req *Request) error {
@@ -391,15 +390,14 @@ func (c *ConnServer) SendUpgradeRequest() error {
 func (c *ConnServer) getHandler(name string) func(res *Response) error {
 	return func(res *Response) error {
 		if res == nil {
-			c.Response <- "command timeout"
+			c.Response <- NewErrorResponse(res.Rid, "command timeout")
 			return errors.New(name + ": command timeout")
 		}
 
-		if res.Response != Success {
-			c.Response <- res.Response
-			return errors.New(name + " failed: " + res.Response)
+		c.Response <- res
+		if res.Status != Success {
+			return errors.New(name + " failed: " + res.Status)
 		}
-		c.Response <- ""
 		return nil
 	}
 }
@@ -426,6 +424,23 @@ func (c *ConnServer) SpawnShell(sid string, command string) {
 	req := NewRequest("shell", map[string]interface{}{
 		"sid": sid, "command": command})
 	c.SendRequest(req, c.getHandler("SpawnShell"))
+}
+
+// ListTree handles a request to list directory contents recursively
+func (c *ConnServer) ListTree(path string) {
+	// Create a request to send to the ghost client
+	req := NewRequest("list_tree", map[string]interface{}{
+		"path": path,
+	})
+	c.SendRequest(req, c.getHandler("ListTree"))
+}
+
+// Fstat handles a request to get the stat of a file.
+func (c *ConnServer) Fstat(path string) {
+	req := NewRequest("fstat", map[string]interface{}{
+		"path": path,
+	})
+	c.SendRequest(req, c.getHandler("Fstat"))
 }
 
 // SpawnFileServer Spawn a remote file connection (a ghost with mode ModeFile).
@@ -456,8 +471,9 @@ func (c *ConnServer) SendClearToDownload() {
 	c.SendRequest(req, nil)
 }
 
-// SpawnModeForwarder spawns a forwarder connection (a ghost with mode ModeForward).
-// sid is the session ID, which will be used as the session ID of the new ghost.
+// SpawnModeForwarder spawns a forwarder connection (a ghost with mode
+// ModeForward). sid is the session ID, which will be used as the session ID of
+// the new ghost.
 func (c *ConnServer) SpawnModeForwarder(sid string, host string, port int) {
 	req := NewRequest("forward", map[string]interface{}{
 		"sid":  sid,

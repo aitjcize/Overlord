@@ -69,6 +69,16 @@ type ConnectLogcatCmd struct {
 	Conn *websocket.Conn
 }
 
+// ListTreeCmd is a command to request a directory listing.
+type ListTreeCmd struct {
+	Path string
+}
+
+// FstatCmd is a command to request a file stat.
+type FstatCmd struct {
+	Path string
+}
+
 // webSocketContext is used for maintaining the session information of
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
@@ -591,8 +601,13 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnTerminalCmd{wc.Sid, ttyDevice}
-			if res := <-agent.Response; res != "" {
-				WebSocketSendError(conn, res)
+			if res := <-agent.Response; res.Status == Failed {
+				var error Error
+				if err := json.Unmarshal(res.Payload, &error); err != nil {
+					WebSocketSendError(conn, "Failed to unmarshal error response: "+err.Error())
+				} else {
+					WebSocketSendError(conn, error.Error)
+				}
 			}
 		} else {
 			ovl.agentsMu.Unlock()
@@ -623,8 +638,13 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnShellCmd{wc.Sid, command}
-			if res := <-agent.Response; res != "" {
-				WebSocketSendError(conn, res)
+			if res := <-agent.Response; res.Status == Failed {
+				var error Error
+				if err := json.Unmarshal(res.Payload, &error); err != nil {
+					WebSocketSendError(conn, "Failed to unmarshal error response: "+err.Error())
+				} else {
+					WebSocketSendError(conn, error.Error)
+				}
 			}
 		} else {
 			ovl.agentsMu.Unlock()
@@ -706,9 +726,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			Sid: sid, Action: "download", Filename: filename[0]}
 
 		res := <-agent.Response
-		if res != "" {
-			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, res),
-				http.StatusBadRequest)
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusBadRequest)
 			return
 		}
 
@@ -812,8 +831,11 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
 				filenames[0], dsts[0], int(perm), true}
 
-			errMsg = <-agent.Response
-			return
+			res := <-agent.Response
+			if res.Status == Failed {
+				errMsg = string(res.Payload)
+				return
+			}
 		}
 
 		mr, err := r.MultipartReader()
@@ -832,8 +854,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			p.FileName(), dsts[0], int(perm), false}
 
 		res := <-agent.Response
-		if res != "" {
-			http.NotFound(w, r)
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusBadRequest)
 			return
 		}
 
@@ -902,13 +924,73 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnModeForwarderCmd{wc.Sid, host, port}
-			if res := <-agent.Response; res != "" {
-				WebSocketSendError(conn, res)
+			if res := <-agent.Response; res.Status == Failed {
+				WebSocketSendError(conn, string(res.Payload))
 			}
 		} else {
 			ovl.agentsMu.Unlock()
 			WebSocketSendError(conn, "No client with mid "+mid)
 		}
+	}
+
+	// Directory listing handler
+	AgentLsTreeHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			http.Error(w, `{"error": "Path parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		agent.Command <- ListTreeCmd{Path: path}
+		res := <-agent.Response
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			return
+		}
+		w.Write(res.Payload)
+	}
+
+	// File stat handler
+	AgentFstatHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			http.Error(w, `{"error": "Path parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		agent.Command <- FstatCmd{Path: path}
+		res := <-agent.Response
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			return
+		}
+		w.Write(res.Payload)
 	}
 
 	// WebSocket monitor endpoint
@@ -935,7 +1017,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		go client.writePump()
 		go client.readPump(ovl)
 	}
-
 	webRootDir := ovl.GetWebRoot()
 
 	// JWT Auth
@@ -969,6 +1050,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	apiRouter.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
 	apiRouter.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
 	apiRouter.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
+	apiRouter.HandleFunc("/api/agent/lstree/{mid}", AgentLsTreeHandler)
+	apiRouter.HandleFunc("/api/agent/fstat/{mid}", AgentFstatHandler)
 	apiRouter.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 	apiRouter.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
 	apiRouter.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)

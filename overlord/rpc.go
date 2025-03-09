@@ -37,7 +37,7 @@ type Request struct {
 	Rid     string          `json:"rid"`
 	Timeout int64           `json:"timeout"`
 	Name    string          `json:"name"`
-	Params  json.RawMessage `json:"params"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // NewRequest creats a new Request object.
@@ -52,7 +52,7 @@ func NewRequest(name string, params map[string]interface{}) *Request {
 	if targs, err := json.Marshal(params); err != nil {
 		panic(err)
 	} else {
-		req.Params = json.RawMessage(targs)
+		req.Payload = json.RawMessage(targs)
 	}
 	return req
 }
@@ -68,27 +68,46 @@ func (r *Request) Marshal() ([]byte, error) {
 	return json.Marshal(r)
 }
 
+// Error is a structure for storing error information.
+type Error struct {
+	Error string `json:"error"`
+}
+
 // Response Object.
 // Implements the Message interface.
 type Response struct {
-	Rid      string          `json:"rid"`
-	Response string          `json:"response"`
-	Params   json.RawMessage `json:"params"`
+	Rid     string          `json:"rid"`
+	Status  string          `json:"status"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 // NewResponse creates a new Response object.
 // rid is the request ID of the request this response is intended for.
 // response is the response status text.
 // params is map between string and any other JSON-serializable data structure.
-func NewResponse(rid, response string, params map[string]interface{}) *Response {
+func NewResponse(rid, status string, params map[string]interface{}) *Response {
 	res := &Response{
-		Rid:      rid,
-		Response: response,
+		Rid:    rid,
+		Status: status,
 	}
 	if targs, err := json.Marshal(params); err != nil {
 		panic(err)
 	} else {
-		res.Params = json.RawMessage(targs)
+		res.Payload = json.RawMessage(targs)
+	}
+	return res
+}
+
+// NewErrorResponse creates a new Response object with an error status.
+func NewErrorResponse(rid, error string) *Response {
+	res := &Response{
+		Rid:    rid,
+		Status: Failed,
+	}
+	if targs, err := json.Marshal(Error{Error: error}); err != nil {
+		panic(err)
+	} else {
+		res.Payload = json.RawMessage(targs)
 	}
 	return res
 }
