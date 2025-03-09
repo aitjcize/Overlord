@@ -118,6 +118,16 @@ func (rpcStub *ghostRPCStub) AddToDownloadQueue(args []string, reply *EmptyReply
 	return nil
 }
 
+// ListDirectory handles directory listing requests
+func (rpcStub *ghostRPCStub) ListDirectory(path string, reply *[]map[string]interface{}) error {
+	entries, err := rpcStub.ghost.ListDirectory(path)
+	if err != nil {
+		return err
+	}
+	*reply = entries
+	return nil
+}
+
 // downloadInfo is a structure that we be place into download queue.
 // In our case since we always execute 'ghost --download' in our pseudo
 // terminal so ttyName will always have the form /dev/pts/X
@@ -718,10 +728,35 @@ func (ghost *Ghost) handleRequest(req *Request) error {
 		err = ghost.handleFileUploadRequest(req)
 	case "forward":
 		err = ghost.handleModeForwardRequest(req)
+	case "list_directory":
+		err = ghost.handleListDirectoryRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
 	return err
+}
+
+// handleListDirectoryRequest handles a request to list directory contents
+func (ghost *Ghost) handleListDirectoryRequest(req *Request) error {
+	type RequestParams struct {
+		Path string `json:"path"`
+	}
+
+	var params RequestParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return ghost.SendResponse(NewResponse(req.Rid, "invalid_params", nil))
+	}
+
+	// List the directory
+	entries, err := ghost.ListDirectory(params.Path)
+	if err != nil {
+		return ghost.SendResponse(NewResponse(req.Rid, err.Error(), nil))
+	}
+
+	// Send the response
+	return ghost.SendResponse(NewResponse(req.Rid, Success, map[string]interface{}{
+		"entries": entries,
+	}))
 }
 
 func (ghost *Ghost) processRequests(reqs []*Request) error {
@@ -1332,6 +1367,48 @@ func (ghost *Ghost) RegisterSession(sesssionID, pidStr string) {
 // AddToDownloadQueue adds a downloadInfo to the download queue
 func (ghost *Ghost) AddToDownloadQueue(ttyName, filename string) {
 	ghost.downloadQueue <- downloadInfo{ttyName, filename}
+}
+
+// ListDirectory returns a list of directory entries with their metadata
+func (ghost *Ghost) ListDirectory(path string) ([]map[string]interface{}, error) {
+	entries := []map[string]interface{}{}
+
+	// Open the directory
+	dir, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer dir.Close()
+
+	// Read directory entries
+	fileInfos, err := dir.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process each entry
+	for _, info := range fileInfos {
+		entry := map[string]interface{}{
+			"name":      info.Name(),
+			"size":      info.Size(),
+			"mode":      info.Mode().String(),
+			"modTime":   info.ModTime().Unix(),
+			"isDir":     info.IsDir(),
+			"isSymlink": (info.Mode() & os.ModeSymlink) != 0,
+		}
+
+		// If it's a symlink, try to resolve it
+		if (info.Mode() & os.ModeSymlink) != 0 {
+			target, err := os.Readlink(filepath.Join(path, info.Name()))
+			if err == nil {
+				entry["linkTarget"] = target
+			}
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
 }
 
 // StartLanDiscovery starts listening to LAN discovery message.

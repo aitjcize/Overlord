@@ -936,6 +936,59 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		go client.readPump(ovl)
 	}
 
+	// Directory listing handler
+	AgentDirectoryListHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		// Get the path from query parameters, default to home directory if not provided
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			path = "."
+		}
+
+		// Get the agent
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		// Create a request to call the ghost's ListDirectory method
+		req := NewRequest("list_directory", map[string]interface{}{
+			"path": path,
+		})
+
+		// Send the request to the agent
+		var response *Response
+		agent.SendRequest(req, func(res *Response) error {
+			response = res
+			return nil
+		})
+
+		// Wait for the response
+		time.Sleep(500 * time.Millisecond)
+
+		if response == nil || response.Response != Success {
+			var errMsg string
+			if response != nil {
+				errMsg = response.Response
+			} else {
+				errMsg = "No response from agent"
+			}
+			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, errMsg), http.StatusInternalServerError)
+			return
+		}
+
+		// Return the directory entries as JSON
+		w.Write(response.Params)
+	}
+
 	webRootDir := ovl.GetWebRoot()
 
 	// JWT Auth
@@ -972,6 +1025,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	apiRouter.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 	apiRouter.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
 	apiRouter.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)
+	apiRouter.HandleFunc("/api/agent/ls/{mid}", AgentDirectoryListHandler)
 
 	// File methods
 	apiRouter.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
