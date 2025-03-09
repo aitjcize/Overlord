@@ -59,13 +59,13 @@ ghost: deps
 	$(call cmd_msg,GO,cmd/$@)
 	@GOBIN=$(BIN) $(GO) install $(LDFLAGS) $(CURDIR)/cmd/$@
 
-$(BIN)/ghost.linux.%:
-	$(call cmd_msg,GO,$(notdir $@))
-	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
-
 $(BIN)/ghost.linux.%.sha1: $(BIN)/ghost.linux.%
 	$(call cmd_msg,SHA1,$(notdir $<))
 	@cd $(BIN) && sha1sum $(notdir $<) > $(notdir $@)
+
+$(BIN)/ghost.linux.%:
+	$(call cmd_msg,GO,$(notdir $@))
+	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
 ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1)
 

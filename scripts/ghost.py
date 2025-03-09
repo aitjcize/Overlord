@@ -549,13 +549,17 @@ class Ghost:
       raise RequestError('Invalid request handler for msg "%s"' % name)
 
     rid = str(uuid.uuid4())
-    msg = {'rid': rid, 'timeout': timeout, 'name': name, 'params': args}
+    msg = {'rid': rid, 'timeout': timeout, 'name': name, 'payload': args}
     if timeout >= 0:
       self._requests[rid] = [self.Timestamp(), timeout, handler]
     self.SendMessage(msg)
 
-  def SendResponse(self, omsg, status, params=None):
-    msg = {'rid': omsg['rid'], 'response': status, 'params': params}
+  def SendResponse(self, omsg, status, payload=None):
+    msg = {'rid': omsg['rid'], 'status': status, 'payload': payload}
+    self.SendMessage(msg)
+
+  def SendErrorResponse(self, omsg, error):
+    msg = {'rid': omsg['rid'], 'status': FAILED, 'payload': {'error': error}}
     self.SendMessage(msg)
 
   def HandleTTYControl(self, fd, control_str):
@@ -569,11 +573,11 @@ class Ghost:
       # Check for ANSI escape sequence for window size
       if control_str.startswith('\x1b[') and control_str.endswith('t'):
         # Remove ESC[ prefix and 't' suffix
-        params = control_str[2:-1].split(';')
-        if len(params) >= 3 and params[0] == '8':
+        payload = control_str[2:-1].split(';')
+        if len(payload) >= 3 and payload[0] == '8':
           # Window size in characters (rows;cols)
-          rows = int(params[1])
-          cols = int(params[2])
+          rows = int(payload[1])
+          cols = int(payload[2])
           logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
           winsize = struct.pack('HHHH', rows, cols, 0, 0)
           fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
@@ -861,9 +865,101 @@ class Ghost:
     self._last_ping = self.Timestamp()
     self.SendRequest('ping', {}, timeout_handler, _PING_TIMEOUT)
 
+  def HandleListTreeRequest(self, msg):
+    """Handle a request to list directory contents recursively."""
+    payload = msg['payload']
+    path = payload.get('path')
+
+    if not os.path.isabs(path):
+      path = os.path.join('~', path)
+
+    path = os.path.expanduser(path)
+
+    try:
+      if not os.path.exists(path):
+        raise RuntimeError(f"No such file or directory: {path}")
+
+      entries = []
+      for root, dirs, files in os.walk(path):
+        for file in files:
+          file_path = os.path.join(root, file)
+          try:
+            file_stat = os.stat(file_path)
+            entry = {
+              'name': file,
+              'path': file_path,
+              'size': file_stat.st_size,
+              'mode': file_stat.st_mode,
+              'mtime': int(file_stat.st_mtime),
+              'is_dir': False,
+              'is_symlink': file_stat.st_mode & stat.S_IFLNK != 0,
+            }
+            if entry['is_symlink']:
+              entry['link_target'] = os.readlink(file_path)
+
+            entries.append(entry)
+          except OSError:
+            pass
+
+        for dir in dirs:
+          dir_path = os.path.join(root, dir)
+          try:
+            dir_stat = os.stat(dir_path)
+            entry = {
+              'name': dir,
+              'path': dir_path,
+              'size': dir_stat.st_size,
+              'mode': dir_stat.st_mode,
+              'mtime': int(dir_stat.st_mtime),
+              'is_dir': True,
+              'is_symlink': dir_stat.st_mode & stat.S_IFLNK != 0,
+            }
+            if entry['is_symlink']:
+              entry['link_target'] = os.readlink(dir_path)
+
+            entries.append(entry)
+          except OSError:
+            pass
+
+      self.SendResponse(msg, SUCCESS, {'entries': entries})
+    except Exception as e:
+      self.SendErrorResponse(msg, str(e))
+
+  def HandleFstatRequest(self, msg):
+    """Handle a request to get file/directory status.
+
+    Args:
+      msg: The request message.
+    """
+    payload = msg['payload']
+    path = payload.get('path')
+
+    if not os.path.isabs(path):
+      path = os.path.join('~', path)
+
+    path = os.path.expanduser(path)
+
+    try:
+      result = {'exists': os.path.exists(path)}
+
+      if result['exists']:
+        stat_info = os.stat(path)
+        result['isDir'] = os.path.isdir(path)
+        result['mode'] = stat_info.st_mode
+        result['size'] = stat_info.st_size
+        result['modTime'] = int(stat_info.st_mtime)
+        result['isSymlink'] = stat_info.st_mode & stat.S_IFLNK != 0
+
+        if result['isSymlink']:
+          result['linkTarget'] = os.readlink(path)
+
+      self.SendResponse(msg, SUCCESS, result)
+    except Exception as e:
+      self.SendErrorResponse(msg, str(e))
+
   def HandleFileDownloadRequest(self, msg):
-    params = msg['params']
-    filepath = params['filename']
+    payload = msg['payload']
+    filepath = payload['filename']
     if not os.path.isabs(filepath):
       filepath = os.path.join(os.getenv('HOME', '/tmp'), filepath)
 
@@ -871,22 +967,22 @@ class Ghost:
       with open(filepath, 'rb', encoding=None):
         pass
     except Exception as e:
-      self.SendResponse(msg, str(e))
+      self.SendErrorResponse(msg, str(e))
       return
 
-    self.SpawnGhost(self.FILE, params['sid'],
+    self.SpawnGhost(self.FILE, payload['sid'],
                     file_op=('download', filepath))
     self.SendResponse(msg, SUCCESS)
 
   def HandleFileUploadRequest(self, msg):
-    params = msg['params']
+    payload = msg['payload']
 
     # Resolve upload filepath
-    filename = params['filename']
+    filename = payload['filename']
     dest_path = filename
 
     # If dest is specified, use it first
-    dest_path = params.get('dest', '')
+    dest_path = payload.get('dest', '')
     if dest_path:
       if not os.path.isabs(dest_path):
         dest_path = os.path.join(os.getenv('HOME', '/tmp'), dest_path)
@@ -897,8 +993,8 @@ class Ghost:
       target_dir = os.getenv('HOME', '/tmp')
 
       # Terminal session ID found, upload to it's current working directory
-      if 'terminal_sid' in params:
-        pid = self._terminal_sid_to_pid.get(params['terminal_sid'], None)
+      if 'terminal_sid' in payload:
+        pid = self._terminal_sid_to_pid.get(payload['terminal_sid'], None)
         if pid:
           try:
             target_dir = self.GetProcessWorkingDirectory(pid)
@@ -916,28 +1012,32 @@ class Ghost:
       with open(dest_path, 'wb', encoding=None):
         pass
     except Exception as e:
-      self.SendResponse(msg, str(e))
+      self.SendErrorResponse(msg, str(e))
       return
 
     # If not check_only, spawn FILE mode ghost agent to handle upload
-    if not params.get('check_only', False):
-      self.SpawnGhost(self.FILE, params['sid'],
-                      file_op=('upload', dest_path, params.get('perm', None)))
+    if not payload.get('check_only', False):
+      self.SpawnGhost(self.FILE, payload['sid'],
+                      file_op=('upload', dest_path, payload.get('perm', None)))
     self.SendResponse(msg, SUCCESS)
 
   def HandleRequest(self, msg):
     command = msg['name']
-    params = msg['params']
+    payload = msg['payload']
 
     if command == 'upgrade':
       self.Upgrade()
     elif command == 'terminal':
-      self.SpawnGhost(self.TERMINAL, params['sid'],
-                      tty_device=params['tty_device'])
+      self.SpawnGhost(self.TERMINAL, payload['sid'],
+                      tty_device=payload['tty_device'])
       self.SendResponse(msg, SUCCESS)
     elif command == 'shell':
-      self.SpawnGhost(self.SHELL, params['sid'], command=params['command'])
+      self.SpawnGhost(self.SHELL, payload['sid'], command=payload['command'])
       self.SendResponse(msg, SUCCESS)
+    elif command == 'list_tree':
+      self.HandleListTreeRequest(msg)
+    elif command == 'fstat':
+      self.HandleFstatRequest(msg)
     elif command == 'file_download':
       self.HandleFileDownloadRequest(msg)
     elif command == 'clear_to_download':
@@ -945,9 +1045,9 @@ class Ghost:
     elif command == 'file_upload':
       self.HandleFileUploadRequest(msg)
     elif command == 'forward':
-      self.SpawnGhost(self.FORWARD, params['sid'],
-                      host=params.get('host', _DEFAULT_FORWARD_HOST),
-                      port=params['port'])
+      self.SpawnGhost(self.FORWARD, payload['sid'],
+                      host=payload.get('host', _DEFAULT_FORWARD_HOST),
+                      port=payload['port'])
       self.SendResponse(msg, SUCCESS)
 
   def HandleResponse(self, response):
@@ -984,7 +1084,7 @@ class Ghost:
 
       if 'name' in msg:
         self.HandleRequest(msg)
-      elif 'response' in msg:
+      elif 'status' in msg:
         self.HandleResponse(msg)
       else:  # Ingnore mal-formed message.
         logging.error('mal-formed JSON request, ignored')
@@ -1056,10 +1156,10 @@ class Ghost:
           self._reset.set()
           raise RuntimeError('Register request timeout')
 
-        self._register_status = response['response']
-        if response['response'] != SUCCESS:
+        self._register_status = response['status']
+        if response['status'] != SUCCESS:
           self._reset.set()
-          raise RuntimeError('Register: ' + response['response'])
+          raise RuntimeError('Register: ' + response['status'])
 
         logging.info('Registered with Overlord at %s:%d', *non_local['addr'])
         self._connected_addr = non_local['addr']

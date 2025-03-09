@@ -123,12 +123,14 @@ def MakeRequestUrl(state, url):
       url if url.startswith('/') else '/' + url)
 
 
-def UrlOpen(state, url):
+def UrlOpen(state, url, headers=[]):
   """Open URL with proper authentication headers."""
   full_url = MakeRequestUrl(state, url)
   request = urllib.request.Request(full_url)
   request.add_header('User-Agent', _USER_AGENT)
   request.add_header(*JWTAuthHeader(state.jwt_token))
+  for header in headers:
+    request.add_header(*header)
   return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
                                 context=state.SSLContext())
 
@@ -177,10 +179,14 @@ def JWTAuthHeader(token):
 
 def GetTerminalSize():
   """Retrieve terminal window size."""
-  ws = struct.pack('HHHH', 0, 0, 0, 0)
-  ws = fcntl.ioctl(0, termios.TIOCGWINSZ, ws)
-  lines, columns, unused_x, unused_y = struct.unpack('HHHH', ws)
-  return lines, columns
+  try:
+    ws = struct.pack('HHHH', 0, 0, 0, 0)
+    ws = fcntl.ioctl(0, termios.TIOCGWINSZ, ws)
+    lines, columns, unused_x, unused_y = struct.unpack('HHHH', ws)
+    return lines, columns
+  except (IOError, struct.error, ValueError):
+    # Default values if we can't get the terminal size
+    return 24, 80
 
 
 class ProgressBar:
@@ -1099,6 +1105,50 @@ class OverlordCliClient:
     if self._state.ssh_pid is not None:
       KillGraceful(self._state.ssh_pid)
 
+  # FileEntry class to represent file entries
+  class FileEntry:
+    """Class to represent a file entry with its metadata."""
+
+    def __init__(self, path, perm=0o644, is_symlink=False, link_target='', is_dir=False):
+      self.path = path
+      self.perm = perm
+      self.is_symlink = is_symlink
+      self.link_target = link_target
+      self.is_dir = is_dir
+
+    @property
+    def name(self):
+      return os.path.basename(self.path.rstrip('/'))
+
+    @property
+    def ftype(self):
+      if self.is_dir:
+        return 'd'
+      return 'l' if self.is_symlink else 'f'
+
+  def _SizeToHuman(self, size_in_bytes):
+    """Convert size in bytes to human readable format.
+
+    Args:
+      size_in_bytes: Size in bytes.
+
+    Returns:
+      Human readable string representation of the size.
+    """
+    if size_in_bytes < 1024:
+      unit = 'B'
+      value = size_in_bytes
+    elif size_in_bytes < 1024 ** 2:
+      unit = 'KiB'
+      value = size_in_bytes / 1024
+    elif size_in_bytes < 1024 ** 3:
+      unit = 'MiB'
+      value = size_in_bytes / (1024 ** 2)
+    elif size_in_bytes < 1024 ** 4:
+      unit = 'GiB'
+      value = size_in_bytes / (1024 ** 3)
+    return '%6.1f %3s' % (value, unit)
+
   def _FilterClients(self, clients, prop_filters, mid=None):
     def _ClientPropertiesMatch(client, key, regex):
       try:
@@ -1118,6 +1168,7 @@ class OverlordCliClient:
       if client:
         return [client]
       clients = [c for c in clients if c['mid'].startswith(mid)]
+
     return clients
 
   @Command('ls', 'list clients', [
@@ -1206,19 +1257,209 @@ class OverlordCliClient:
       else:
         raise
 
-  def _RemoteDirExists(self, path):
-    return ast.literal_eval(self.CheckOutput(
-      'stat %s >/dev/null 2>&1 && echo True || echo False' % path))
+  def _LsTree(self, path):
+    """Get a recursive directory listing using the Overlord API.
 
-  def _RemoteGetPathType(self, path):
-    return self.CheckOutput('stat \'%s\' --printf \'%%F\' '
-                            '2>/dev/null' % path).strip()
+    This method uses the Overlord API to get a directory listing recursively,
+    including all subdirectories and files, similar to os.walk.
+
+    Args:
+      path: The path to list.
+
+    Returns:
+      A list of FileEntry objects representing all files and directories.
+
+    Raises:
+      RuntimeError: If the API call fails.
+    """
+    url = ('/api/agent/lstree/%s?path=%s&token=%s' %
+           (urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(path),
+            urllib.parse.quote(self._state.jwt_token)))
+    try:
+      response = UrlOpen(self._state, url)
+      data = json.loads(response.read().decode('utf-8'))
+
+      entries_data = data['entries']
+
+      entries = []
+      for entry in entries_data:
+        try:
+          perm = entry.get('mode', 0o644)
+        except (ValueError, TypeError):
+          perm = 0o644
+
+        is_dir = entry.get('is_dir', False)
+        file_path = entry.get('path', '')
+
+        # Add trailing slash to directories for consistency
+        if is_dir and not file_path.endswith('/'):
+          file_path += '/'
+
+        is_symlink = entry.get('is_symlink', False)
+        link_target = entry.get('link_target', '')
+
+        entries.append(self.FileEntry(
+            path=file_path,
+            perm=perm,
+            is_symlink=is_symlink,
+            link_target=link_target,
+            is_dir=is_dir
+        ))
+
+      return entries
+    except urllib.error.HTTPError as e:
+      try:
+        error_data = json.loads(e.read().decode('utf-8'))
+        msg = error_data.get('error', 'unknown error')
+      except (ValueError, AttributeError):
+        msg = str(e)
+      raise RuntimeError('lstree: %s' % msg) from None
+
+  def _Fstat(self, path):
+    """Get file or directory status using the Overlord API.
+
+    Args:
+      path: The path to get status for.
+
+    Returns:
+      A dictionary containing file/directory status information.
+
+    Raises:
+      RuntimeError: If the API call fails.
+    """
+    # Ensure all parameters are strings before quoting
+    mid = str(self._selected_mid) if self._selected_mid is not None else ""
+    path_str = str(path) if path is not None else ""
+    token = ""
+
+    if self._state is not None and hasattr(self._state, 'jwt_token') and self._state.jwt_token is not None:
+        token = str(self._state.jwt_token)
+
+    url = ('/api/agent/fstat/%s?path=%s&token=%s' %
+           (urllib.parse.quote(mid),
+            urllib.parse.quote(path_str),
+            urllib.parse.quote(token)))
+    try:
+      response = UrlOpen(self._state, url)
+      data = json.loads(response.read().decode('utf-8'))
+      return data
+    except urllib.error.HTTPError as e:
+      try:
+        error_data = json.loads(e.read().decode('utf-8'))
+        msg = error_data.get('error', 'unknown error')
+      except (ValueError, AttributeError):
+        msg = str(e)
+      raise RuntimeError('fstat failed: %s' % msg)
+
+  @AutoRetry('pull', _RETRY_TIMES)
+  def _PullSingle(self, entry, dst):
+    """Pull a single file or symlink.
+
+    Args:
+      entry: A FileEntry object representing the file to pull.
+      dst: The destination path.
+    """
+    try:
+      os.makedirs(os.path.dirname(dst))
+    except Exception:
+      pass
+
+    # Remote file is a link
+    if entry.is_symlink:
+      pbar = ProgressBar(entry.name)
+      if os.path.exists(dst):
+        os.remove(dst)
+      os.symlink(entry.link_target, dst)
+      pbar.End()
+      return
+
+    url = ('/api/agent/download/%s?filename=%s' %
+           (urllib.parse.quote(self._selected_mid), urllib.parse.quote(entry.path)))
+    try:
+      h = UrlOpen(self._state, url)
+    except urllib.error.HTTPError as e:
+      msg = json.loads(e.read()).get('error', 'unknown error')
+      raise RuntimeError('pull: %s' % msg) from None
+    except KeyboardInterrupt:
+      return
+
+    pbar = ProgressBar(entry.name)
+    with open(dst, 'wb') as f:
+      os.fchmod(f.fileno(), entry.perm)
+      total_size = int(h.headers.get('Content-Length'))
+      downloaded_size = 0
+
+      while True:
+        data = h.read(_BUFSIZ)
+        if not data:
+          break
+        downloaded_size += len(data)
+        pbar.SetProgress(downloaded_size * 100 / total_size,
+                         downloaded_size)
+        f.write(data)
+    pbar.End()
+
+  @Command('pull', 'pull a file or directory from remote', [
+      Arg('src', metavar='SOURCE'),
+      Arg('dst', metavar='DESTINATION', default='.', nargs='?')])
+  def Pull(self, args):
+    self.CheckClient()
+
+    # Get directory listing using the API
+    try:
+      entries = self._LsTree(args.src)
+    except RuntimeError as e:
+      raise RuntimeError(f"pull: {str(e)}")
+
+    if args.dst == '.':
+      args.dst = os.path.basename(args.src)
+
+    args.dst = os.path.abspath(args.dst)
+
+    # Since the entries are in absolute path. We need to find the common prefix
+    # with args.src
+    common_prefix = os.path.commonpath([entry.path for entry in entries])
+
+    if not os.path.isabs(common_prefix):
+      raise RuntimeError(f"common_prefix is not absolute: {common_prefix}")
+
+    while os.path.basename(common_prefix) != os.path.basename(args.src):
+      common_prefix = os.path.dirname(common_prefix)
+      if common_prefix == '/':
+        break
+
+    pull_spec = []
+    for entry in entries:
+      # If dst path exists, the dst path should be dst(dir) + rest of the path
+      # w/o common prefix
+      if os.path.exists(args.dst):
+        rel_path = os.path.relpath(entry.path, common_prefix)
+        dst = os.path.join(args.dst, os.path.basename(common_prefix))
+        if rel_path != '.':
+          dst = os.path.join(dst, rel_path)
+      else:
+        # Otherwise, the dst path should be dst + rest of the path w/ common
+        # prefix
+        rel_path = os.path.relpath(entry.path, common_prefix)
+        if rel_path == '.':
+          dst = args.dst
+        else:
+          dst = os.path.join(args.dst, rel_path)
+
+      pull_spec.append((entry, dst))
+
+    for spec in pull_spec:
+      entry, dst = spec
+      if entry.is_dir:
+        os.makedirs(dst, exist_ok=True)
+      else:
+        self._PullSingle(entry, dst)
 
   @AutoRetry('push', _RETRY_TIMES)
-  def _PushSingleFile(self, src, dst):
+  def _PushSingle(self, src, dst):
     src_base = os.path.basename(src)
 
-    # Local file is a link
     if os.path.islink(src):
       pbar = ProgressBar(src_base)
       link_path = os.readlink(src)
@@ -1235,11 +1476,6 @@ class OverlordCliClient:
     mode = '0%o' % (0x1FF & os.stat(src).st_mode)
     url = ('/api/agent/upload/%s?dest=%s&perm=%s' %
            (urllib.parse.quote(self._selected_mid), dst, mode))
-    try:
-      UrlOpen(self._state, url + '&filename=%s' % src_base)
-    except urllib.error.HTTPError as e:
-      msg = json.loads(e.read()).get('error', None)
-      raise RuntimeError('push: %s' % msg) from None
 
     pbar = ProgressBar(src_base)
     self._HTTPPostFile(url, src, pbar.SetProgress,
@@ -1252,40 +1488,60 @@ class OverlordCliClient:
   def Push(self, args):
     self.CheckClient()
 
-    def _push_single_target(src, dst):
+    def _Push(src, dst):
       if os.path.isdir(src):
         src = os.path.abspath(src)
         base_dir_name = os.path.basename(src)
-        dst_exists = self._RemoteDirExists(dst)
 
-        if dst_exists and self._RemoteGetPathType(dst) != 'directory':
+        # Use the API to check if the destination exists and is a directory
+        try:
+          stat_info = self._Fstat(dst)
+          dst_exists = stat_info.get('exists', False)
+          dst_is_dir = stat_info.get('is_dir', False) if dst_exists else False
+        except RuntimeError as e:
+          # Some error occurred
+          raise
+
+        if dst_exists and not dst_is_dir:
           raise RuntimeError('push: %s: Not a directory' % dst)
 
-        for subpath, unused_x, files in os.walk(src):
-          # If destination directory does not exist, we should strip the first
-          # layer of directory. For example: src_dir contains a single file 'A'
-          #
-          # push src_dir dest_dir
-          #
-          # If dest_dir exists, the resulting directory structure should be:
-          #   dest_dir/src_dir/A
-          # If dest_dir does not exist, the resulting directory structure should
-          # be:
-          #   dest_dir/A
-          dst_root = base_dir_name if dst_exists else ''
-          relpath = os.path.relpath(subpath, src)
-          for name in files:
-            self._PushSingleFile(os.path.join(subpath, name),
-                  os.path.join(dst, dst_root, relpath, name))
+        # Get all files in the source directory tree
+        entries = self._LocalLsTree(src)
+
+        # Process each file entry
+        for entry in entries:
+          # Skip directories, we only need to push files
+          if entry.is_dir:
+            continue
+
+          # Calculate the relative path from the source directory
+          rel_path = os.path.relpath(entry.path, src)
+
+          # Determine the destination path
+          if dst_exists:
+            # If destination exists, preserve the directory structure
+            dest_path = os.path.join(dst, base_dir_name, rel_path)
+          else:
+            # If destination doesn't exist, strip the top-level directory
+            dest_path = os.path.join(dst, rel_path)
+
+          # Push the file
+          self._PushSingle(entry.path, dest_path)
       else:
-        self._PushSingleFile(src, dst)
+        self._PushSingle(src, dst)
 
     if len(args.srcs) > 1:
-      dst_type = self._RemoteGetPathType(args.dst)
-      if not dst_type:
+      # Use the API to check if the destination is a directory
+      try:
+        stat_info = self._Fstat(args.dst)
+        dst_exists = stat_info.get('exists', False)
+        dst_is_dir = stat_info.get('is_dir', False)
+
+        if not dst_exists or not dst_is_dir:
+          raise RuntimeError('push: %s: Not a directory' % args.dst)
+      except RuntimeError as e:
+        # If we can't stat it, it's not a directory or doesn't exist
         raise RuntimeError('push: %s: No such file or directory' % args.dst)
-      if dst_type != 'directory':
-        raise RuntimeError('push: %s: Not a directory' % args.dst)
 
     for src in args.srcs:
       if not os.path.exists(src):
@@ -1294,92 +1550,7 @@ class OverlordCliClient:
       if not os.access(src, os.R_OK):
         raise RuntimeError('push: can not open "%s" for reading' % src)
 
-      _push_single_target(src, args.dst)
-
-  @Command('pull', 'pull a file or directory from remote', [
-      Arg('src', metavar='SOURCE'),
-      Arg('dst', metavar='DESTINATION', default='.', nargs='?')])
-  def Pull(self, args):
-    self.CheckClient()
-
-    @AutoRetry('pull', _RETRY_TIMES)
-    def _pull(src, dst, ftype, perm=0o644, link=None):
-      try:
-        os.makedirs(os.path.dirname(dst))
-      except Exception:
-        pass
-
-      src_base = os.path.basename(src)
-
-      # Remote file is a link
-      if ftype == 'l':
-        pbar = ProgressBar(src_base)
-        if os.path.exists(dst):
-          os.remove(dst)
-        os.symlink(link, dst)
-        pbar.End()
-        return
-
-      url = ('/api/agent/download/%s?filename=%s' %
-             (urllib.parse.quote(self._selected_mid), urllib.parse.quote(src)))
-      try:
-        h = UrlOpen(self._state, url)
-      except urllib.error.HTTPError as e:
-        msg = json.loads(e.read()).get('error', 'unkown error')
-        raise RuntimeError('pull: %s' % msg) from None
-      except KeyboardInterrupt:
-        return
-
-      pbar = ProgressBar(src_base)
-      with open(dst, 'wb') as f:
-        os.fchmod(f.fileno(), perm)
-        total_size = int(h.headers.get('Content-Length'))
-        downloaded_size = 0
-
-        while True:
-          data = h.read(_BUFSIZ)
-          if not data:
-            break
-          downloaded_size += len(data)
-          pbar.SetProgress(downloaded_size * 100 / total_size,
-                           downloaded_size)
-          f.write(data)
-      pbar.End()
-
-    # Use find to get a listing of all files under a root directory. The 'stat'
-    # command is used to retrieve the filename and it's filemode.
-    output = self.CheckOutput(
-        'cd $HOME; '
-        'stat "%(src)s" >/dev/null && '
-        'find "%(src)s" \'(\' -type f -o -type l \')\' '
-        '-printf \'%%m\t%%p\t%%y\t%%l\n\''
-        % {'src': args.src})
-
-    # We got error from the stat command
-    if output.startswith('stat: '):
-      sys.stderr.write(output)
-      return
-
-    entries = output.strip('\n').split('\n')
-    common_prefix = os.path.dirname(args.src)
-
-    if len(entries) == 1:
-      entry = entries[0]
-      perm, src_path, ftype, link = entry.split('\t', -1)
-      if os.path.isdir(args.dst):
-        dst = os.path.join(args.dst, os.path.basename(src_path))
-      else:
-        dst = args.dst
-      _pull(src_path, dst, ftype, int(perm, base=8), link)
-    else:
-      if not os.path.exists(args.dst):
-        common_prefix = args.src
-
-      for entry in entries:
-        perm, src_path, ftype, link = entry.split('\t', -1)
-        rel_dst = src_path[len(common_prefix):].lstrip('/')
-        _pull(src_path, os.path.join(args.dst, rel_dst), ftype,
-              int(perm, base=8), link)
+      _Push(src, args.dst)
 
   @Command('forward', 'forward remote port to local port', [
       Arg('--list', dest='list_all', action='store_true', default=False,
@@ -1467,6 +1638,80 @@ class OverlordCliClient:
       self._server.AddForward(self._selected_mid, args.remote, args.local_port,
                               pid)
 
+  def _LocalLsTree(self, path):
+    """Get a recursive directory listing of local files.
+
+    This method recursively traverses a local directory and returns FileEntry objects
+    for all files and directories found, similar to os.walk but with a unified return format.
+
+    Args:
+      path: The local path to list.
+
+    Returns:
+      A list of FileEntry objects representing all files and directories.
+
+    Raises:
+      RuntimeError: If the path doesn't exist or can't be accessed.
+    """
+    if not os.path.exists(path):
+      raise RuntimeError(f"local lstree: {path}: No such file or directory")
+
+    if not os.access(path, os.R_OK):
+      raise RuntimeError(f"local lstree: {path}: Permission denied")
+
+    results = []
+
+    # If it's a file, return a single FileEntry
+    if os.path.isfile(path):
+      stat_info = os.stat(path)
+      perm = stat_info.st_mode & 0o777
+      is_symlink = os.path.islink(path)
+      link_target = os.readlink(path) if is_symlink else ''
+
+      return [self.FileEntry(
+          path=path,
+          perm=perm,
+          is_symlink=is_symlink,
+          link_target=link_target,
+          is_dir=False
+      )]
+
+    # For directories, walk the tree
+    for root, dirs, files in os.walk(path):
+      # Add directory entries
+      for dir_name in dirs:
+        dir_path = os.path.join(root, dir_name)
+        stat_info = os.stat(dir_path)
+        perm = stat_info.st_mode & 0o777
+        is_symlink = os.path.islink(dir_path)
+        link_target = os.readlink(dir_path) if is_symlink else ''
+
+        results.append(self.FileEntry(
+            path=dir_path,
+            perm=perm,
+            is_symlink=is_symlink,
+            link_target=link_target,
+            is_dir=True
+        ))
+
+      # Add file entries
+      for file_name in files:
+        file_path = os.path.join(root, file_name)
+        stat_info = os.stat(file_path)
+        perm = stat_info.st_mode & 0o777
+        is_symlink = os.path.islink(file_path)
+        link_target = os.readlink(file_path) if is_symlink else ''
+
+        results.append(self.FileEntry(
+            path=file_path,
+            perm=perm,
+            is_symlink=is_symlink,
+            link_target=link_target,
+            is_dir=False
+        ))
+
+    return results
+
 
 def main():
   # Setup logging format
@@ -1483,7 +1728,7 @@ def main():
   except KeyboardInterrupt:
     print('Ctrl-C received, abort')
   except Exception as e:
-    print(f'error: {e}')
+    print(f'error: {str(e)}')
 
 
 if __name__ == '__main__':
