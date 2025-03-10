@@ -143,7 +143,7 @@ struct DashboardView: View {
             setupServices()
 
             // Check if the app was in background and restart all TCP servers if needed
-            if OverlordAppIOS.wasInBackground {
+            if OverlordDashboardApp.wasInBackground {
                 print("DashboardView: App was in background, restarting all TCP servers")
                 // Restart all TCP servers
                 portForwardViewModel.restartAllTCPServers()

@@ -25,12 +25,12 @@ xcpretty:
 # Build the project
 build:
 	@echo "Building project..."
-	xcodebuild -scheme app-ios -sdk iphonesimulator -configuration Debug build
+	xcodebuild -scheme "Overlord Dashboard" -sdk iphonesimulator -configuration Debug build
 
 # Clean the project
 clean:
 	@echo "Cleaning project..."
-	xcodebuild -scheme app-ios clean
+	xcodebuild -scheme "Overlord Dashboard" clean
 	rm -rf build/
 	rm -rf DerivedData/
 
@@ -51,11 +51,11 @@ test: test-ios
 test-ios: xcpretty
 	@echo "Running tests on iOS simulator..."
 	@if command -v xcpretty >/dev/null; then \
-		xcodebuild test -scheme app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests | xcpretty || \
+		xcodebuild test -scheme "Overlord Dashboard" -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests | xcpretty || \
 		echo "Error: Could not run tests on iPhone 16 Pro Max simulator. Please ensure it is available."; \
 	else \
 		echo "xcpretty not available, running with standard output..."; \
-		xcodebuild test -scheme app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests || \
+		xcodebuild test -scheme "Overlord Dashboard" -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests || \
 		echo "Error: Could not run tests on iPhone 16 Pro Max simulator. Please ensure it is available."; \
 	fi
 
@@ -63,11 +63,11 @@ test-ios: xcpretty
 test-ui: xcpretty
 	@echo "Running UI tests on iOS simulator..."
 	@if command -v xcpretty >/dev/null; then \
-		xcodebuild test -scheme app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosUITests | xcpretty || \
+		xcodebuild test -scheme "Overlord Dashboard" -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosUITests | xcpretty || \
 		echo "Error: Could not run UI tests on iPhone 16 Pro Max simulator. Please ensure it is available."; \
 	else \
 		echo "xcpretty not available, running with standard output..."; \
-		xcodebuild test -scheme app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosUITests || \
+		xcodebuild test -scheme "Overlord Dashboard" -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosUITests || \
 		echo "Error: Could not run UI tests on iPhone 16 Pro Max simulator. Please ensure it is available."; \
 	fi
 
@@ -78,4 +78,4 @@ test-all: test-ios test-ui
 # Run tests with verbose output
 test-verbose:
 	@echo "Running tests with verbose output..."
-	xcodebuild test -scheme app-ios -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests
+	xcodebuild test -scheme "Overlord Dashboard" -destination 'platform=iOS Simulator,name=iPhone 16 Pro Max' -only-testing:app-iosTests
