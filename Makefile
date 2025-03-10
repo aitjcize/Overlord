@@ -11,6 +11,7 @@ LDFLAGS=
 WEBROOT_DIR=$(CURDIR)/webroot
 DIST_APPS_DIR=$(WEBROOT_DIR)/apps
 GO_DIRS=./overlord/... ./cmd/...
+PY_FILES=$(shell find scripts -name "*.py")
 
 # Supported architectures for ghost binary
 GHOST_ARCHS=amd64 386 arm64 arm
@@ -33,6 +34,7 @@ endif
 	build build-go build-py build-apps \
 	ghost ghost-all overlordd \
 	go-fmt go-lint \
+	py-lint py-format \
 	clean clean-apps \
 	install
 
@@ -109,6 +111,14 @@ go-lint:
 	@$(GO) install golang.org/x/lint/golint@latest
 	$(call cmd_msg,LINT,$(GO_DIRS))
 	@golint -set_exit_status $(GO_DIRS)
+
+py-lint:
+	$(call cmd_msg,PYLINT,$(PY_FILES))
+	@pylint --rcfile=.pylintrc $(PY_FILES)
+
+py-format:
+	$(call cmd_msg,YAPF,$(PY_FILES))
+	@yapf -i $(PY_FILES)
 
 # Pattern rule for building individual apps
 $(DIST_APPS_DIR)/%:

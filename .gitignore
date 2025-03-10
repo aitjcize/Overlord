@@ -1,5 +1,5 @@
 bin/ghost
-bin/ghost.*.linux*
+bin/ghost.linux*
 bin/ghost.py*
 bin/overlordd
 bin/*.pybin*
@@ -12,3 +12,5 @@ node_modules
 dist
 .swiftpm
 xcuserdata
+__pycache__
+*.pyc

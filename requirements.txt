@@ -1,3 +1,11 @@
-git+https://github.com/aitjcize/WebSocket-for-Python.git
+astroid==3.3.9
 bcrypt==4.3.0
+dill==0.3.9
+isort==6.0.1
+mccabe==0.7.0
+platformdirs==4.3.6
+pylint==3.3.5
 PyYAML==6.0.2
+tomlkit==0.13.2
+ws4py @ git+https://github.com/aitjcize/WebSocket-for-Python.git
+yapf==0.43.0
