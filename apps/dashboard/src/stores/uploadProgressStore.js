@@ -42,87 +42,53 @@ export const useUploadProgressStore = defineStore("uploadProgress", () => {
       query += "&dest=" + dest;
     }
 
-    // Function to handle the actual file upload
-    const postFile = (file) => {
-      const id = randomID();
-      const formData = new FormData();
-      formData.append("file", file);
+    const id = randomID();
+    const formData = new FormData();
+    formData.append("file", file);
 
-      // Add record to the list
-      addRecord({ filename: file.name, id: id });
+    // Add record to the list
+    addRecord({ filename: file.name, id: id });
 
-      // Create an axios instance for the upload
-      axios
-        .post(uploadRequestPath + query, formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-          onUploadProgress: (progressEvent) => {
-            if (progressEvent.total) {
-              const percentComplete = Math.round(
-                (progressEvent.loaded * 100) / progressEvent.total,
-              );
-              const progressBar = document.getElementById(id);
-              if (progressBar) {
-                progressBar.style.width = percentComplete + "%";
-                const percentElement = progressBar.querySelector(".percent");
-                if (percentElement) {
-                  percentElement.textContent = percentComplete + "%";
-                }
+    // Create an axios instance for the upload
+    axios
+      .post(uploadRequestPath + query, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentComplete = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total,
+            );
+            const progressBar = document.getElementById(id);
+            if (progressBar) {
+              progressBar.style.width = percentComplete + "%";
+              const percentElement = progressBar.querySelector(".percent");
+              if (percentElement) {
+                percentElement.textContent = percentComplete + "%";
               }
             }
-          },
-        })
-        .then(() => {
-          const progressBar = document.getElementById(id);
-          if (progressBar) {
-            progressBar.style.width = "100%";
           }
-
-          // Display the progress bar for 1 more second after completion
-          setTimeout(() => {
-            removeRecord(id);
-          }, 1000);
-
-          // Execute done callback if provided
-          if (done) {
-            done();
-          }
-        })
-        .catch((error) => {
-          let errorMessage = "Upload failed";
-
-          // Extract error message from response if available
-          if (error.response && error.response.data) {
-            errorMessage = error.response.data.error || errorMessage;
-          }
-
-          addRecord({
-            error: true,
-            filename: file.name,
-            id: id,
-            message: errorMessage,
-          });
-
-          // Remove error message after a delay
-          setTimeout(() => {
-            removeRecord(id);
-          }, 5000);
-        });
-    };
-
-    // First check if the upload is allowed
-    axios
-      .get(
-        `${uploadRequestPath}${query}&filename=${encodeURIComponent(file.name)}`,
-      )
+        },
+      })
       .then(() => {
-        // Upload the file if the check passes
-        postFile(file);
+        const progressBar = document.getElementById(id);
+        if (progressBar) {
+          progressBar.style.width = "100%";
+        }
+
+        // Display the progress bar for 1 more second after completion
+        setTimeout(() => {
+          removeRecord(id);
+        }, 1000);
+
+        // Execute done callback if provided
+        if (done) {
+          done();
+        }
       })
       .catch((error) => {
-        const id = randomID();
-        let errorMessage = "Upload check failed";
+        let errorMessage = "Upload failed";
 
         // Extract error message from response if available
         if (error.response && error.response.data) {

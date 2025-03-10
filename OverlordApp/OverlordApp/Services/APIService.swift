@@ -12,7 +12,7 @@ class APIService {
     }
     
     func getClients(token: String) -> AnyPublisher<[Client], Error> {
-        let url = URL(string: "\(APIService.baseURL)/agents/list")!
+        let url = URL(string: "\(APIService.baseURL)/agents")!
         var request = URLRequest(url: url)
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -23,7 +23,7 @@ class APIService {
     }
     
     func getClientProperties(mid: String, token: String) -> AnyPublisher<[String: String], Error> {
-        let url = URL(string: "\(APIService.baseURL)/agent/properties/\(mid)")!
+        let url = URL(string: "\(APIService.baseURL)/agents/\(mid)/properties")!
         var request = URLRequest(url: url)
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -34,7 +34,7 @@ class APIService {
     }
     
     func downloadFile(sid: String, token: String) {
-        let url = URL(string: "\(APIService.baseURL)/file/download/\(sid)?token=\(token)")!
+        let url = URL(string: "\(APIService.baseURL)/sessions/\(sid)/file?token=\(token)")!
         UIApplication.shared.open(url)
     }
 } 

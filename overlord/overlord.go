@@ -712,7 +712,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// File download request handler.
 	// Handler for file download request, the filename target machine is
 	// specified in the request URL.
-	AgentDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
+	AgentFileDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		mid := vars["mid"]
 
@@ -768,7 +768,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// This handler deal with requests that are initiated by the client. We
 	// simply check if the session id exists in the download client list, than
 	// start to download the file if it does.
-	FileDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
+	SessionFileDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		sid := vars["sid"]
 
@@ -785,85 +785,220 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		serveFileHTTP(w, c)
 	}
 
-	// File upload request handler.
-	AgentUploadHandler := func(w http.ResponseWriter, r *http.Request) {
-		var ok bool
-		var err error
-		var agent *ConnServer
-		var errMsg string
+	// Port forwarding handler
+	AgentModeForwardHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("ModeForward request from %s\n", r.RemoteAddr)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 
-		defer func() {
-			if errMsg != "" {
-				http.Error(w, fmt.Sprintf(`{"error": "%s"}`, errMsg),
-					http.StatusBadRequest)
-			}
-		}()
+		var host string = defaultForwardHost
+		var port int
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
-		ovl.agentsMu.Lock()
-		if agent, ok = ovl.agents[mid]; !ok {
-			ovl.agentsMu.Unlock()
-			errMsg = fmt.Sprintf("No client with mid %s", mid)
-			return
-		}
-		ovl.agentsMu.Unlock()
-
-		// Target terminal session ID
-		var terminalSids []string
-		if terminalSids, ok = r.URL.Query()["terminal_sid"]; !ok {
-			terminalSids = []string{""}
-		}
-		sid := uuid.NewV4().String()
-
-		// Upload destination
-		var dsts []string
-		if dsts, ok = r.URL.Query()["dest"]; !ok {
-			dsts = []string{""}
+		// default host to 127.0.0.1 if not specified
+		if _host, ok := r.URL.Query()["host"]; ok {
+			host = _host[0]
 		}
 
-		// Upload destination
-		var perm int64
-		if perms, ok := r.URL.Query()["perm"]; ok {
-			if perm, err = strconv.ParseInt(perms[0], 8, 32); err != nil {
-				errMsg = err.Error()
+		if _port, ok := r.URL.Query()["port"]; ok {
+			if port, err = strconv.Atoi(_port[0]); err != nil {
+				WebSocketSendError(conn, "invalid port")
 				return
 			}
+		} else {
+			WebSocketSendError(conn, "no port specified")
+			return
 		}
 
-		// Check only
-		if r.Method == "GET" {
-			// If we are checking only, we need a extra filename parameters since
-			// we don't have a form to supply the filename.
-			var filenames []string
-			if filenames, ok = r.URL.Query()["filename"]; !ok {
-				filenames = []string{""}
+		ovl.agentsMu.Lock()
+		if agent, ok := ovl.agents[mid]; ok {
+			ovl.agentsMu.Unlock()
+			wc := newWebsocketContext(conn)
+			ovl.AddWebsocketContext(wc)
+			agent.Command <- SpawnModeForwarderCmd{wc.Sid, host, port}
+			if res := <-agent.Response; res.Status == Failed {
+				WebSocketSendError(conn, string(res.Payload))
 			}
+		} else {
+			ovl.agentsMu.Unlock()
+			WebSocketSendError(conn, "No client with mid "+mid)
+		}
+	}
 
-			agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
-				filenames[0], dsts[0], int(perm), true}
+	// File listing and stat operations handler
+	AgentFsHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 
-			res := <-agent.Response
-			if res.Status == Failed {
-				errMsg = string(res.Payload)
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		op := r.URL.Query().Get("op")
+		if op == "" {
+			op = "lstree" // Default to listing
+		}
+
+		if op == "lstree" {
+			agent.Command <- ListTreeCmd{Path: path}
+		} else if op == "fstat" {
+			agent.Command <- FstatCmd{Path: path}
+		} else {
+			http.Error(w, fmt.Sprintf(`{"error": "Unknown operation %s"}`, op), http.StatusBadRequest)
+			return
+		}
+
+		res := <-agent.Response
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			return
+		}
+		w.Write(res.Payload)
+	}
+
+	// Symlink creation handler
+	AgentFsSymlinkHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		target := r.URL.Query().Get("target")
+		dest := r.URL.Query().Get("dest")
+
+		if target == "" {
+			http.Error(w, `{"error": "target parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+		if dest == "" {
+			http.Error(w, `{"error": "dest parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		agent.Command <- CreateSymlinkCmd{Target: target, Dest: dest}
+		res := <-agent.Response
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			return
+		}
+		w.Write(res.Payload)
+	}
+
+	// Directory creation handler
+	AgentFsDirHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		perm := 0755 // Default permission
+		if permStr := r.URL.Query().Get("perm"); permStr != "" {
+			var err error
+			perm64, err := strconv.ParseInt(permStr, 10, 32)
+			if err != nil {
+				http.Error(w, `{"error": "invalid perm parameter"}`, http.StatusBadRequest)
+				return
+			}
+			perm = int(perm64)
+		}
+
+		agent.Command <- MkdirCmd{Path: path, Perm: perm}
+		res := <-agent.Response
+		if res.Status == Failed {
+			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			return
+		}
+		w.Write(res.Payload)
+	}
+
+	// File upload handler
+	AgentFileUploadHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		vars := mux.Vars(r)
+		mid := vars["mid"]
+
+		ovl.agentsMu.Lock()
+		agent, ok := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+		if !ok {
+			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			return
+		}
+
+		var terminalSid string
+		if terminalSids, ok := r.URL.Query()["terminal_sid"]; ok {
+			terminalSid = terminalSids[0]
+		}
+
+		var dest string
+		if dests, ok := r.URL.Query()["dest"]; ok {
+			dest = dests[0]
+		}
+
+		var perm int64 = 0644 // Default permission
+		if perms, ok := r.URL.Query()["perm"]; ok {
+			var err error
+			perm, err = strconv.ParseInt(perms[0], 8, 32)
+			if err != nil {
+				http.Error(w, `{"error": "invalid permission format"}`, http.StatusBadRequest)
 				return
 			}
 		}
 
 		mr, err := r.MultipartReader()
 		if err != nil {
-			errMsg = err.Error()
+			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusBadRequest)
 			return
 		}
 
 		p, err := mr.NextPart()
 		if err != nil {
-			errMsg = err.Error()
+			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusBadRequest)
 			return
 		}
 
-		agent.Command <- SpawnFileCmd{sid, terminalSids[0], "upload",
-			p.FileName(), dsts[0], int(perm), false}
+		sid := uuid.NewV4().String()
+		agent.Command <- SpawnFileCmd{sid, terminalSid, "upload",
+			p.FileName(), dest, int(perm), false}
 
 		res := <-agent.Response
 		if res.Status == Failed {
@@ -894,137 +1029,10 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		c.StopListen()
 
 		if err != nil {
-			errMsg = err.Error()
+			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusInternalServerError)
 			return
 		}
 		w.Write([]byte(`{"status": "success"}`))
-		return
-	}
-
-	// Port forwarding request handler
-	AgentModeForwardHandler := func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("ModeForward request from %s\n", r.RemoteAddr)
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		var host string = defaultForwardHost
-		var port int
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-		// default thost to 127.0.0.1 if not specified
-		if _host, ok := r.URL.Query()["host"]; ok {
-			host = _host[0]
-		}
-
-		if _port, ok := r.URL.Query()["port"]; ok {
-			if port, err = strconv.Atoi(_port[0]); err != nil {
-				WebSocketSendError(conn, "invalid port")
-				return
-			}
-		} else {
-			WebSocketSendError(conn, "no port specified")
-			return
-		}
-
-		ovl.agentsMu.Lock()
-		if agent, ok := ovl.agents[mid]; ok {
-			ovl.agentsMu.Unlock()
-			wc := newWebsocketContext(conn)
-			ovl.AddWebsocketContext(wc)
-			agent.Command <- SpawnModeForwarderCmd{wc.Sid, host, port}
-			if res := <-agent.Response; res.Status == Failed {
-				WebSocketSendError(conn, string(res.Payload))
-			}
-		} else {
-			ovl.agentsMu.Unlock()
-			WebSocketSendError(conn, "No client with mid "+mid)
-		}
-	}
-
-	// File stat handler
-	AgentFilesystemHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-
-		// Get operation type from query parameters
-		op := r.URL.Query().Get("op")
-		if op == "" {
-			http.Error(w, `{"error": "op parameter is required"}`, http.StatusBadRequest)
-			return
-		}
-
-		ovl.agentsMu.Lock()
-		agent, ok := ovl.agents[mid]
-		ovl.agentsMu.Unlock()
-		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
-			return
-		}
-
-		switch op {
-		case "lstree":
-			path := r.URL.Query().Get("path")
-			if path == "" {
-				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
-				return
-			}
-			agent.Command <- ListTreeCmd{Path: path}
-
-		case "fstat":
-			path := r.URL.Query().Get("path")
-			if path == "" {
-				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
-				return
-			}
-			agent.Command <- FstatCmd{Path: path}
-
-		case "symlink":
-			target := r.URL.Query().Get("target")
-			if target == "" {
-				http.Error(w, `{"error": "target parameter is required"}`, http.StatusBadRequest)
-				return
-			}
-			dest := r.URL.Query().Get("dest")
-			if dest == "" {
-				http.Error(w, `{"error": "dest parameter is required"}`, http.StatusBadRequest)
-				return
-			}
-			agent.Command <- CreateSymlinkCmd{Target: target, Dest: dest}
-
-		case "mkdir":
-			path := r.URL.Query().Get("path")
-			if path == "" {
-				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
-				return
-			}
-			perm := r.URL.Query().Get("perm")
-			if perm == "" {
-				perm = "0755" // Default permission
-			}
-			permInt, err := strconv.ParseInt(perm, 8, 32)
-			if err != nil {
-				http.Error(w, `{"error": "invalid permission format"}`, http.StatusBadRequest)
-				return
-			}
-			agent.Command <- MkdirCmd{Path: path, Perm: int(permInt)}
-
-		default:
-			http.Error(w, fmt.Sprintf(`{"error": "Unknown operation %s"}`, op), http.StatusBadRequest)
-			return
-		}
-
-		res := <-agent.Response
-		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusInternalServerError)
-			return
-		}
-		w.Write(res.Payload)
 	}
 
 	// WebSocket monitor endpoint
@@ -1071,29 +1079,39 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// Add login endpoint for JWT authentication (public)
 	apiRouter.HandleFunc("/api/auth/login", jwtAuth.Login).Methods("POST")
 
-	// Protected endpoints
-	apiRouter.HandleFunc("/api/apps/list", AppsListHandler)
-	apiRouter.HandleFunc("/api/agents/list", AgentsListHandler)
-	apiRouter.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler)
-	apiRouter.HandleFunc("/api/logcats/list", LogcatsListHandler)
+	// Apps
+	apiRouter.HandleFunc("/api/apps", AppsListHandler).Methods("GET")
 
-	// Logcat methods
-	apiRouter.HandleFunc("/api/log/{mid}/{sid}", LogcatHandler)
+	// Agents
+	apiRouter.HandleFunc("/api/agents", AgentsListHandler).Methods("GET")
+	apiRouter.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler).Methods("POST")
+	apiRouter.HandleFunc("/api/agents/{mid}/properties", AgentPropertiesHandler).Methods("GET")
 
-	// Agent methods
-	apiRouter.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
-	apiRouter.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
-	apiRouter.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
-	apiRouter.HandleFunc("/api/agent/filesystem/{mid}", AgentFilesystemHandler)
-	apiRouter.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
-	apiRouter.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
-	apiRouter.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)
+	// File transfer operations
+	apiRouter.HandleFunc("/api/agents/{mid}/file", AgentFileDownloadHandler).Methods("GET")
+	apiRouter.HandleFunc("/api/agents/{mid}/file", AgentFileUploadHandler).Methods("POST")
 
-	// File methods
-	apiRouter.HandleFunc("/api/file/download/{sid}", FileDownloadHandler)
+	// Filesystem operations
+	apiRouter.HandleFunc("/api/agents/{mid}/fs", AgentFsHandler).Methods("GET")
+	apiRouter.HandleFunc("/api/agents/{mid}/fs/symlinks", AgentFsSymlinkHandler).Methods("POST")
+	apiRouter.HandleFunc("/api/agents/{mid}/fs/directories", AgentFsDirHandler).Methods("POST")
+
+	// Terminal/Shell
+	apiRouter.HandleFunc("/api/agents/{mid}/tty", AgentTtyHandler).Methods("GET")
+	apiRouter.HandleFunc("/api/agents/{mid}/shell", ModeShellHandler).Methods("GET")
+
+	// Port forwarding
+	apiRouter.HandleFunc("/api/agents/{mid}/forward", AgentModeForwardHandler).Methods("GET")
+
+	// Logcat
+	apiRouter.HandleFunc("/api/logcats", LogcatsListHandler).Methods("GET")
+	apiRouter.HandleFunc("/api/logcats/{mid}/{sid}", LogcatHandler).Methods("GET")
 
 	// Monitor
-	apiRouter.HandleFunc("/api/monitor", MonitorHandler)
+	apiRouter.HandleFunc("/api/monitor", MonitorHandler).Methods("GET")
+
+	// File download by session ID (internal endpoint)
+	apiRouter.HandleFunc("/api/sessions/{sid}/file", SessionFileDownloadHandler).Methods("GET")
 
 	// Create a middleware that conditionally applies authentication based on the path
 	conditionalAuthMiddleware := func(next http.Handler) http.Handler {

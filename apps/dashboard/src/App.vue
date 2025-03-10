@@ -99,7 +99,7 @@ const initializeDashboard = async () => {
 
     monitorService.on("file download", (sid) => {
       const token = localStorage.getItem("token");
-      const url = `${window.location.protocol}//${window.location.host}/api/file/download/${sid}?token=${token}`;
+      const url = `${window.location.protocol}//${window.location.host}/api/sessions/${sid}/file?token=${token}`;
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
       iframe.src = url;

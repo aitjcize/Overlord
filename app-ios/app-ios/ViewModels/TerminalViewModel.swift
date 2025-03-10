@@ -104,7 +104,7 @@ class TerminalViewModel: ObservableObject {
         let wsProtocol = serverAddress.hasPrefix("https") ? "wss://" : "ws://"
         let baseAddress = serverAddress.replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
-        let wsURL = URL(string: "\(wsProtocol)\(baseAddress)/api/agent/tty/\(terminal.clientId)?token=\(token)")!
+        let wsURL = URL(string: "\(wsProtocol)\(baseAddress)/api/agents/\(terminal.clientId)/tty?token=\(token)")!
 
         // Create WebSocket task
         let session = URLSession(configuration: .default)
