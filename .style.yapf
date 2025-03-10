@@ -1,0 +1,16 @@
+[style]
+based_on_style = google
+indent_width = 2
+column_limit = 80
+split_before_logical_operator = true
+dedent_closing_brackets = false
+split_before_named_assigns = true
+blank_line_before_nested_class_or_def = true
+blank_line_before_class_docstring = true
+blank_line_before_module_docstring = true
+coalesce_brackets = true
+continuation_align_style = space
+continuation_indent_width = 4
+join_multiple_lines = true
+split_before_first_argument = false
+split_complex_comprehension = false
