@@ -22,6 +22,7 @@ import select
 import signal
 import socket
 import ssl
+import stat
 import struct
 import subprocess
 import sys
@@ -884,37 +885,39 @@ class Ghost:
         for file in files:
           file_path = os.path.join(root, file)
           try:
-            file_stat = os.stat(file_path)
+            file_stat = os.lstat(file_path)
             entry = {
               'name': file,
               'path': file_path,
               'size': file_stat.st_size,
-              'mode': file_stat.st_mode,
+              'perm': file_stat.st_mode,
               'mtime': int(file_stat.st_mtime),
               'is_dir': False,
-              'is_symlink': file_stat.st_mode & stat.S_IFLNK != 0,
+              'is_symlink': stat.S_ISLNK(file_stat.st_mode),
             }
             if entry['is_symlink']:
               entry['link_target'] = os.readlink(file_path)
 
             entries.append(entry)
-          except OSError:
+          except OSError as e:
+            logging.exception(e)
             pass
 
         for dir in dirs:
           dir_path = os.path.join(root, dir)
           try:
-            dir_stat = os.stat(dir_path)
+            dir_stat = os.lstat(dir_path)
             entry = {
               'name': dir,
               'path': dir_path,
               'size': dir_stat.st_size,
-              'mode': dir_stat.st_mode,
+              'perm': dir_stat.st_mode,
               'mtime': int(dir_stat.st_mtime),
               'is_dir': True,
-              'is_symlink': dir_stat.st_mode & stat.S_IFLNK != 0,
+              'is_symlink': stat.S_ISLNK(dir_stat.st_mode),
             }
             if entry['is_symlink']:
+              entry['is_dir'] = False
               entry['link_target'] = os.readlink(dir_path)
 
             entries.append(entry)
@@ -944,14 +947,15 @@ class Ghost:
 
       if result['exists']:
         stat_info = os.stat(path)
-        result['isDir'] = os.path.isdir(path)
-        result['mode'] = stat_info.st_mode
+        result['is_dir'] = os.path.isdir(path)
+        result['perm'] = stat_info.st_mode
         result['size'] = stat_info.st_size
-        result['modTime'] = int(stat_info.st_mtime)
-        result['isSymlink'] = stat_info.st_mode & stat.S_IFLNK != 0
+        result['mod_time'] = int(stat_info.st_mtime)
+        result['is_symlink'] = stat.S_ISLNK(stat_info.st_mode)
 
-        if result['isSymlink']:
-          result['linkTarget'] = os.readlink(path)
+        if result['is_symlink']:
+          result['link_target'] = os.readlink(path)
+          result['iis_dir'] = False
 
       self.SendResponse(msg, SUCCESS, result)
     except Exception as e:
@@ -1021,7 +1025,41 @@ class Ghost:
                       file_op=('upload', dest_path, payload.get('perm', None)))
     self.SendResponse(msg, SUCCESS)
 
+  def HandleCreateSymlinkRequest(self, msg):
+    """Handle create_symlink request."""
+    payload = msg['payload']
+    target = payload['target']
+    dest = payload['dest']
+
+    try:
+      # Create parent directories if they don't exist
+      os.makedirs(os.path.dirname(dest), exist_ok=True)
+
+      # Remove existing file/link if it exists
+      if os.path.exists(dest):
+        os.remove(dest)
+
+      # Create the symlink
+      os.symlink(target, dest)
+      self.SendResponse(msg, SUCCESS)
+    except Exception as e:
+      self.SendErrorResponse(msg, str(e))
+
+  def HandleMkdirRequest(self, msg):
+    """Handle mkdir request."""
+    payload = msg['payload']
+    path = payload['path']
+    perm = payload['perm']
+
+    try:
+      os.makedirs(path, exist_ok=True)
+      os.chmod(path, perm)
+      self.SendResponse(msg, SUCCESS)
+    except Exception as e:
+      self.SendErrorResponse(msg, str(e))
+
   def HandleRequest(self, msg):
+    """Handle request from overlord."""
     command = msg['name']
     payload = msg['payload']
 
@@ -1044,6 +1082,10 @@ class Ghost:
       self.StartDownloadServer()
     elif command == 'file_upload':
       self.HandleFileUploadRequest(msg)
+    elif command == 'create_symlink':
+      self.HandleCreateSymlinkRequest(msg)
+    elif command == 'mkdir':
+      self.HandleMkdirRequest(msg)
     elif command == 'forward':
       self.SpawnGhost(self.FORWARD, payload['sid'],
                       host=payload.get('host', _DEFAULT_FORWARD_HOST),

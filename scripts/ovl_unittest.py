@@ -104,10 +104,15 @@ class PushUnittest(FileSystemTestCase):
         self.cli._PushSingle = self.PushSingle
         self.cli._LocalLsTree = self.LocalLsTree
         self.cli._Fstat = self.Fstat
+        self.cli._Mkdir = self.Mkdir
 
     def PushSingle(self, src, dst):
         """Mock function for _PushSingle."""
         self.results.append((src, dst))
+
+    def Mkdir(self, path, perm=0o755):
+        """Mock function for _Mkdir."""
+        pass
 
     def Fstat(self, path):
         """Mock function for _Fstat."""
@@ -424,6 +429,9 @@ class PullUnittest(FileSystemTestCase):
         self.cli._PullSingle = self.PullSingle
         self.cli._LsTree = self.LsTree
 
+    def tearDown(self):
+        super().tearDown()
+
     def PullSingle(self, entry, dst):
         """Mock function for _Pull."""
         self.results.append((entry.path, dst))
@@ -477,12 +485,15 @@ class PullUnittest(FileSystemTestCase):
 
     def test_pull_abs_file_to_abs_file(self):
         """Test pulling an absolute file path to an absolute file path."""
-        args = argparse.Namespace()
-        args.src = "/remote/single_file"
-        args.dst = "/absolute/local_file"
+        src = "/remote/single_file"
+        dst = "/absolute/local_file"
+        args = argparse.Namespace(src=src, dst=dst)
 
-        self.cli.Pull(args)
-        self.assertEqual(self.results, [(args.src, args.dst)])
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'):
+            self.cli.Pull(args)
+
+        self.assertEqual(self.results, [(src, dst)])
 
     def test_pull_abs_file_to_rel_file(self):
         """Test pulling an absolute file path to a relative file path."""
@@ -490,19 +501,14 @@ class PullUnittest(FileSystemTestCase):
         args.src = "/remote/single_file"
         args.dst = "local_file"
 
-        with patch(
-            "os.path.abspath",
-            lambda path: (
-                os.path.join(self.user_home, path)
-                if not path.startswith("/")
-                else path
-            ),
-        ):
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'):
             self.cli.Pull(args)
-            self.assertEqual(
-                self.results,
-                [(args.src, os.path.join(self.user_home, "local_file"))],
-            )
+
+        # The destination path should be converted to absolute
+        self.assertEqual(
+            self.results, [(args.src, os.path.join(self.user_home, args.dst))]
+        )
 
     def test_pull_rel_file_to_abs_file(self):
         """Test pulling a relative file path to an absolute file path."""
@@ -510,10 +516,14 @@ class PullUnittest(FileSystemTestCase):
         args.src = "single_file"
         args.dst = "/absolute/local_file"
 
-        self.cli.Pull(args)
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'):
+            self.cli.Pull(args)
+
+        # The source path should be converted to absolute
         self.assertEqual(
             self.results,
-            [(os.path.join(self.remote_root, "single_file"), args.dst)]
+            [(os.path.join(self.remote_root, args.src), args.dst)],
         )
 
     def test_pull_rel_file_to_rel_file(self):
@@ -522,24 +532,20 @@ class PullUnittest(FileSystemTestCase):
         args.src = "single_file"
         args.dst = "local_file"
 
-        with patch(
-            "os.path.abspath",
-            lambda path: (
-                os.path.join(self.user_home, path)
-                if not path.startswith("/")
-                else path
-            ),
-        ):
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'):
             self.cli.Pull(args)
-            self.assertEqual(
-                self.results,
-                [
-                    (
-                        os.path.join(self.remote_root, "single_file"),
-                        os.path.join(self.user_home, "local_file"),
-                    )
-                ],
-            )
+
+        # Both paths should be converted to absolute
+        self.assertEqual(
+            self.results,
+            [
+                (
+                    os.path.join(self.remote_root, args.src),
+                    os.path.join(self.user_home, args.dst),
+                )
+            ],
+        )
 
     def test_pull_abs_file_to_abs_dir_exists(self):
         """Test pulling an absolute file path to an absolute directory that exists."""
@@ -547,12 +553,16 @@ class PullUnittest(FileSystemTestCase):
         args.src = "/remote/single_file"
         args.dst = "/absolute/local_dir"
 
-        with patch("os.path.exists", lambda path: path == args.dst):
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", lambda path: path == args.dst
+        ):
             self.cli.Pull(args)
-            self.assertEqual(
-                self.results,
-                [(args.src, os.path.join(args.dst, "single_file"))],
-            )
+
+        self.assertEqual(
+            self.results,
+            [(args.src, os.path.join(args.dst, "single_file"))],
+        )
 
     def test_pull_abs_dir_to_abs_dir_not_exists(self):
         """Test pulling an absolute directory path to an absolute directory that does not exist."""
@@ -560,19 +570,27 @@ class PullUnittest(FileSystemTestCase):
         args.src = "/remote/some_dir"
         args.dst = "/absolute/local_dir"
 
-        with patch("os.path.exists", return_value=False), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", return_value=False
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (os.path.join(args.src, "a/b"), os.path.join(args.dst, "a/b")),
-                (
-                    os.path.join(args.src, "a/c/d"),
-                    os.path.join(args.dst, "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(args.src, "a/b"),
+                        os.path.join(args.dst, "a/b"),
+                    ),
+                    (
+                        os.path.join(args.src, "a/c/d"),
+                        os.path.join(args.dst, "a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_abs_dir_to_abs_dir_exists(self):
         """Test pulling an absolute directory path to an absolute directory that exists."""
@@ -580,22 +598,27 @@ class PullUnittest(FileSystemTestCase):
         args.src = "/remote/some_dir"
         args.dst = "/absolute/local_dir"
 
-        with patch("os.path.exists", lambda path: path == args.dst), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", lambda path: path == args.dst
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(args.src, "a/b"),
-                    os.path.join(args.dst, "some_dir", "a/b"),
-                ),
-                (
-                    os.path.join(args.src, "a/c/d"),
-                    os.path.join(args.dst, "some_dir", "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(args.src, "a/b"),
+                        os.path.join(args.dst, "some_dir/a/b"),
+                    ),
+                    (
+                        os.path.join(args.src, "a/c/d"),
+                        os.path.join(args.dst, "some_dir/a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_abs_dir_to_rel_dir_not_exists(self):
         """Test pulling an absolute directory path to a relative directory that does not exist."""
@@ -603,8 +626,9 @@ class PullUnittest(FileSystemTestCase):
         args.src = "/remote/some_dir"
         args.dst = "local_dir"
 
-        with patch("os.path.exists", return_value=False), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", return_value=False
         ), patch(
             "os.path.abspath",
             lambda path: (
@@ -615,17 +639,21 @@ class PullUnittest(FileSystemTestCase):
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(args.src, "a/b"),
-                    os.path.join(self.user_home, args.dst, "a/b"),
-                ),
-                (
-                    os.path.join(args.src, "a/c/d"),
-                    os.path.join(self.user_home, args.dst, "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(args.src, "a/b"),
+                        os.path.join(self.user_home, args.dst, "a/b"),
+                    ),
+                    (
+                        os.path.join(args.src, "a/c/d"),
+                        os.path.join(self.user_home, args.dst, "a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_rel_dir_to_abs_dir_not_exists(self):
         """Test pulling a relative directory path to an absolute directory that does not exist."""
@@ -633,22 +661,27 @@ class PullUnittest(FileSystemTestCase):
         args.src = "some_dir"
         args.dst = "/absolute/local_dir"
 
-        with patch("os.path.exists", return_value=False), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", return_value=False
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(self.remote_root, args.src, "a/b"),
-                    os.path.join(args.dst, "a/b"),
-                ),
-                (
-                    os.path.join(self.remote_root, args.src, "a/c/d"),
-                    os.path.join(args.dst, "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(self.remote_root, args.src, "a/b"),
+                        os.path.join(args.dst, "a/b"),
+                    ),
+                    (
+                        os.path.join(self.remote_root, args.src, "a/c/d"),
+                        os.path.join(args.dst, "a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_rel_dir_to_rel_dir_not_exists(self):
         """Test pulling a relative directory path to a relative directory that does not exist."""
@@ -656,8 +689,9 @@ class PullUnittest(FileSystemTestCase):
         args.src = "some_dir"
         args.dst = "local_dir"
 
-        with patch("os.path.exists", return_value=False), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", return_value=False
         ), patch(
             "os.path.abspath",
             lambda path: (
@@ -668,17 +702,21 @@ class PullUnittest(FileSystemTestCase):
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(self.remote_root, args.src, "a/b"),
-                    os.path.join(self.user_home, args.dst, "a/b"),
-                ),
-                (
-                    os.path.join(self.remote_root, args.src, "a/c/d"),
-                    os.path.join(self.user_home, args.dst, "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(self.remote_root, args.src, "a/b"),
+                        os.path.join(self.user_home, args.dst, "a/b"),
+                    ),
+                    (
+                        os.path.join(self.remote_root, args.src, "a/c/d"),
+                        os.path.join(self.user_home, args.dst, "a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_rel_dir_to_abs_dir_exists(self):
         """Test pulling a relative directory path to an absolute directory that exists."""
@@ -686,22 +724,27 @@ class PullUnittest(FileSystemTestCase):
         args.src = "some_dir"
         args.dst = "/absolute/local_dir"
 
-        with patch("os.path.exists", lambda path: path == args.dst), patch(
-            "os.makedirs", lambda path, **kwargs: None
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", lambda path: path == args.dst
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(self.remote_root, args.src, "a/b"),
-                    os.path.join(args.dst, "some_dir", "a/b"),
-                ),
-                (
-                    os.path.join(self.remote_root, args.src, "a/c/d"),
-                    os.path.join(args.dst, "some_dir", "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(self.remote_root, args.src, "a/b"),
+                        os.path.join(args.dst, "some_dir/a/b"),
+                    ),
+                    (
+                        os.path.join(self.remote_root, args.src, "a/c/d"),
+                        os.path.join(args.dst, "some_dir/a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
     def test_pull_rel_dir_to_rel_dir_exists(self):
         """Test pulling a relative directory path to a relative directory that exists."""
@@ -709,10 +752,10 @@ class PullUnittest(FileSystemTestCase):
         args.src = "some_dir"
         args.dst = "local_dir"
 
-        with patch(
-            "os.path.exists",
-            lambda path: path == os.path.join(self.user_home, args.dst),
-        ), patch("os.makedirs", lambda path, **kwargs: None), patch(
+        # Add the patches for os.chmod and os.makedirs
+        with patch('os.chmod'), patch('os.makedirs'), patch(
+            "os.path.exists", lambda path: path == os.path.join(self.user_home, args.dst)
+        ), patch(
             "os.path.abspath",
             lambda path: (
                 os.path.join(self.user_home, path)
@@ -722,17 +765,21 @@ class PullUnittest(FileSystemTestCase):
         ):
             self.cli.Pull(args)
 
-            expected = [
-                (
-                    os.path.join(self.remote_root, args.src, "a/b"),
-                    os.path.join(self.user_home, args.dst, "some_dir", "a/b"),
-                ),
-                (
-                    os.path.join(self.remote_root, args.src, "a/c/d"),
-                    os.path.join(self.user_home, args.dst, "some_dir", "a/c/d"),
-                ),
-            ]
-            self.assertEqual(sorted(self.results), sorted(expected))
+        self.assertEqual(
+            sorted(self.results),
+            sorted(
+                [
+                    (
+                        os.path.join(self.remote_root, args.src, "a/b"),
+                        os.path.join(self.user_home, args.dst, "some_dir/a/b"),
+                    ),
+                    (
+                        os.path.join(self.remote_root, args.src, "a/c/d"),
+                        os.path.join(self.user_home, args.dst, "some_dir/a/c/d"),
+                    ),
+                ]
+            ),
+        )
 
 
 if __name__ == "__main__":

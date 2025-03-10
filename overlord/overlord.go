@@ -79,6 +79,18 @@ type FstatCmd struct {
 	Path string
 }
 
+// CreateSymlinkCmd is a command to create a symlink.
+type CreateSymlinkCmd struct {
+	Target string // Target path
+	Dest   string // Destination path
+}
+
+// MkdirCmd is a command to create a directory.
+type MkdirCmd struct {
+	Path string // Path to create
+	Perm int    // Directory permissions
+}
+
 // webSocketContext is used for maintaining the session information of
 // WebSocket requests. When requests come from Web Server, we create a new
 // WebSocketConext to store the session ID and WebSocket connection. ConnServer
@@ -410,7 +422,7 @@ func (ovl *Overlord) GetAppDir() string {
 
 // GetAppNames return the name of overlord apps.
 func (ovl *Overlord) GetAppNames() ([]string, error) {
-	var appNames []string
+	appNames := []string{}
 
 	apps, err := os.ReadDir(ovl.GetAppDir())
 	if err != nil {
@@ -933,46 +945,17 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		}
 	}
 
-	// Directory listing handler
-	AgentLsTreeHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-
-		vars := mux.Vars(r)
-		mid := vars["mid"]
-
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			http.Error(w, `{"error": "Path parameter is required"}`, http.StatusBadRequest)
-			return
-		}
-
-		ovl.agentsMu.Lock()
-		agent, ok := ovl.agents[mid]
-		ovl.agentsMu.Unlock()
-		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
-			return
-		}
-
-		agent.Command <- ListTreeCmd{Path: path}
-		res := <-agent.Response
-		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusInternalServerError)
-			return
-		}
-		w.Write(res.Payload)
-	}
-
 	// File stat handler
-	AgentFstatHandler := func(w http.ResponseWriter, r *http.Request) {
+	AgentFilesystemHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
 
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			http.Error(w, `{"error": "Path parameter is required"}`, http.StatusBadRequest)
+		// Get operation type from query parameters
+		op := r.URL.Query().Get("op")
+		if op == "" {
+			http.Error(w, `{"error": "op parameter is required"}`, http.StatusBadRequest)
 			return
 		}
 
@@ -984,7 +967,58 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			return
 		}
 
-		agent.Command <- FstatCmd{Path: path}
+		switch op {
+		case "lstree":
+			path := r.URL.Query().Get("path")
+			if path == "" {
+				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+				return
+			}
+			agent.Command <- ListTreeCmd{Path: path}
+
+		case "fstat":
+			path := r.URL.Query().Get("path")
+			if path == "" {
+				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+				return
+			}
+			agent.Command <- FstatCmd{Path: path}
+
+		case "symlink":
+			target := r.URL.Query().Get("target")
+			if target == "" {
+				http.Error(w, `{"error": "target parameter is required"}`, http.StatusBadRequest)
+				return
+			}
+			dest := r.URL.Query().Get("dest")
+			if dest == "" {
+				http.Error(w, `{"error": "dest parameter is required"}`, http.StatusBadRequest)
+				return
+			}
+			agent.Command <- CreateSymlinkCmd{Target: target, Dest: dest}
+
+		case "mkdir":
+			path := r.URL.Query().Get("path")
+			if path == "" {
+				http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+				return
+			}
+			perm := r.URL.Query().Get("perm")
+			if perm == "" {
+				perm = "0755" // Default permission
+			}
+			permInt, err := strconv.ParseInt(perm, 8, 32)
+			if err != nil {
+				http.Error(w, `{"error": "invalid permission format"}`, http.StatusBadRequest)
+				return
+			}
+			agent.Command <- MkdirCmd{Path: path, Perm: int(permInt)}
+
+		default:
+			http.Error(w, fmt.Sprintf(`{"error": "Unknown operation %s"}`, op), http.StatusBadRequest)
+			return
+		}
+
 		res := <-agent.Response
 		if res.Status == Failed {
 			http.Error(w, string(res.Payload), http.StatusInternalServerError)
@@ -1050,8 +1084,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	apiRouter.HandleFunc("/api/agent/tty/{mid}", AgentTtyHandler)
 	apiRouter.HandleFunc("/api/agent/shell/{mid}", ModeShellHandler)
 	apiRouter.HandleFunc("/api/agent/properties/{mid}", AgentPropertiesHandler)
-	apiRouter.HandleFunc("/api/agent/lstree/{mid}", AgentLsTreeHandler)
-	apiRouter.HandleFunc("/api/agent/fstat/{mid}", AgentFstatHandler)
+	apiRouter.HandleFunc("/api/agent/filesystem/{mid}", AgentFilesystemHandler)
 	apiRouter.HandleFunc("/api/agent/download/{mid}", AgentDownloadHandler)
 	apiRouter.HandleFunc("/api/agent/upload/{mid}", AgentUploadHandler)
 	apiRouter.HandleFunc("/api/agent/forward/{mid}", AgentModeForwardHandler)

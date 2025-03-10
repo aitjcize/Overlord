@@ -891,10 +891,10 @@ class OverlordCliClient:
     self._state = DaemonState.FromDict(self._server.State())
     sha1sum = GetVersionDigest()
 
-    if sha1sum != self._state.version_sha1sum:
-      print('ovl server is out of date.  killing...')
-      KillGraceful(self._server.GetPid())
-      self.StartServer()
+    #if sha1sum != self._state.version_sha1sum:
+    #  print('ovl server is out of date.  killing...')
+    #  KillGraceful(self._server.GetPid())
+    #  self.StartServer()
 
   def GetSSHControlFile(self, host):
     return _SSH_CONTROL_SOCKET_PREFIX + host
@@ -1272,7 +1272,7 @@ class OverlordCliClient:
     Raises:
       RuntimeError: If the API call fails.
     """
-    url = ('/api/agent/lstree/%s?path=%s&token=%s' %
+    url = ('/api/agent/filesystem/%s?op=lstree&path=%s&token=%s' %
            (urllib.parse.quote(self._selected_mid),
             urllib.parse.quote(path),
             urllib.parse.quote(self._state.jwt_token)))
@@ -1285,7 +1285,7 @@ class OverlordCliClient:
       entries = []
       for entry in entries_data:
         try:
-          perm = entry.get('mode', 0o644)
+          perm = entry.get('perm', 0o644)
         except (ValueError, TypeError):
           perm = 0o644
 
@@ -1336,7 +1336,7 @@ class OverlordCliClient:
     if self._state is not None and hasattr(self._state, 'jwt_token') and self._state.jwt_token is not None:
         token = str(self._state.jwt_token)
 
-    url = ('/api/agent/fstat/%s?path=%s&token=%s' %
+    url = ('/api/agent/filesystem/%s?op=fstat&path=%s&token=%s' %
            (urllib.parse.quote(mid),
             urllib.parse.quote(path_str),
             urllib.parse.quote(token)))
@@ -1352,6 +1352,28 @@ class OverlordCliClient:
         msg = str(e)
       raise RuntimeError('fstat failed: %s' % msg)
 
+  def _Mkdir(self, path, perm=0o755):
+    """Create a directory with specific permissions using the Overlord API.
+
+    Args:
+      path: The path to create.
+      perm: The permissions to set (in octal).
+
+    Raises:
+      RuntimeError: If the API call fails.
+    """
+    url = ('/api/agent/filesystem/%s?op=mkdir&path=%s&perm=%o' %
+           (urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(path),
+            perm))
+    try:
+      response = UrlOpen(self._state, url)
+      if response.status != 200:
+        raise RuntimeError(f"Failed to create directory: {response.read()}")
+    except urllib.error.HTTPError as e:
+      msg = json.loads(e.read()).get('error', 'unknown error')
+      raise RuntimeError(f'mkdir: {msg}')
+
   @AutoRetry('pull', _RETRY_TIMES)
   def _PullSingle(self, entry, dst):
     """Pull a single file or symlink.
@@ -1365,7 +1387,6 @@ class OverlordCliClient:
     except Exception:
       pass
 
-    # Remote file is a link
     if entry.is_symlink:
       pbar = ProgressBar(entry.name)
       if os.path.exists(dst):
@@ -1398,6 +1419,9 @@ class OverlordCliClient:
         pbar.SetProgress(downloaded_size * 100 / total_size,
                          downloaded_size)
         f.write(data)
+
+      os.fchmod(f.fileno(), entry.perm)
+
     pbar.End()
 
   @Command('pull', 'pull a file or directory from remote', [
@@ -1453,6 +1477,7 @@ class OverlordCliClient:
       entry, dst = spec
       if entry.is_dir:
         os.makedirs(dst, exist_ok=True)
+        os.chmod(dst, entry.perm)
       else:
         self._PullSingle(entry, dst)
 
@@ -1463,13 +1488,21 @@ class OverlordCliClient:
     if os.path.islink(src):
       pbar = ProgressBar(src_base)
       link_path = os.readlink(src)
-      self.CheckOutput('mkdir -p %(dirname)s; '
-                       'if [ -d "%(dst)s" ]; then '
-                       'ln -sf "%(link_path)s" "%(dst)s/%(link_name)s"; '
-                       'else ln -sf "%(link_path)s" "%(dst)s"; fi' %
-                       dict(dirname=os.path.dirname(dst),
-                            link_path=link_path, dst=dst,
-                            link_name=src_base))
+
+      url = ('/api/agent/filesystem/%s?op=symlink&target=%s&dest=%s&token=%s' %
+             (urllib.parse.quote(self._selected_mid),
+              urllib.parse.quote(link_path),
+              urllib.parse.quote(dst),
+              urllib.parse.quote(self._state.jwt_token)))
+
+      try:
+        response = UrlOpen(self._state, url)
+        if response.status != 200:
+          raise RuntimeError(f"Failed to create symlink: {response.read()}")
+      except urllib.error.HTTPError as e:
+        msg = json.loads(e.read()).get('error', 'unknown error')
+        raise RuntimeError(f'push: {msg}')
+
       pbar.End()
       return
 
@@ -1510,22 +1543,17 @@ class OverlordCliClient:
 
         # Process each file entry
         for entry in entries:
-          # Skip directories, we only need to push files
-          if entry.is_dir:
-            continue
-
-          # Calculate the relative path from the source directory
           rel_path = os.path.relpath(entry.path, src)
 
-          # Determine the destination path
           if dst_exists:
-            # If destination exists, preserve the directory structure
             dest_path = os.path.join(dst, base_dir_name, rel_path)
           else:
-            # If destination doesn't exist, strip the top-level directory
             dest_path = os.path.join(dst, rel_path)
 
-          # Push the file
+          if entry.is_dir:
+            self._Mkdir(dest_path, entry.perm)
+            continue
+
           self._PushSingle(entry.path, dest_path)
       else:
         self._PushSingle(src, dst)
@@ -1691,7 +1719,7 @@ class OverlordCliClient:
             perm=perm,
             is_symlink=is_symlink,
             link_target=link_target,
-            is_dir=True
+            is_dir=False if is_symlink else True
         ))
 
       # Add file entries
@@ -1725,10 +1753,11 @@ def main():
   ovl = OverlordCliClient()
   try:
     ovl.Main()
-  except KeyboardInterrupt:
-    print('Ctrl-C received, abort')
+  #except KeyboardInterrupt:
+  #  print('Ctrl-C received, abort')
   except Exception as e:
-    print(f'error: {str(e)}')
+    logging.exception(e)
+    #print(f'error: {str(e)}')
 
 
 if __name__ == '__main__':

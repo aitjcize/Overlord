@@ -570,7 +570,7 @@ func (ghost *Ghost) handleFstatRequest(req *Request) error {
 	}
 	if err == nil {
 		result["is_dir"] = fileInfo.IsDir()
-		result["mode"] = fileInfo.Mode()
+		result["perm"] = fileInfo.Mode().Perm()
 		result["size"] = fileInfo.Size()
 		result["mod_time"] = fileInfo.ModTime().Unix()
 		isSymlink := (fileInfo.Mode() & os.ModeSymlink) != 0
@@ -681,6 +681,8 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 	}
 	f.Close()
 
+	os.Chmod(destPath, os.FileMode(params.Perm))
+
 	// If not check_only, spawn ModeFile mode ghost agent to handle upload
 	if !params.CheckOnly {
 		go func() {
@@ -776,6 +778,69 @@ func (ghost *Ghost) StartUploadServer() error {
 	return nil
 }
 
+func (ghost *Ghost) handleCreateSymlinkRequest(req *Request) error {
+	type RequestPayload struct {
+		Target string `json:"target"`
+		Dest   string `json:"dest"`
+	}
+
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, "invalid_params"))
+	}
+
+	// Create parent directories if they don't exist
+	if err := os.MkdirAll(filepath.Dir(params.Dest), 0755); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+
+	// Remove existing file/link if it exists
+	if _, err := os.Lstat(params.Dest); err == nil {
+		if err := os.Remove(params.Dest); err != nil {
+			return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+		}
+	}
+
+	// Create the symlink
+	if err := os.Symlink(params.Target, params.Dest); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+
+	return ghost.SendResponse(NewResponse(req.Rid, Success, nil))
+}
+
+func (ghost *Ghost) handleMkdirRequest(req *Request) error {
+	type RequestPayload struct {
+		Path string `json:"path"`
+		Perm int    `json:"perm"`
+	}
+
+	var params RequestPayload
+	if err := json.Unmarshal(req.Payload, &params); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, "invalid_params"))
+	}
+
+	if !filepath.IsAbs(params.Path) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+		}
+		params.Path = filepath.Join(home, params.Path)
+	}
+
+	// Create the directory with the specified permissions
+	if err := os.MkdirAll(params.Path, os.FileMode(params.Perm)); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+
+	// Set the permissions again as MkdirAll might not set them correctly for all directories
+	if err := os.Chmod(params.Path, os.FileMode(params.Perm)); err != nil {
+		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+	}
+
+	return ghost.SendResponse(NewResponse(req.Rid, Success, nil))
+}
+
 func (ghost *Ghost) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
@@ -797,6 +862,10 @@ func (ghost *Ghost) handleRequest(req *Request) error {
 		err = ghost.handleFileUploadRequest(req)
 	case "forward":
 		err = ghost.handleModeForwardRequest(req)
+	case "create_symlink":
+		err = ghost.handleCreateSymlinkRequest(req)
+	case "mkdir":
+		err = ghost.handleMkdirRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
 	}
@@ -1433,11 +1502,12 @@ func (ghost *Ghost) ListTree(path string) ([]map[string]interface{}, error) {
 			"name":       info.Name(),
 			"path":       filePath,
 			"size":       info.Size(),
-			"mode":       info.Mode(),
+			"perm":       info.Mode().Perm(),
 			"mod_time":   info.ModTime().Unix(),
 			"is_dir":     info.IsDir(),
 			"is_symlink": isSymlink,
 		}
+
 		if isSymlink {
 			target, err := os.Readlink(filePath)
 			if err == nil {
