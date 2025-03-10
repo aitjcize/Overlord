@@ -190,6 +190,10 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 		c.ListTree(v.Path)
 	case FstatCmd:
 		c.Fstat(v.Path)
+	case CreateSymlinkCmd:
+		c.CreateSymlink(v.Target, v.Dest)
+	case MkdirCmd:
+		c.Mkdir(v.Path, v.Perm)
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
 		c.writeLogToWS(v.Conn, c.logcat.History)
@@ -441,6 +445,24 @@ func (c *ConnServer) Fstat(path string) {
 		"path": path,
 	})
 	c.SendRequest(req, c.getHandler("Fstat"))
+}
+
+// CreateSymlink handles a request to create a symlink.
+func (c *ConnServer) CreateSymlink(target, dest string) {
+	req := NewRequest("create_symlink", map[string]interface{}{
+		"target": target,
+		"dest":   dest,
+	})
+	c.SendRequest(req, c.getHandler("CreateSymlink"))
+}
+
+// Mkdir handles a request to create a directory.
+func (c *ConnServer) Mkdir(path string, perm int) {
+	req := NewRequest("mkdir", map[string]interface{}{
+		"path": path,
+		"perm": perm,
+	})
+	c.SendRequest(req, c.getHandler("Mkdir"))
 }
 
 // SpawnFileServer Spawn a remote file connection (a ghost with mode ModeFile).
