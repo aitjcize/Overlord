@@ -610,7 +610,7 @@ const activeTerminalId = computed(() => {
 
 // Update the uploadRequestPath computed to use the local state
 const uploadRequestPath = computed(() => {
-  return `/api/agent/upload/${props.terminal.mid}`;
+  return `/api/agents/${props.terminal.mid}/file`;
 });
 
 // After terminal import statements, add this composable
@@ -787,7 +787,7 @@ const setupWebSocket = () => {
 
   // Create a new WebSocket connection with token
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/api/agent/tty/${props.terminal.mid}?token=${encodeURIComponent(token)}`;
+  const wsUrl = `${protocol}//${window.location.host}/api/agents/${props.terminal.mid}/tty?token=${encodeURIComponent(token)}`;
   const newWs = new WebSocket(wsUrl);
 
   newWs.onopen = () => {

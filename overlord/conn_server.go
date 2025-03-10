@@ -200,7 +200,7 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 		c.logcat.WsConns = append(c.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
 		c.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
-			v.Perm, v.CheckOnly)
+			v.Perm)
 	case SpawnModeForwarderCmd:
 		c.SpawnModeForwarder(v.Sid, v.Host, v.Port)
 	}
@@ -470,7 +470,7 @@ func (c *ConnServer) Mkdir(path string, perm int) {
 // sid is used for uploading file, indicatiting which client's working
 // directory to upload to.
 func (c *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
-	dest string, perm int, checkOnly bool) {
+	dest string, perm int) {
 	if action == "download" {
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
@@ -478,7 +478,7 @@ func (c *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
 	} else if action == "upload" {
 		req := NewRequest("file_upload", map[string]interface{}{
 			"sid": sid, "terminal_sid": terminalSid, "filename": filename,
-			"dest": dest, "perm": perm, "check_only": checkOnly})
+			"dest": dest, "perm": perm})
 		c.SendRequest(req, c.getHandler("SpawnFileServer: upload"))
 	} else {
 		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)

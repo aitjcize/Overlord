@@ -28,7 +28,7 @@ class APIService {
     }
 
     func getClients(token: String) -> AnyPublisher<[Client], Error> {
-        guard let url = URL(string: "\(APIService.baseURL)/agents/list") else {
+        guard let url = URL(string: "\(APIService.baseURL)/agents") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
         var request = URLRequest(url: url)
@@ -40,7 +40,7 @@ class APIService {
     }
 
     func getClientProperties(mid: String, token: String) -> AnyPublisher<[String: String], Error> {
-        guard let url = URL(string: "\(APIService.baseURL)/agent/properties/\(mid)") else {
+        guard let url = URL(string: "\(APIService.baseURL)/agents/\(mid)/properties") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
         var request = URLRequest(url: url)
@@ -52,7 +52,7 @@ class APIService {
     }
 
     func downloadFile(sid: String, token: String) {
-        guard let url = URL(string: "\(APIService.baseURL)/file/download/\(sid)?token=\(token)") else { return }
+        guard let url = URL(string: "\(APIService.baseURL)/sessions/\(sid)/file?token=\(token)") else { return }
 
         Task { @MainActor in
             #if os(iOS)

@@ -226,7 +226,7 @@ class PortForwardViewModel: ObservableObject {
         let wsProtocol = serverAddress.hasPrefix("https") ? "wss://" : "ws://"
         let baseAddress = serverAddress.replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
-        let urlString = "\(wsProtocol)\(baseAddress)/api/agent/forward/\(portForward.clientId)" +
+        let urlString = "\(wsProtocol)\(baseAddress)/api/agents/\(portForward.clientId)/forward" +
             "?host=\(portForward.remoteHost)" +
             "&port=\(portForward.remotePort)" +
             "&token=\(token)"

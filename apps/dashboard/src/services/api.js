@@ -5,7 +5,7 @@ const API_BASE_URL = "/api";
 export const apiService = {
   async getClients() {
     try {
-      const response = await axios.get(`${API_BASE_URL}/agents/list`);
+      const response = await axios.get(`${API_BASE_URL}/agents`);
       return response.data;
     } catch (error) {
       console.error("Error fetching clients:", error);
@@ -17,7 +17,7 @@ export const apiService = {
   async getClientProperties(mid) {
     try {
       const response = await axios.get(
-        `${API_BASE_URL}/agent/properties/${mid}`,
+        `${API_BASE_URL}/agents/${mid}/properties`,
       );
       return response.data;
     } catch (error) {

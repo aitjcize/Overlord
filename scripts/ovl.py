@@ -123,16 +123,33 @@ def MakeRequestUrl(state, url):
       url if url.startswith('/') else '/' + url)
 
 
-def UrlOpen(state, url, headers=[]):
-  """Open URL with proper authentication headers."""
-  full_url = MakeRequestUrl(state, url)
-  request = urllib.request.Request(full_url)
-  request.add_header('User-Agent', _USER_AGENT)
-  request.add_header(*JWTAuthHeader(state.jwt_token))
-  for header in headers:
-    request.add_header(*header)
-  return urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
-                                context=state.SSLContext())
+def UrlOpen(state, url, headers=[], data=None, method='GET'):
+  """Open a URL with proper headers.
+
+  Args:
+    state: DaemonState object.
+    url: URL to open.
+    headers: Additional headers to add.
+    data: Data to send for POST requests (will be JSON encoded).
+    method: HTTP method to use (GET or POST).
+
+  Returns:
+    urllib.response.addinfourl: Response from the server.
+  """
+  url = MakeRequestUrl(state, url)
+  headers = list(headers)  # Make a copy to avoid modifying the original
+  if state.jwt_token:
+    headers.append(JWTAuthHeader(state.jwt_token))
+  if data is not None:
+    headers.append(('Content-Type', 'application/json'))
+    data = json.dumps(data).encode('utf-8')
+
+  req = urllib.request.Request(
+      url=url,
+      data=data,
+      headers=dict(headers),
+      method=method)
+  return urllib.request.urlopen(req, context=state.SSLContext())
 
 
 def GetTLSCertificateSHA1Fingerprint(cert_pem):
@@ -489,7 +506,7 @@ class OverlordClientDaemon:
     try:
       self._state.ssl = ssl_enabled
       self._state.jwt_token = self.GetJWTToken()
-      self._GetJSON('/api/agents/list')
+      self._GetJSON('/api/agents')
     except urllib.error.HTTPError as e:
       return ('HTTPError', e.getcode(), str(e), e.read().strip())
     except Exception as e:
@@ -501,7 +518,7 @@ class OverlordClientDaemon:
     if time.time() - self._state.last_list <= _LIST_CACHE_TIMEOUT:
       return self._state.listing
 
-    self._state.listing = self._GetJSON('/api/agents/list')
+    self._state.listing = self._GetJSON('/api/agents')
     self._state.last_list = time.time()
     return self._state.listing
 
@@ -823,7 +840,7 @@ class OverlordCliClient:
     with open(GetTLSCertPath(host), 'w') as f:
       f.write(cert_pem)
 
-  def _HTTPPostFile(self, url, filename, progress=None, user=None, passwd=None):
+  def _HTTPPostFile(self, url, filename, progress=None):
     """Perform HTTP POST and upload file to Overlord.
 
     To minimize the external dependencies, we construct the HTTP post request
@@ -879,7 +896,8 @@ class OverlordCliClient:
       logging.warning('file changed during upload, upload may be truncated.')
 
     resp = h.getresponse()
-    return resp.status == 200
+    if resp.status != 200:
+      raise RuntimeError(f"Failed to upload file: {resp.read()}")
 
   def CheckDaemon(self):
     self._server = OverlordClientDaemon.GetRPCServer()
@@ -965,7 +983,7 @@ class OverlordCliClient:
     bio = BytesIO()
     ws = ShellWebSocketClient(
         self._state, bio,
-        scheme + '%s:%d/api/agent/shell/%s?command=%s&token=%s' % (
+        scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' % (
             self._state.host, self._state.port,
             urllib.parse.quote(self._selected_mid),
             urllib.parse.quote(command),
@@ -1069,7 +1087,7 @@ class OverlordCliClient:
             logging.error('%s; %s', except_str, body)
 
         if ret is not True:
-          print('\nFailed not connect to %s: %s' % (host, ret))
+          print('\nFailed to connect to %s: %s' % (host, ret))
         else:
           print('\nConnection to %s:%d established.' % (host, args.port))
       except Exception as e:
@@ -1236,7 +1254,7 @@ class OverlordCliClient:
       cmd = ' '.join(command)
       ws = ShellWebSocketClient(
           self._state, sys.stdout.buffer,
-          scheme + '%s:%d/api/agent/shell/%s?command=%s&token=%s' % (
+          scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' % (
               self._state.host, self._state.port,
               urllib.parse.quote(self._selected_mid),
               urllib.parse.quote(cmd),
@@ -1244,7 +1262,7 @@ class OverlordCliClient:
     else:
       ws = TerminalWebSocketClient(
           self._state, self._selected_mid, self._escape,
-          scheme + '%s:%d/api/agent/tty/%s?token=%s' % (
+          scheme + '%s:%d/api/agents/%s/tty?token=%s' % (
               self._state.host, self._state.port,
               urllib.parse.quote(self._selected_mid),
               urllib.parse.quote(self._state.jwt_token)))
@@ -1272,10 +1290,9 @@ class OverlordCliClient:
     Raises:
       RuntimeError: If the API call fails.
     """
-    url = ('/api/agent/filesystem/%s?op=lstree&path=%s&token=%s' %
+    url = ('/api/agents/%s/fs?op=lstree&path=%s' %
            (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(path),
-            urllib.parse.quote(self._state.jwt_token)))
+            urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
       data = json.loads(response.read().decode('utf-8'))
@@ -1328,18 +1345,9 @@ class OverlordCliClient:
     Raises:
       RuntimeError: If the API call fails.
     """
-    # Ensure all parameters are strings before quoting
-    mid = str(self._selected_mid) if self._selected_mid is not None else ""
-    path_str = str(path) if path is not None else ""
-    token = ""
-
-    if self._state is not None and hasattr(self._state, 'jwt_token') and self._state.jwt_token is not None:
-        token = str(self._state.jwt_token)
-
-    url = ('/api/agent/filesystem/%s?op=fstat&path=%s&token=%s' %
-           (urllib.parse.quote(mid),
-            urllib.parse.quote(path_str),
-            urllib.parse.quote(token)))
+    url = ('/api/agents/%s/fs?op=fstat&path=%s' %
+           (urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
       data = json.loads(response.read().decode('utf-8'))
@@ -1362,12 +1370,12 @@ class OverlordCliClient:
     Raises:
       RuntimeError: If the API call fails.
     """
-    url = ('/api/agent/filesystem/%s?op=mkdir&path=%s&perm=%o' %
+    url = ('/api/agents/%s/fs/directories?path=%s&perm=%d' %
            (urllib.parse.quote(self._selected_mid),
             urllib.parse.quote(path),
             perm))
     try:
-      response = UrlOpen(self._state, url)
+      response = UrlOpen(self._state, url, method='POST')
       if response.status != 200:
         raise RuntimeError(f"Failed to create directory: {response.read()}")
     except urllib.error.HTTPError as e:
@@ -1395,8 +1403,9 @@ class OverlordCliClient:
       pbar.End()
       return
 
-    url = ('/api/agent/download/%s?filename=%s' %
-           (urllib.parse.quote(self._selected_mid), urllib.parse.quote(entry.path)))
+    url = ('/api/agents/%s/file?filename=%s' %
+           (urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(entry.path)))
     try:
       h = UrlOpen(self._state, url)
     except urllib.error.HTTPError as e:
@@ -1489,14 +1498,13 @@ class OverlordCliClient:
       pbar = ProgressBar(src_base)
       link_path = os.readlink(src)
 
-      url = ('/api/agent/filesystem/%s?op=symlink&target=%s&dest=%s&token=%s' %
+      url = ('/api/agents/%s/fs/symlinks?target=%s&dest=%s' %
              (urllib.parse.quote(self._selected_mid),
               urllib.parse.quote(link_path),
-              urllib.parse.quote(dst),
-              urllib.parse.quote(self._state.jwt_token)))
+              urllib.parse.quote(dst)))
 
       try:
-        response = UrlOpen(self._state, url)
+        response = UrlOpen(self._state, url, method='POST')
         if response.status != 200:
           raise RuntimeError(f"Failed to create symlink: {response.read()}")
       except urllib.error.HTTPError as e:
@@ -1507,12 +1515,16 @@ class OverlordCliClient:
       return
 
     mode = '0%o' % (0x1FF & os.stat(src).st_mode)
-    url = ('/api/agent/upload/%s?dest=%s&perm=%s' %
-           (urllib.parse.quote(self._selected_mid), dst, mode))
+    url = ('/api/agents/%s/file?dest=%s&perm=%s' %
+           (urllib.parse.quote(self._selected_mid),
+            urllib.parse.quote(dst),
+            mode))
 
     pbar = ProgressBar(src_base)
-    self._HTTPPostFile(url, src, pbar.SetProgress,
-                       self._state.username, self._state.password)
+    try:
+      self._HTTPPostFile(url, src, pbar.SetProgress)
+    except Exception as e:
+      raise RuntimeError(f'push: {str(e)}')
     pbar.End()
 
   @Command('push', 'push a file or directory to remote', [
@@ -1637,7 +1649,7 @@ class OverlordCliClient:
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
           self._state, conn,
-          scheme + '%s:%d/api/agent/forward/%s?host=%s&port=%d&token=%s' % (
+          scheme + '%s:%d/api/agents/%s/forward?host=%s&port=%d&token=%s' % (
               self._state.host, self._state.port,
               urllib.parse.quote(self._selected_mid),
               remote_host, remote_port,

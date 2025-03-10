@@ -132,7 +132,7 @@ class TestOverlord(unittest.TestCase):
 
     def CheckClient():
       try:
-        clients = self._GetJSON('/api/agents/list')
+        clients = self._GetJSON('/api/agents')
         return len(clients) == 2
       except Exception as e:
         print(f"Error checking clients: {e}")
@@ -204,22 +204,22 @@ class TestOverlord(unittest.TestCase):
     return json.loads(urllib.request.urlopen(req).read())
 
   def testWebAPI(self):
-    # Test /api/app/list
+    # Test /api/apps
     appsdir = os.path.join(self.basedir, '../webroot/apps')
     apps = os.listdir(appsdir)
-    res = self._GetJSON('/api/apps/list')
+    res = self._GetJSON('/api/apps')
     assert len(res['apps']) == len(apps)
 
-    # Test /api/agents/list
-    assert len(self._GetJSON('/api/agents/list')) == 2
+    # Test /api/agents
+    assert len(self._GetJSON('/api/agents')) == 2
 
-    # Test /api/logcats/list. TODO(wnhuang): test this properly
-    assert not self._GetJSON('/api/logcats/list')
+    # Test /api/logcats. TODO(wnhuang): test this properly
+    assert not self._GetJSON('/api/logcats')
 
-    # Test /api/agent/properties/mid
-    for client in self._GetJSON('/api/agents/list'):
+    # Test /api/agents/{mid}/properties
+    for client in self._GetJSON('/api/agents'):
       assert self._GetJSON(
-          '/api/agent/properties/%s' % client['mid']) is not None
+          '/api/agents/%s/properties' % client['mid']) is not None
 
   def testShellCommand(self):
     class TestClient(WebSocketBaseClient):
@@ -233,12 +233,12 @@ class TestOverlord(unittest.TestCase):
       def received_message(self, message):
         self.message += message.data
 
-    clients = self._GetJSON('/api/agents/list')
+    clients = self._GetJSON('/api/agents')
     self.assertTrue(clients)
     answer = subprocess.check_output(['uname', '-r'])
 
     for client in clients:
-      ws = TestClient('ws://' + self.host + '/api/agent/shell/%s' %
+      ws = TestClient('ws://' + self.host + '/api/agents/%s/shell' %
                       urllib.parse.quote(client['mid']) + '?command=' +
                       urllib.parse.quote('uname -r') + '&token=' + self.token)
       ws.connect()
@@ -252,58 +252,45 @@ class TestOverlord(unittest.TestCase):
       def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.state = self.NONE
-        self.answer = 0
-        self.test_run = False
-        self.buffer = b''
+        self.message = ''
 
       def handshake_ok(self):
         pass
 
       def closed(self, code, reason=None):
-        if not self.test_run:
-          raise RuntimeError('test exit before being run: %s' % reason)
+        del code, reason  # Unused.
+        raise CloseWebSocket()
 
       def received_message(self, message):
-        if message.is_text:
-          # Ignore control messages.
-          return
-
-        self.buffer += message.data
-        if b'\r\n' not in self.buffer:
-          return
-
-        self.test_run = True
-        msg_text, self.buffer = self.buffer.split(b'\r\n', 1)
+        msg_text = message.data.decode('utf-8')
         if self.state == self.NONE:
-          if msg_text.startswith(b'TEST-SHELL-CHALLENGE'):
+          if msg_text.startswith('$ '):
             self.state = self.PROMPT
-            challenge_number = int(msg_text.split()[1])
-            self.answer = challenge_number + _INCREMENT
-            self.send('%d\n' % self.answer)
+            self.send('echo %d\n' % _INCREMENT)
+          else:
+            raise TestError('Unexpected response: %r' % msg_text)
         elif self.state == self.PROMPT:
-          msg_text = msg_text.strip()
-          if msg_text == b'SUCCESS':
-            raise CloseWebSocket
-          if msg_text == b'FAILED':
-            raise TestError('Challange failed')
-          if msg_text and int(msg_text) == self.answer:
-            pass
+          if msg_text == 'echo %d\r\n' % _INCREMENT:
+            self.state = self.RESPONSE
+          else:
+            raise TestError('Unexpected response: %r' % msg_text)
+        elif self.state == self.RESPONSE:
+          if msg_text == '%d\r\n' % _INCREMENT:
+            raise CloseWebSocket()
           else:
             raise TestError('Unexpected response: %r' % msg_text)
 
-    clients = self._GetJSON('/api/agents/list')
+    clients = self._GetJSON('/api/agents')
     assert clients
 
     for client in clients:
-      ws = TestClient('ws://' + self.host + '/api/agent/tty/%s' %
-                      urllib.parse.quote(client['mid']) + '?token=' + self.token)
-      ws.connect()
+      ws = TestClient('ws://' + self.host + '/api/agents/%s/tty?token=%s' %
+                      (urllib.parse.quote(client['mid']), self.token))
       try:
+        ws.connect()
         ws.run()
-      except TestError as e:
-        raise e
       except CloseWebSocket:
-        ws.close()
+        pass
 
 
 if __name__ == '__main__':
