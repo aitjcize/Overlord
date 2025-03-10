@@ -28,7 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "app-ios.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "app-ios.app"; path = "Overlord Dashboard.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A4870512D7AC17600AC952B /* app-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A48705B2D7AC17600AC952B /* app-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -100,9 +100,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3A48703F2D7AC17500AC952B /* app-ios */ = {
+		3A48703F2D7AC17500AC952B /* Overlord Dashboard */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-ios" */;
+			buildConfigurationList = 3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord Dashboard" */;
 			buildPhases = (
 				3A48703C2D7AC17500AC952B /* Sources */,
 				3A48703D2D7AC17500AC952B /* Frameworks */,
@@ -115,11 +115,11 @@
 			fileSystemSynchronizedGroups = (
 				3A4870422D7AC17500AC952B /* app-ios */,
 			);
-			name = "app-ios";
+			name = "Overlord Dashboard";
 			packageProductDependencies = (
 				3A4870712D7AC17600AC952B /* SwiftTerm */,
 			);
-			productName = "app-ios";
+			productName = "Overlord Dashboard";
 			productReference = 3A4870402D7AC17500AC952B /* app-ios.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -209,7 +209,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3A48703F2D7AC17500AC952B /* app-ios */,
+				3A48703F2D7AC17500AC952B /* Overlord Dashboard */,
 				3A4870502D7AC17600AC952B /* app-iosTests */,
 				3A48705A2D7AC17600AC952B /* app-iosUITests */,
 			);
@@ -267,12 +267,12 @@
 /* Begin PBXTargetDependency section */
 		3A4870532D7AC17600AC952B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 3A48703F2D7AC17500AC952B /* app-ios */;
+			target = 3A48703F2D7AC17500AC952B /* Overlord Dashboard */;
 			targetProxy = 3A4870522D7AC17600AC952B /* PBXContainerItemProxy */;
 		};
 		3A48705D2D7AC17600AC952B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 3A48703F2D7AC17500AC952B /* app-ios */;
+			target = 3A48703F2D7AC17500AC952B /* Overlord Dashboard */;
 			targetProxy = 3A48705C2D7AC17600AC952B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -405,6 +405,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Overlord Dashboard";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -444,6 +445,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Overlord Dashboard";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -572,7 +574,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-ios" */ = {
+		3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord Dashboard" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A4870662D7AC17600AC952B /* Debug */,

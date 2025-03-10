@@ -3,7 +3,7 @@ import SwiftTerm
 import SwiftUI
 
 @main
-struct OverlordAppIOS: App {
+struct OverlordDashboardApp: App {
     @StateObject private var authViewModel = AuthViewModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -25,15 +25,15 @@ struct OverlordAppIOS: App {
             switch scenePhase {
             case .active:
                 // App has become active (either first launch or returning from background)
-                if OverlordAppIOS.wasInBackground {
+                if OverlordDashboardApp.wasInBackground {
                     print("App returned to foreground")
                     // Reset the flag
-                    OverlordAppIOS.wasInBackground = false
+                    OverlordDashboardApp.wasInBackground = false
                 }
             case .background:
-                // App has gone to the background
+                // App went to the background
                 print("App went to background")
-                OverlordAppIOS.wasInBackground = true
+                OverlordDashboardApp.wasInBackground = true
             case .inactive:
                 // App is inactive (transitioning between states)
                 break
@@ -42,4 +42,4 @@ struct OverlordAppIOS: App {
             }
         }
     }
-}
+} 

@@ -4,6 +4,11 @@
 <dict>
 	<key>SchemeUserState</key>
 	<dict>
+		<key>Overlord Dashboard.xcscheme_^#shared#^_</key>
+		<dict>
+			<key>orderHint</key>
+			<integer>0</integer>
+		</dict>
 		<key>app-ios.xcscheme_^#shared#^_</key>
 		<dict>
 			<key>orderHint</key>
