@@ -14,7 +14,7 @@ GO_DIRS=./overlord/... ./cmd/...
 PY_FILES=$(shell find scripts -name "*.py")
 
 # Supported architectures for ghost binary
-GHOST_ARCHS=amd64 386 arm64 arm
+GHOST_ARCHS=amd64 arm64 arm
 GHOST_BINS=$(addprefix $(BIN)/ghost.linux., $(GHOST_ARCHS))
 
 # Get list of apps with package.json
