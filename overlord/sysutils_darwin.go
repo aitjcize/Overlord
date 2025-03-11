@@ -7,6 +7,7 @@ package overlord
 import (
 	// #cgo LDFLAGS: -lproc
 	// #include <libproc.h>
+	// #include <unistd.h>
 	"C"
 	"bytes"
 	"errors"
@@ -60,4 +61,14 @@ func GetProcessWorkingDirectory(pid int) (string, error) {
 	n := bytes.Index(buf, []byte{0})
 
 	return string(buf[:n]), nil
+}
+
+// Ttyname returns the TTY name of a given file descriptor.
+func Ttyname(fd uintptr) (string, error) {
+	var ttyname *C.char
+	ttyname = C.ttyname(C.int(fd))
+	if ttyname == nil {
+		return "", errors.New("ttyname returned NULL")
+	}
+	return C.GoString(ttyname), nil
 }

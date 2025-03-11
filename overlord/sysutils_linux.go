@@ -93,3 +93,17 @@ func GetMachineID() (string, error) {
 func GetProcessWorkingDirectory(pid int) (string, error) {
 	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 }
+
+// Ttyname returns the TTY name of a given file descriptor.
+func Ttyname(fd uintptr) (string, error) {
+	// Get the process ID
+	pid := os.Getpid()
+
+	// Try to read the symlink for the file descriptor
+	ttyPath, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/%d", pid, fd))
+	if err != nil {
+		return "", fmt.Errorf("failed to get tty name: %v", err)
+	}
+
+	return ttyPath, nil
+}
