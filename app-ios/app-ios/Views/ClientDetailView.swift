@@ -180,10 +180,12 @@ struct ClientDetailView: View {
                     updatedClient.properties = properties
 
                     // Update in the view model
-                    clientViewModel.clients[client.mid] = updatedClient
+                    if let index = clientViewModel.clients.firstIndex(where: { $0.mid == client.mid }) {
+                        clientViewModel.clients[index] = updatedClient
+                    }
 
                     // Verify the client was updated in the view model
-                    if clientViewModel.clients[client.mid] != nil {
+                    if clientViewModel.clients.contains(where: { $0.mid == client.mid }) {
                         // We can't directly update 'client' as it's a let constant,
                         // but we've updated it in the view model which will trigger UI updates
                     }

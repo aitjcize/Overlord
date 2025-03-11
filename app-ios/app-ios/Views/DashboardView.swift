@@ -222,8 +222,8 @@ struct DashboardView: View {
 
         // Set up view models
         Task { @MainActor in
-            clientViewModel.loadInitialClients(token: token)
-            clientViewModel.setupWebSocketHandlers()
+            await clientViewModel.loadInitialClients()
+            clientViewModel.startMonitoring()
             terminalViewModel.setupWebSocketHandlers()
             uploadProgressViewModel.setupWebSocketHandlers()
         }

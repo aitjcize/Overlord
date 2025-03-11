@@ -9,227 +9,143 @@ import Foundation
 
 @MainActor
 class ClientViewModel: ObservableObject {
-    @Published var clients: [String: Client] = [:]
-    @Published var recentClients: [Client] = []
+    @Published var clients: [Client] = []
     @Published var cameras: [String: Camera] = [:]
-    @Published var activeClientId: String?
-    @Published var filterPattern: String = ""
-
-    // Computed property for backward compatibility
-    var fixtures: [String: Client] {
-        Dictionary(uniqueKeysWithValues: clients.values.filter { $0.pinned }.map { ($0.mid, $0) })
-    }
-
+    private var filterPattern: String = ""
     let apiService: APIService
-    let webSocketService: WebSocketService
-    private var cancellables = Set<AnyCancellable>()
+    private let monitorService: MonitorService
 
-    var clientsArray: [Client] {
-        Array(clients.values)
+    init() {
+        apiService = APIService()
+        monitorService = MonitorService()
+
+        // Set up WebSocket event handlers
+        monitorService.onAgentJoined = { [weak self] client in
+            Task { @MainActor in
+                self?.handleAgentJoined(client)
+            }
+        }
+        monitorService.onAgentLeft = { [weak self] client in
+            Task { @MainActor in
+                self?.handleAgentLeft(client)
+            }
+        }
     }
 
-    var activeRecentClients: [Client] {
-        let active = recentClients.filter { clients[$0.mid] != nil }
+    func startMonitoring() {
+        monitorService.start()
+    }
 
-        // Sort alphabetically by name (case-insensitive)
-        return active.sorted {
-            let name1 = $0.name?.lowercased() ?? $0.mid.lowercased()
-            let name2 = $1.name?.lowercased() ?? $1.mid.lowercased()
-            return name1 < name2
+    func stopMonitoring() {
+        monitorService.stop()
+    }
+
+    @MainActor
+    func loadInitialClients() async {
+        guard let token = UserDefaults.standard.string(forKey: "authToken") else { return }
+
+        do {
+            let clientsList = try await apiService.getClients(token: token).async()
+            // Set the initial clients list first
+            clients = clientsList
+
+            // Then load properties for each client
+            for client in clientsList {
+                await loadClientProperties(client: client, token: token)
+            }
+        } catch {
+            print("Failed to load initial clients: \(error)")
         }
+    }
+
+    private func sortClients() {
+        clients.sort { client1, client2 in
+            if client1.pinned != client2.pinned {
+                return client1.pinned && !client2.pinned
+            }
+            // If both have same pin status, sort by name/mid
+            return (client1.name ?? client1.mid) < (client2.name ?? client2.mid)
+        }
+    }
+
+    private func handleAgentJoined(_ client: Client) {
+        // Add or update client in the list, preserving pinned status if it exists
+        if let index = clients.firstIndex(where: { $0.mid == client.mid }) {
+            let wasPinned = clients[index].pinned
+            var updatedClient = client
+            updatedClient.pinned = wasPinned
+            clients[index] = updatedClient
+        } else {
+            clients.append(client)
+        }
+
+        sortClients()
+
+        // Load client properties
+        if let token = UserDefaults.standard.string(forKey: "authToken") {
+            Task {
+                await loadClientProperties(client: client, token: token)
+            }
+        }
+    }
+
+    private func handleAgentLeft(_ client: Client) {
+        clients.removeAll { $0.mid == client.mid }
+        sortClients()
+    }
+
+    func setFilterPattern(_ pattern: String) {
+        filterPattern = pattern
+        objectWillChange.send()
     }
 
     var filteredClients: [Client] {
-        let filtered: [Client]
         if filterPattern.isEmpty {
-            filtered = clientsArray
-        } else {
-            let pattern = filterPattern.lowercased()
-            filtered = clientsArray
-                .filter { $0.mid.lowercased().contains(pattern) || ($0.name?.lowercased().contains(pattern) ?? false) }
+            return clients // Already sorted when modified
         }
-
-        // Sort by pinned status first, then alphabetically by name
-        return filtered.sorted {
-            if $0.pinned && !$1.pinned {
-                return true
-            } else if !$0.pinned && $1.pinned {
-                return false
-            } else {
-                let name1 = $0.name?.lowercased() ?? $0.mid.lowercased()
-                let name2 = $1.name?.lowercased() ?? $1.mid.lowercased()
-                return name1 < name2
+        let filtered = clients.filter { client in
+            client.mid.lowercased().contains(filterPattern.lowercased())
+        }
+        return filtered.sorted { client1, client2 in
+            if client1.pinned != client2.pinned {
+                return client1.pinned && !client2.pinned
             }
+            return (client1.name ?? client1.mid) < (client2.name ?? client2.mid)
         }
     }
 
-    init(apiService: APIService? = nil, webSocketService: WebSocketService? = nil) {
-        // Use provided services or create them in a Task
-        if let apiService = apiService {
-            self.apiService = apiService
-        } else {
-            // Create a placeholder that will be replaced in the Task below
-            self.apiService = APIService()
-        }
+    public func loadClientProperties(client: Client, token: String) async {
+        do {
+            let properties = try await apiService.getClientProperties(mid: client.mid, token: token).async()
 
-        if let webSocketService = webSocketService {
-            self.webSocketService = webSocketService
-        } else {
-            // Create a placeholder that will be replaced in the Task below
-            self.webSocketService = WebSocketService()
-        }
-
-        // Listen for WebSocket authentication failures
-        Task { @MainActor in
-            NotificationCenter.default.publisher(for: .webSocketAuthenticationFailed)
-                .sink { _ in
-                    // Handle authentication failure
-                    NotificationCenter.default.post(name: .logoutRequested, object: nil)
-                }
-                .store(in: &cancellables)
-        }
-    }
-
-    func loadInitialClients(token: String) {
-        Task { @MainActor in
-            do {
-                let clientsList = try await apiService.getClients(token: token).async()
-
-                // Process clients sequentially
-                for client in clientsList {
-                    await loadClientProperties(client: client, token: token)
-                }
-            } catch {
-                print("Failed to load clients: \(error)")
+            // Update client properties
+            if let index = clients.firstIndex(where: { $0.mid == client.mid }) {
+                clients[index].properties = properties
             }
+        } catch {
+            print("Failed to load properties for client \(client.mid): \(error)")
         }
-    }
-
-    private func loadClientProperties(client: Client, token: String) async {
-        Task { @MainActor in
-            do {
-                let properties = try await apiService.getClientProperties(mid: client.mid, token: token).async()
-
-                var updatedClient = client
-                updatedClient.properties = properties
-
-                // Add to clients map
-                self.clients[client.mid] = updatedClient
-            } catch {
-                print("Failed to load properties for client \(client.mid): \(error)")
-            }
-        }
-    }
-
-    func setupWebSocketHandlers() {
-        webSocketService.on(event: "agent joined") { [weak self] message in
-            guard let self = self,
-                  let data = message.data(using: .utf8),
-                  let client = try? JSONDecoder().decode(Client.self, from: data)
-            else {
-                return
-            }
-
-            Task { @MainActor in
-                self.addClient(client)
-            }
-        }
-
-        webSocketService.on(event: "agent left") { [weak self] message in
-            guard let self = self,
-                  let data = message.data(using: .utf8),
-                  let client = try? JSONDecoder().decode(Client.self, from: data)
-            else {
-                return
-            }
-
-            Task { @MainActor in
-                self.removeClient(mid: client.mid)
-            }
-        }
-
-        webSocketService.on(event: "file download") { [weak self] sid in
-            guard let self = self,
-                  let token = UserDefaults.standard.string(forKey: "authToken")
-            else {
-                return
-            }
-
-            Task { @MainActor in
-                self.apiService.downloadFile(sid: sid, token: token)
-            }
-        }
-    }
-
-    func addClient(_ client: Client) {
-        // Preserve pinned status if client already exists
-        var newClient = client
-        if let existingClient = clients[client.mid] {
-            newClient.pinned = existingClient.pinned
-        }
-
-        clients[client.mid] = newClient
-
-        // Add to recent clients if connected via WebSocket
-        if webSocketService.isConnected {
-            // Remove if already exists
-            recentClients.removeAll { $0.mid == client.mid }
-
-            // Add to beginning and limit to 5
-            recentClients.insert(client, at: 0)
-            if recentClients.count > 5 {
-                recentClients = Array(recentClients.prefix(5))
-            }
-        }
-    }
-
-    func removeClient(mid: String) {
-        clients.removeValue(forKey: mid)
-        recentClients.removeAll { $0.mid == mid }
     }
 
     func togglePinStatus(for mid: String) {
-        guard var client = clients[mid] else { return }
-        client.pinned.toggle()
-        clients[mid] = client
+        if let index = clients.firstIndex(where: { $0.mid == mid }) {
+            clients[index].pinned.toggle()
+            sortClients()
+            objectWillChange.send()
+        }
     }
 
+    // Camera management functions
     func addCamera(id: String, clientId: String) -> Camera {
         let camera = Camera(id: id, clientId: clientId)
         cameras[id] = camera
+        objectWillChange.send()
         return camera
     }
 
     func removeCamera(id: String) {
         cameras.removeValue(forKey: id)
-    }
-
-    func setFilterPattern(_ pattern: String) {
-        filterPattern = pattern
-    }
-
-    func setActiveClientId(_ mid: String?) {
-        activeClientId = mid
-    }
-
-    static func createClientViewModel() -> ClientViewModel {
-        let apiService = APIService()
-        let webSocketService = WebSocketService()
-        return ClientViewModel(apiService: apiService, webSocketService: webSocketService)
-    }
-
-    func addFixture(client: Client) {
-        // For backward compatibility
-        guard var clientToPin = clients[client.mid] else { return }
-        clientToPin.pinned = true
-        clients[client.mid] = clientToPin
-    }
-
-    func removeFixture(mid: String) {
-        // For backward compatibility
-        guard var clientToUnpin = clients[mid] else { return }
-        clientToUnpin.pinned = false
-        clients[mid] = clientToUnpin
+        objectWillChange.send()
     }
 }
 

@@ -471,16 +471,27 @@ extension PortForwardViewModel {
     func restartTCPServerIfNeeded(for portForwardId: String) {
         guard let portForward = portForwards[portForwardId] else { return }
 
-        // Check if the listener exists and is active
-        if let listener = listeners[portForwardId], listener.state == .ready {
-            // Listener is already active, no need to restart
-            return
+        print("[PortForward] Attempting to restart TCP server for port forward \(portForwardId)")
+
+        // Close all existing connection pairs for this port forward
+        connectionQueue.sync {
+            for (pairId, connectionPair) in connectionPairs where connectionPair.portForwardId == portForwardId {
+                connectionPair.close()
+                connectionPairs.removeValue(forKey: pairId)
+            }
+
+            // Close all active connections (for backward compatibility)
+            if let activeConnections = connections[portForwardId] {
+                for connection in activeConnections {
+                    connection.cancel()
+                }
+                connections.removeValue(forKey: portForwardId)
+            }
         }
 
-        // If the listener doesn't exist or is not active, restart it
-        if listeners[portForwardId] != nil {
-            // Cancel the existing listener first
-            listeners[portForwardId]?.cancel()
+        // Cancel the existing listener if it exists
+        if let listener = listeners[portForwardId] {
+            listener.cancel()
             listeners.removeValue(forKey: portForwardId)
         }
 
@@ -488,7 +499,7 @@ extension PortForwardViewModel {
         startLocalServer(for: portForward)
 
         // Log the restart
-        print("[PortForward] Restarting TCP server for port forward \(portForwardId)")
+        print("[PortForward] Restarted TCP server for port forward \(portForwardId)")
     }
 
     // Public method to restart all TCP servers
@@ -496,18 +507,27 @@ extension PortForwardViewModel {
     func restartAllTCPServers() {
         print("[PortForward] Restarting all TCP servers")
 
-        // Iterate through all port forwards and restart their TCP servers if needed
+        // Iterate through all port forwards and restart their TCP servers
         for (portForwardId, portForward) in portForwards {
-            // Check if the listener exists and is active
-            if let listener = listeners[portForwardId], listener.state == .ready {
-                // Listener is already active, no need to restart
-                continue
+            // Close all existing connection pairs for this port forward
+            connectionQueue.sync {
+                for (pairId, connectionPair) in connectionPairs where connectionPair.portForwardId == portForwardId {
+                    connectionPair.close()
+                    connectionPairs.removeValue(forKey: pairId)
+                }
+
+                // Close all active connections (for backward compatibility)
+                if let activeConnections = connections[portForwardId] {
+                    for connection in activeConnections {
+                        connection.cancel()
+                    }
+                    connections.removeValue(forKey: portForwardId)
+                }
             }
 
-            // If the listener doesn't exist or is not active, restart it
-            if listeners[portForwardId] != nil {
-                // Cancel the existing listener first
-                listeners[portForwardId]?.cancel()
+            // Cancel the existing listener if it exists
+            if let listener = listeners[portForwardId] {
+                listener.cancel()
                 listeners.removeValue(forKey: portForwardId)
             }
 

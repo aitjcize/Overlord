@@ -61,7 +61,7 @@ struct CameraRow: View {
     @ObservedObject var clientViewModel: ClientViewModel
 
     var clientName: String {
-        if let client = clientViewModel.clients[camera.clientId] {
+        if let client = clientViewModel.clients.first(where: { $0.mid == camera.clientId }) {
             return client.name ?? client.mid
         }
         return camera.clientId

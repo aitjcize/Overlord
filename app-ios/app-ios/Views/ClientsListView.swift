@@ -26,28 +26,6 @@ struct ClientsListView: View {
                     clientViewModel.setFilterPattern(newValue)
                 }
 
-            // Recent clients section
-            if !clientViewModel.activeRecentClients.isEmpty {
-                VStack(alignment: .leading) {
-                    Text("Recent Clients")
-                        .font(.headline)
-                        .foregroundColor(Color(hex: "94a3b8"))
-                        .padding(.horizontal)
-
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(clientViewModel.activeRecentClients) { client in
-                                RecentClientCard(client: client) {
-                                    openTerminal(for: client)
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                }
-                .padding(.vertical, 8)
-            }
-
             // All clients list with pinned items at the top
             List {
                 ForEach(clientViewModel.filteredClients) { client in
@@ -85,7 +63,43 @@ struct ClientsListView: View {
                 }
             }
             .listStyle(PlainListStyle())
+            .refreshable {
+                if let token = UserDefaults.standard.string(forKey: "authToken") {
+                    do {
+                        let clientsList = try await clientViewModel.apiService.getClients(token: token).async()
+                        // Process clients sequentially
+                        for client in clientsList {
+                            await clientViewModel.loadClientProperties(client: client, token: token)
+                        }
+                    } catch {
+                        print("Failed to refresh clients: \(error)")
+                    }
+                }
+            }
+            .onAppear {
+                // Configure refresh control appearance
+                UIRefreshControl.appearance().tintColor = UIColor(hex: "94a3b8")
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .foregroundColor: UIColor(hex: "94a3b8")
+                ]
+                UIRefreshControl.appearance().attributedTitle = NSAttributedString(
+                    string: "Pull to refresh",
+                    attributes: attributes
+                )
+
+                // Start WebSocket monitoring and load initial clients
+                Task {
+                    await clientViewModel.loadInitialClients()
+                    clientViewModel.startMonitoring()
+                }
+            }
+            .onDisappear {
+                // Stop WebSocket monitoring when view disappears
+                clientViewModel.stopMonitoring()
+            }
         }
+        .tint(Color(hex: "3b82f6"))
+        .accentColor(Color(hex: "3b82f6"))
         .background(Color(hex: "0f172a").ignoresSafeArea())
         .sheet(isPresented: $showingTerminal) {
             if let terminal = currentTerminal {
@@ -145,7 +159,6 @@ struct ClientsListView: View {
     }
 
     private func openPortForwardDialog(for client: Client) {
-        // Directly set the selected client, which will trigger the sheet presentation
         selectedClientForPortForward = client
     }
 }
@@ -177,31 +190,6 @@ struct SearchBar: View {
         .padding(12)
         .background(Color(hex: "1e293b"))
         .cornerRadius(10)
-    }
-}
-
-struct RecentClientCard: View {
-    let client: Client
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action, label: {
-            VStack(alignment: .leading) {
-                Text(client.name ?? client.mid)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                Text(client.mid)
-                    .font(.caption)
-                    .foregroundColor(Color(hex: "94a3b8"))
-                    .lineLimit(1)
-            }
-            .frame(width: 150, height: 80)
-            .padding()
-            .background(Color(hex: "1e293b"))
-            .cornerRadius(10)
-        })
     }
 }
 
