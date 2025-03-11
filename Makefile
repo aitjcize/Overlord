@@ -61,7 +61,7 @@ ghost: deps
 
 $(BIN)/ghost.linux.%.sha1: $(BIN)/ghost.linux.%
 	$(call cmd_msg,SHA1,$(notdir $<))
-	@cd $(BIN) && sha1sum $(notdir $<) > $(notdir $@)
+	@cd $(BIN) && sha1sum $(notdir $<) | awk '{ print $$1 }' > $(notdir $@)
 
 $(BIN)/ghost.linux.%:
 	$(call cmd_msg,GO,$(notdir $@))
