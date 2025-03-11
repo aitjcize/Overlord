@@ -27,7 +27,9 @@ cmd_msg = @echo "  $(1)  $(2)"
 
 ifeq ($(STATIC), true)
 	LDFLAGS=-a -tags netgo -installsuffix netgo \
-		-ldflags '-extldflags "-static"'
+		-ldflags '-s -w -extldflags "-static"'
+else
+	LDFLAGS=-ldflags '-s -w'
 endif
 
 .PHONY: all \
