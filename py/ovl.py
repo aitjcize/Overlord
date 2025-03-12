@@ -41,6 +41,7 @@ import yaml
 
 _CERT_DIR = os.path.expanduser('~/.config/ovl')
 
+_DEBUG = False
 _ESCAPE = '~'
 _BUFSIZ = 8192
 _DEFAULT_HTTPS_PORT = 443
@@ -377,8 +378,9 @@ class OverlordClientDaemon:
 
     pid = os.fork()
     if pid == 0:
-      for fd in range(3):
-        os.close(fd)
+      if not _DEBUG:
+        for fd in range(3):
+          os.close(fd)
       self._server.serve_forever()
 
   @staticmethod
@@ -1768,7 +1770,8 @@ def main():
   except KeyboardInterrupt:
     print('Ctrl-C received, abort')
   except Exception as e:
-    logging.exception(e)
+    if _DEBUG:
+      logging.exception(e)
     print(f'error: {str(e)}')
 
 
