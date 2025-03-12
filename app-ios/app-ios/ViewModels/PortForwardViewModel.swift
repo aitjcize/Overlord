@@ -471,7 +471,16 @@ extension PortForwardViewModel {
     func restartTCPServerIfNeeded(for portForwardId: String) {
         guard let portForward = portForwards[portForwardId] else { return }
 
-        print("[PortForward] Attempting to restart TCP server for port forward \(portForwardId)")
+        print("[PortForward] Checking if TCP server restart is needed for port forward \(portForwardId)")
+
+        // Check if the listener exists and is active
+        if let listener = listeners[portForwardId], listener.state == .ready {
+            // Listener is already active, no need to restart
+            print("[PortForward] TCP server for port forward \(portForwardId) is already active, no restart needed")
+            return
+        }
+
+        print("[PortForward] Restarting TCP server for port forward \(portForwardId)")
 
         // Close all existing connection pairs for this port forward
         connectionQueue.sync {
@@ -499,16 +508,25 @@ extension PortForwardViewModel {
         startLocalServer(for: portForward)
 
         // Log the restart
-        print("[PortForward] Restarted TCP server for port forward \(portForwardId)")
+        print("[PortForward] TCP server restarted for port forward \(portForwardId)")
     }
 
     // Public method to restart all TCP servers
     // This is used when the app comes back from the background
     func restartAllTCPServers() {
-        print("[PortForward] Restarting all TCP servers")
+        print("[PortForward] Checking all TCP servers for restart")
 
-        // Iterate through all port forwards and restart their TCP servers
+        // Iterate through all port forwards and restart their TCP servers if needed
         for (portForwardId, portForward) in portForwards {
+            // Check if the listener exists and is active
+            if let listener = listeners[portForwardId], listener.state == .ready {
+                // Listener is already active, no need to restart
+                print("[PortForward] TCP server for port forward \(portForwardId) is already active, no restart needed")
+                continue
+            }
+
+            print("[PortForward] Restarting TCP server for port forward \(portForwardId)")
+
             // Close all existing connection pairs for this port forward
             connectionQueue.sync {
                 for (pairId, connectionPair) in connectionPairs where connectionPair.portForwardId == portForwardId {
@@ -535,7 +553,7 @@ extension PortForwardViewModel {
             startLocalServer(for: portForward)
 
             // Log the restart
-            print("[PortForward] Restarted TCP server for port forward \(portForwardId)")
+            print("[PortForward] TCP server restarted for port forward \(portForwardId)")
         }
     }
 }

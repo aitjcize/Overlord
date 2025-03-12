@@ -609,8 +609,9 @@ struct WebViewContainer: View {
             )
         }
         .onDisappear {
-            // Ensure we clean up when the view disappears
-            if viewModel.lastCreatedPortForward?.id == portForward.id {
+            // Only clear lastCreatedPortForward if we're in the immediate creation flow
+            // (shouldShowPortForwardWebView is true), not when browsing existing port forwards
+            if viewModel.lastCreatedPortForward?.id == portForward.id && viewModel.shouldShowPortForwardWebView {
                 viewModel.lastCreatedPortForward = nil
                 viewModel.shouldShowPortForwardWebView = false
             }

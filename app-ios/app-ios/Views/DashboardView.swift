@@ -153,13 +153,13 @@ struct DashboardView: View {
             get: { portForwardViewModel.shouldShowPortForwardWebView },
             set: { newValue in
                 portForwardViewModel.shouldShowPortForwardWebView = newValue
-                if !newValue {
-                    portForwardViewModel.lastCreatedPortForward = nil
-                }
+                // Only clear lastCreatedPortForward when dismissing the sheet if we're in the creation flow
+                // This prevents clearing port forwards when viewing existing ones
             }
         ), onDismiss: {
             portForwardViewModel.shouldShowPortForwardWebView = false
-            portForwardViewModel.lastCreatedPortForward = nil
+            // We don't need to clear lastCreatedPortForward here as it will be handled
+            // by the WebViewContainer's onDisappear method when appropriate
         }, content: {
             Group {
                 if let portForward = portForwardViewModel.lastCreatedPortForward, let url = portForward.localURL {
