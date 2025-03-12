@@ -57,7 +57,7 @@ class TestOverlord(unittest.TestCase):
   def setUp(self):
     self.basedir = os.path.dirname(__file__)
     bindir = self.__class__.bindir
-    scriptdir = os.path.normpath(os.path.join(self.basedir, '../scripts'))
+    scriptdir = os.path.normpath(os.path.join(self.basedir, '../py'))
 
     env = os.environ.copy()
     env['SHELL'] = os.path.join(os.getcwd(), self.basedir, 'test_shell.sh')

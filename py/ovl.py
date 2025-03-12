@@ -909,10 +909,10 @@ class OverlordCliClient:
     self._state = DaemonState.FromDict(self._server.State())
     sha1sum = GetVersionDigest()
 
-    #if sha1sum != self._state.version_sha1sum:
-    #  print('ovl server is out of date.  killing...')
-    #  KillGraceful(self._server.GetPid())
-    #  self.StartServer()
+    if sha1sum != self._state.version_sha1sum:
+      print('ovl server is out of date.  killing...')
+      KillGraceful(self._server.GetPid())
+      self.StartServer()
 
   def GetSSHControlFile(self, host):
     return _SSH_CONTROL_SOCKET_PREFIX + host
@@ -1765,11 +1765,11 @@ def main():
   ovl = OverlordCliClient()
   try:
     ovl.Main()
-  #except KeyboardInterrupt:
-  #  print('Ctrl-C received, abort')
+  except KeyboardInterrupt:
+    print('Ctrl-C received, abort')
   except Exception as e:
     logging.exception(e)
-    #print(f'error: {str(e)}')
+    print(f'error: {str(e)}')
 
 
 if __name__ == '__main__':

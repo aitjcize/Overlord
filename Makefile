@@ -11,7 +11,7 @@ LDFLAGS=
 WEBROOT_DIR=$(CURDIR)/webroot
 DIST_APPS_DIR=$(WEBROOT_DIR)/apps
 GO_DIRS=./overlord/... ./cmd/...
-PY_FILES=$(shell find scripts -name "*.py")
+PY_FILES=$(shell find py -name "*.py")
 
 # Supported architectures for ghost binary
 GHOST_ARCHS=amd64 386 arm64 arm
@@ -74,9 +74,9 @@ ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1)
 build-go: overlordd ghost ghost-all
 
 build-py:
-	@ln -sf ../scripts/ghost.py bin
+	@ln -sf ../py/ghost.py bin
 	$(call cmd_msg,SHA1,ghost.py)
-	@sha1sum scripts/ghost.py > bin/ghost.py.sha1
+	@sha1sum py/ghost.py > bin/ghost.py.sha1
 
 	@mkdir -p $(BUILD)
 	$(call cmd_msg,VENV,creating virtualenv)
@@ -85,19 +85,19 @@ build-py:
 	$(call cmd_msg,PIP,installing requirements)
 	@cd $(BUILD); \
 	. $(BUILD)/.venv/bin/activate; \
-	pip install -q -r $(CURDIR)/requirements.txt; \
+	pip install -q -r $(CURDIR)/py/requirements.txt; \
 	pip install -q pyinstaller
 
 	$(call cmd_msg,GEN,ovl.pybin)
 	@cd $(BUILD); . $(BUILD)/.venv/bin/activate; \
-	pyinstaller --onefile $(CURDIR)/scripts/ovl.py > /dev/null;
+	pyinstaller --onefile $(CURDIR)/py/ovl.py > /dev/null;
 	@mv $(BUILD)/dist/ovl $(BIN)/ovl.pybin
 	$(call cmd_msg,SHA1,ovl.pybin)
 	@cd $(BIN) && sha1sum ovl.pybin > ovl.pybin.sha1
 
 	$(call cmd_msg,GEN,ghost.pybin)
 	@cd $(BUILD); . $(BUILD)/.venv/bin/activate; \
-	pyinstaller --onefile $(CURDIR)/scripts/ghost.py > /dev/null
+	pyinstaller --onefile $(CURDIR)/py/ghost.py > /dev/null
 	@mv $(BUILD)/dist/ghost $(BIN)/ghost.pybin
 	$(call cmd_msg,SHA1,ghost.pybin)
 	@cd $(BIN) && sha1sum ghost.pybin > ghost.pybin.sha1

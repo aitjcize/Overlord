@@ -36,7 +36,7 @@ RUN mkdir -p /config /app /app/webroot/upgrade
 WORKDIR /app
 
 COPY --from=gobuilder /src/bin/overlordd /app
-COPY --from=gobuilder /src/scripts/start_overlordd.sh /app
+COPY --from=gobuilder /src/sh/start_overlordd.sh /app
 COPY --from=gobuilder /src/bin/ghost.* /app/webroot/upgrade/
 COPY --from=pybuilder /src/bin/ghost.* /app/webroot/upgrade/
 COPY --from=pybuilder /src/bin/ovl.* /app/webroot/upgrade/

@@ -19,7 +19,7 @@ jobs:
           apk add git python3 make gcc linux-headers libc-dev py-pip
           python3 -m venv .venv
           source .venv/bin/activate
-          pip install -r requirements.txt
+          pip install -r py/requirements.txt
       - name: Fix permission
         run: git config --global --add safe.directory $PWD
       - name: test
