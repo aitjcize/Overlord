@@ -138,6 +138,7 @@ def UrlOpen(state, url, headers=[], data=None, method='GET'):
   """
   url = MakeRequestUrl(state, url)
   headers = list(headers)  # Make a copy to avoid modifying the original
+  headers.append(('User-Agent', _USER_AGENT))
   if state.jwt_token:
     headers.append(JWTAuthHeader(state.jwt_token))
   if data is not None:
@@ -1080,7 +1081,6 @@ class OverlordCliClient:
             code, except_str, body = ret[1:]
             if code == 401:
               print('connect: %s' % body)
-              prompt = True
               if not username_provided or not password_provided:
                 continue
               break
