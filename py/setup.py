@@ -24,15 +24,6 @@ if 'install' in sys.argv or 'develop' in sys.argv:
 with open('requirements.txt') as f:
     requirements = f.read().splitlines()
 
-# Filter out git dependencies for setup.py
-filtered_requirements = []
-for req in requirements:
-    if not req.startswith('ws4py @ git+') and req.strip():
-        filtered_requirements.append(req)
-
-# Add ws4py as a regular requirement
-filtered_requirements.append('ws4py')
-
 setup(
     name="overlord",
     version="1.0.0",
@@ -50,7 +41,7 @@ setup(
             'stream_camera=stream_camera:main',
         ],
     },
-    install_requires=filtered_requirements,
+    install_requires=requirements,
     python_requires='>=3.6',
     classifiers=[
         "Development Status :: 4 - Beta",
