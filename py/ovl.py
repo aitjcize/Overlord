@@ -576,7 +576,10 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
   def opened(self):
     def _FeedInput():
       self._old_termios = termios.tcgetattr(self._stdin_fd)
+      attrs = self._old_termios
+      attrs[3] &= ~(termios.ECHO | termios.ICANON)
       tty.setraw(self._stdin_fd)
+      termios.tcsetattr(self._stdin_fd, termios.TCSANOW, attrs)
 
       # Send initial terminal size
       rows, cols = GetTerminalSize()
