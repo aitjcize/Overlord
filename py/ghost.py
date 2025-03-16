@@ -563,27 +563,35 @@ class Ghost:
     msg = {'rid': omsg['rid'], 'status': FAILED, 'payload': {'error': error}}
     self.SendMessage(msg)
 
-  def HandleTTYControl(self, fd, control_str):
+  def HandleTTYControl(self, fd, buffer):
     """Handle terminal control sequences.
 
     Args:
       fd: File descriptor of the terminal
       control_str: Control string to process
+
+    Returns:
+      index of the next character after the control sequence
     """
+    if not buffer.startswith(b'\x1b['):
+      return 0
+
+    t_pos = buffer.find(b't')
+    if t_pos == -1:
+      return 0
+
     try:
-      # Check for ANSI escape sequence for window size
-      if control_str.startswith('\x1b[') and control_str.endswith('t'):
-        # Remove ESC[ prefix and 't' suffix
-        payload = control_str[2:-1].split(';')
-        if len(payload) >= 3 and payload[0] == '8':
-          # Window size in characters (rows;cols)
-          rows = int(payload[1])
-          cols = int(payload[2])
-          logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
-          winsize = struct.pack('HHHH', rows, cols, 0, 0)
-          fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+      params = buffer[2:t_pos].split(b';')
+      if len(params) >= 3 and params[0] == b'8':
+        rows = int(params[1])
+        cols = int(params[2])
+        logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
+        winsize = struct.pack('HHHH', rows, cols, 0, 0)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+        return t_pos + 1
     except Exception as e:
       logging.warning('Error handling terminal control: %s', e)
+    return 0
 
   def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
@@ -627,32 +635,13 @@ class Ghost:
         if buf == b'\x04':
           raise RuntimeError('connection terminated')
 
-        write_buffer = b''
-        i = 0
-        while i < len(buf):
-          # Check for ESC sequence
-          if buf[i:i+2] == b'\x1b[':
-            # Look for the 't' terminator
-            sequence_found = False
-            for j in range(i+2, len(buf)):
-              if buf[j:j+1] == b't':
-                # Found a complete escape sequence
-                control_seq = buf[i:j+1].decode('utf-8', errors='ignore')
-                self.HandleTTYControl(fd, control_seq)
-                # Skip the processed sequence
-                i = j + 1
-                sequence_found = True
-                break
-            if not sequence_found:
-              # No terminator found, treat as regular data
-              write_buffer += buf[i:i+1]
-              i += 1
-          else:
-            write_buffer += buf[i:i+1]
-            i += 1
-
-        if write_buffer:
-          os.write(fd, write_buffer)
+        pos = buf.find(b'\x1b[')
+        if pos != -1:
+          os.write(fd, buf[:pos])
+          consumed = self.HandleTTYControl(fd, buf[pos:])
+          os.write(fd, buf[pos+consumed:])
+        else:
+          os.write(fd, buf)
 
       # Initial buffer processing
       _ProcessBuffer(self._sock.RecvBuf())
