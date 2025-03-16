@@ -806,13 +806,10 @@ const setupWebSocket = () => {
     if (event.data instanceof Blob) {
       // Handle binary data
       const reader = new FileReader();
-      reader.onload = () => {
-        const data = new Uint8Array(reader.result);
-        // Convert binary data to string
-        const text = new TextDecoder().decode(data);
-        xterm.write(text);
+      reader.onloadend = () => {
+        xterm.write(reader.result);
       };
-      reader.readAsArrayBuffer(event.data);
+      reader.readAsText(event.data);
     } else {
       // Handle text data
       try {
