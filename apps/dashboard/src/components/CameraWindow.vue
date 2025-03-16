@@ -78,7 +78,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from "vue";
-import { useClientStore } from "@/store/clients";
+import { useClientStore } from "@/stores/clientStore";
 
 const clientStore = useClientStore();
 

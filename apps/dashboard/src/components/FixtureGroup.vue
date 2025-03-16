@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { useClientStore } from "@/store/clients";
+import { useClientStore } from "@/stores/clientStore";
 import FixtureWidget from "./FixtureWidget.vue";
 import { computed } from "vue";
 
@@ -62,10 +62,10 @@ defineProps({
 });
 
 const clientStore = useClientStore();
-const fixtures = computed(() => Array.from(clientStore.fixtures.values()));
+const fixtures = computed(() => Object.values(clientStore.fixtures.value));
 
 const removeFixture = (fixture) => {
-  clientStore.removeFixture(fixture.id);
+  clientStore.removeFixture(fixture.mid);
 };
 </script>
 
