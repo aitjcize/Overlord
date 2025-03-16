@@ -1038,10 +1038,9 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		}
 
 		termios.Cfmakeraw(&term)
-		term.Iflag &= (unix.IXON | unix.IXOFF)
-		term.Cflag |= unix.CLOCAL
-		term.Ispeed = unix.B115200
-		term.Ospeed = unix.B115200
+		term.Iflag &^= (unix.IXON | unix.IXOFF) // Disable software flow control
+		term.Cflag |= unix.CLOCAL               // Ignore modem control lines
+		term.Cflag &^= unix.CRTSCTS             // Disable hardware flow control
 
 		if err = termios.Tcsetattr(tty.Fd(), termios.TCSANOW, &term); err != nil {
 			return err

@@ -616,20 +616,12 @@ class Ghost:
       else:
         fd = os.open(self._tty_device, os.O_RDWR)
         tty.setraw(fd)
-        # 0: iflag
-        # 1: oflag
-        # 2: cflag
-        # 3: lflag
-        # 4: ispeed
-        # 5: ospeed
-        # 6: cc
-        attr = termios.tcgetattr(fd)
-        attr[0] &= ~(termios.IXON | termios.IXOFF)
-        attr[2] |= termios.CLOCAL
-        attr[2] &= ~termios.CRTSCTS
-        attr[4] = termios.B115200
-        attr[5] = termios.B115200
-        termios.tcsetattr(fd, termios.TCSANOW, attr)
+
+        attrs = termios.tcgetattr(fd)
+        attrs[0] &= ~(termios.IXON | termios.IXOFF)  # Disable software flow control
+        attrs[2] |= termios.CLOCAL                   # Ignore modem control lines
+        attrs[2] &= ~termios.CRTSCTS                 # Disable hardware flow control
+        termios.tcsetattr(fd, termios.TCSANOW, attrs)
 
       def _ProcessBuffer(buf):
         if buf == b'\x04':
