@@ -26,13 +26,15 @@ final class PortForwardViewModelTests: XCTestCase {
         let remoteHost = "example.com"
         let remotePort = 80
         let useHttps = true
+        let customName = "My Custom Port Forward"
 
         // When
         let portForward = portForwardViewModel.createPortForward(
             for: client,
             remoteHost: remoteHost,
             remotePort: remotePort,
-            useHttps: useHttps
+            useHttps: useHttps,
+            customName: customName
         )
 
         // Then
@@ -41,6 +43,7 @@ final class PortForwardViewModelTests: XCTestCase {
         XCTAssertEqual(portForward.remoteHost, remoteHost)
         XCTAssertEqual(portForward.remotePort, remotePort)
         XCTAssertEqual(portForward.useHttps, useHttps)
+        XCTAssertEqual(portForward.customName, customName)
         XCTAssertEqual(portForwardViewModel.portForwards.count, 1)
         XCTAssertEqual(portForwardViewModel.portForwards[portForward.id], portForward)
         XCTAssertEqual(portForwardViewModel.lastCreatedPortForward, portForward)
@@ -99,6 +102,34 @@ final class PortForwardViewModelTests: XCTestCase {
 
         // Verify local ports are different
         XCTAssertNotEqual(portForward1.localPort, portForward2.localPort)
+    }
+
+    func testCreatePortForwardWithoutCustomName() {
+        // Given
+        let client = Client(mid: "test-client", name: "Test Client")
+        let remoteHost = "example.com"
+        let remotePort = 80
+        let useHttps = false
+
+        // When
+        let portForward = portForwardViewModel.createPortForward(
+            for: client,
+            remoteHost: remoteHost,
+            remotePort: remotePort,
+            useHttps: useHttps
+        )
+
+        // Then
+        XCTAssertEqual(portForward.clientId, client.mid)
+        XCTAssertEqual(portForward.clientName, client.name)
+        XCTAssertEqual(portForward.remoteHost, remoteHost)
+        XCTAssertEqual(portForward.remotePort, remotePort)
+        XCTAssertEqual(portForward.useHttps, useHttps)
+        XCTAssertNil(portForward.customName)
+        XCTAssertEqual(portForward.displayName, "Test Client - example.com:80")
+        XCTAssertEqual(portForwardViewModel.portForwards.count, 1)
+        XCTAssertEqual(portForwardViewModel.portForwards[portForward.id], portForward)
+        XCTAssertEqual(portForwardViewModel.lastCreatedPortForward, portForward)
     }
 
     // Note: Testing the actual TCP and WebSocket connections would require more complex mocking

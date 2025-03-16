@@ -67,7 +67,8 @@ class PortForwardViewModel: ObservableObject {
         for client: Client,
         remoteHost: String,
         remotePort: Int,
-        useHttps: Bool = false
+        useHttps: Bool = false,
+        customName: String? = nil
     ) -> PortForward {
         // Increment local port counter to get a unique local port
         localPortCounter += 1
@@ -79,7 +80,8 @@ class PortForwardViewModel: ObservableObject {
             remoteHost: remoteHost,
             remotePort: remotePort,
             localPort: localPort,
-            useHttps: useHttps
+            useHttps: useHttps,
+            customName: customName
         )
 
         // Store the port forward

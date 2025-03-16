@@ -10,6 +10,7 @@ final class PortForwardTests: XCTestCase {
         let remotePort = 80
         let localPort = 8080
         let useHttps = true
+        let customName = "My Custom Port Forward"
 
         // When
         let portForward = PortForward(
@@ -18,7 +19,8 @@ final class PortForwardTests: XCTestCase {
             remoteHost: remoteHost,
             remotePort: remotePort,
             localPort: localPort,
-            useHttps: useHttps
+            useHttps: useHttps,
+            customName: customName
         )
 
         // Then
@@ -28,6 +30,7 @@ final class PortForwardTests: XCTestCase {
         XCTAssertEqual(portForward.remotePort, remotePort)
         XCTAssertEqual(portForward.localPort, localPort)
         XCTAssertEqual(portForward.useHttps, useHttps)
+        XCTAssertEqual(portForward.customName, customName)
         XCTAssertFalse(portForward.isActive)
         XCTAssertNil(portForward.webSocket)
     }
@@ -118,5 +121,50 @@ final class PortForwardTests: XCTestCase {
 
         // Port forwards with the same ID should be equal
         XCTAssertEqual(portForward1, portForward3)
+    }
+
+    func testDisplayNameWithCustomName() {
+        // Given
+        let customName = "My Custom Port Forward"
+        let portForward = PortForward(
+            clientId: "client1",
+            clientName: "Client",
+            remoteHost: "example.com",
+            remotePort: 80,
+            localPort: 8080,
+            customName: customName
+        )
+
+        // Then
+        XCTAssertEqual(portForward.displayName, customName)
+    }
+
+    func testDisplayNameWithoutCustomName() {
+        // Given
+        let portForward = PortForward(
+            clientId: "client1",
+            clientName: "Client",
+            remoteHost: "example.com",
+            remotePort: 80,
+            localPort: 8080
+        )
+
+        // Then
+        XCTAssertEqual(portForward.displayName, "Client - example.com:80")
+    }
+
+    func testDisplayNameWithEmptyCustomName() {
+        // Given
+        let portForward = PortForward(
+            clientId: "client1",
+            clientName: "Client",
+            remoteHost: "example.com",
+            remotePort: 80,
+            localPort: 8080,
+            customName: ""
+        )
+
+        // Then
+        XCTAssertEqual(portForward.displayName, "Client - example.com:80")
     }
 }

@@ -9,10 +9,29 @@ struct PortForwardDialog: View {
     @State private var remotePort: String = "80"
     @State private var useHttps: Bool = false
     @State private var isCreating: Bool = false
+    @State private var customName: String = ""
+
+    // Computed property for the default name
+    private var defaultName: String {
+        let clientName = client.name ?? client.mid
+        return "\(clientName) - \(remoteHost):\(remotePort)\(useHttps ? " (https)" : "")"
+    }
 
     var body: some View {
         NavigationView {
             Form {
+                Section(header: Text("Port Forward Session Name")) {
+                    TextField(defaultName, text: $customName)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .onChange(of: remoteHost) { _ in updatePlaceholder() }
+                        .onChange(of: remotePort) { _ in updatePlaceholder() }
+                        .onChange(of: useHttps) { _ in updatePlaceholder() }
+                        .placeholder(when: customName.isEmpty) {
+                            Text(defaultName).foregroundColor(.gray.opacity(0.5))
+                        }
+                }
+
                 Section(header: Text("Remote Connection Details")) {
                     TextField("Remote Host", text: $remoteHost)
                         .autocapitalization(.none)
@@ -84,21 +103,41 @@ struct PortForwardDialog: View {
         return true
     }
 
+    private func updatePlaceholder() {
+        // This function is called when any of the inputs change to update the placeholder
+        // The actual update happens automatically through the defaultName computed property
+    }
+
     private func createPortForward() {
         guard let port = Int(remotePort) else { return }
 
         isCreating = true
         print("Creating port forward for client \(client.mid) to \(remoteHost):\(remotePort) (HTTPS: \(useHttps))")
 
-        // Create the port forward
+        // Create the port forward with the custom name (if provided)
         _ = portForwardViewModel.createPortForward(
             for: client,
             remoteHost: remoteHost,
             remotePort: port,
-            useHttps: useHttps
+            useHttps: useHttps,
+            customName: customName.isEmpty ? nil : customName
         )
 
         isCreating = false
         dismiss()
+    }
+}
+
+// Extension to add placeholder text to TextField
+extension View {
+    func placeholder<Content: View>(
+        when shouldShow: Bool,
+        alignment: Alignment = .leading,
+        @ViewBuilder placeholder: () -> Content
+    ) -> some View {
+        ZStack(alignment: alignment) {
+            placeholder().opacity(shouldShow ? 1 : 0)
+            self
+        }
     }
 }

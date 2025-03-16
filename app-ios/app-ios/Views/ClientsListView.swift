@@ -172,8 +172,15 @@ struct SearchBar: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(Color(hex: "64748b"))
 
-            TextField(placeholder, text: $text)
-                .foregroundColor(.white)
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .foregroundColor(Color(hex: "94a3b8")) // Lighter color for placeholder
+                }
+
+                TextField("", text: $text)
+                    .foregroundColor(.white)
+            }
 
             if !text.isEmpty {
                 Button(
@@ -201,15 +208,9 @@ struct ClientRow: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(client.name ?? client.mid)
-                    .font(.headline)
-                    .foregroundColor(.white)
-
-                Text(client.mid)
-                    .font(.caption)
-                    .foregroundColor(Color(hex: "94a3b8"))
-            }
+            Text(client.name ?? client.mid)
+                .font(.headline)
+                .foregroundColor(.white)
 
             Spacer()
 

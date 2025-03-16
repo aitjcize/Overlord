@@ -150,59 +150,49 @@ struct PortForwardRow: View {
     }()
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 12) {
-                Image(systemName: "network")
-                    .font(.system(size: 20))
-                    .foregroundColor(portForward.isActive ? Color(hex: "3b82f6") : Color(hex: "ef4444"))
-                    .frame(width: 40, height: 40)
-                    .background(Color(hex: "334155"))
-                    .cornerRadius(8)
+        HStack(spacing: 12) {
+            Image(systemName: "network")
+                .font(.system(size: 20))
+                .foregroundColor(Color(hex: "3b82f6"))
+                .frame(width: 40, height: 40)
+                .background(Color(hex: "334155"))
+                .cornerRadius(8)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(portForward.displayName)
-                        .font(.headline)
-                        .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(portForward.displayName)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                HStack {
+                    // Format the port numbers without commas
+                    let localPortStr = portFormatter
+                        .string(from: NSNumber(value: portForward.localPort)) ?? "\(portForward.localPort)"
+                    let remotePortStr = portFormatter
+                        .string(from: NSNumber(value: portForward.remotePort)) ?? "\(portForward.remotePort)"
+
+                    Text("\(localPortStr) → \(portForward.remoteHost):\(remotePortStr)")
+                        .font(.caption)
+                        .foregroundColor(Color(hex: "94a3b8"))
                         .lineLimit(1)
-                        .truncationMode(.tail)
-                        // Calculate available width based on screen size and other elements
-                        .frame(maxWidth: geometry.size.width - 80, alignment: .leading)
-
-                    HStack {
-                        // Format the port numbers without commas
-                        let localPortStr = portFormatter
-                            .string(from: NSNumber(value: portForward.localPort)) ?? "\(portForward.localPort)"
-                        let remotePortStr = portFormatter
-                            .string(from: NSNumber(value: portForward.remotePort)) ?? "\(portForward.remotePort)"
-
-                        Text("localhost:\(localPortStr) → \(portForward.remoteHost):\(remotePortStr)")
-                            .font(.caption)
-                            .foregroundColor(Color(hex: "94a3b8"))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            // Calculate available width based on inactive status
-                            .frame(
-                                maxWidth: portForward.isActive ? geometry.size.width - 80 : geometry.size.width - 150,
-                                alignment: .leading
-                            )
-
-                        if !portForward.isActive {
-                            Text("Inactive")
-                                .font(.caption)
-                                .foregroundColor(Color(hex: "ef4444"))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color(hex: "334155"))
-                                .cornerRadius(4)
-                        }
-                    }
+                        .truncationMode(.middle)
                 }
-
-                Spacer()
             }
-            .padding(.vertical, 8)
+
+            Spacer()
+
+            if !portForward.isActive {
+                Text("Inactive")
+                    .font(.caption)
+                    .foregroundColor(Color(hex: "ef4444"))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color(hex: "334155"))
+                    .cornerRadius(4)
+            }
         }
-        .frame(height: 70)
+        .padding(.vertical, 8)
         .listRowBackground(Color(hex: "1e293b"))
     }
 }
@@ -214,6 +204,7 @@ struct WebView: UIViewRepresentable {
     @Binding var currentURL: URL?
     @Binding var canGoBack: Bool
     @Binding var canGoForward: Bool
+    @Binding var progressValue: Float
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -247,6 +238,9 @@ struct WebView: UIViewRepresentable {
         // Set the navigation delegate to handle SSL certificate validation
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
+
+        // Add observer for progress
+        context.coordinator.addProgressObserver(webView)
 
         // Load the URL
         if let url = URL(string: url.absoluteString) {
@@ -283,9 +277,33 @@ struct WebView: UIViewRepresentable {
 
     class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var parent: WebView
+        private var progressObservation: NSKeyValueObservation?
 
         init(_ parent: WebView) {
             self.parent = parent
+        }
+
+        deinit {
+            progressObservation?.invalidate()
+        }
+
+        func addProgressObserver(_ webView: WKWebView) {
+            progressObservation = webView.observe(\.estimatedProgress, options: [.new]) { [weak self] webView, _ in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    self.parent.progressValue = Float(webView.estimatedProgress)
+
+                    // When progress reaches 1.0, wait a bit and then hide the loading indicator
+                    if webView.estimatedProgress >= 1.0 {
+                        // Small delay to ensure the page is fully rendered
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if webView.estimatedProgress >= 1.0 {
+                                self.parent.isLoading = false
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Add method to handle cookies
@@ -327,7 +345,8 @@ struct WebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             // Ensure cookies are saved after page load completes
             configureCookieHandling()
-            parent.isLoading = false
+
+            // The loading state will be updated by the progress observer
 
             // Update current URL and navigation state
             if let url = webView.url {
@@ -422,43 +441,30 @@ struct WebViewContainer: View {
     @State private var loadError: Error?
     @State private var isLoading = true
     @State private var currentURL: URL?
-    @State private var urlString: String = ""
-    @State private var showURLBar: Bool = false
     @State private var canGoBack: Bool = false
     @State private var canGoForward: Bool = false
     @State private var navigationStateTimer: Timer?
+    @State private var progressValue: Float = 0.0
+    @State private var isAnimating: Bool = false
 
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // URL Bar (shown when tapping the title)
-                if showURLBar {
-                    HStack {
-                        TextField("URL", text: $urlString, onCommit: {
-                            loadURL()
-                        })
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .padding(8)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                // Animated loading progress bar
+                ZStack(alignment: .leading) {
+                    // Background track
+                    Rectangle()
+                        .frame(height: 3)
+                        .foregroundColor(Color.gray.opacity(0.2))
 
-                        Button(
-                            action: {
-                                loadURL()
-                            },
-                            label: {
-                                Image(systemName: "arrow.right.circle.fill")
-                                    .foregroundColor(.blue)
-                            }
-                        )
-                        .padding(.horizontal, 8)
+                    // Animated progress bar
+                    if isLoading {
+                        LoadingProgressBar(progress: $progressValue, isAnimating: $isAnimating)
+                            .frame(height: 3)
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemBackground))
                 }
+                .opacity(isLoading ? 1 : 0)
+                .animation(.easeInOut(duration: 0.3), value: isLoading)
 
                 ZStack {
                     if loadError == nil {
@@ -468,11 +474,14 @@ struct WebViewContainer: View {
                             isLoading: $isLoading,
                             currentURL: $currentURL,
                             canGoBack: $canGoBack,
-                            canGoForward: $canGoForward
+                            canGoForward: $canGoForward,
+                            progressValue: $progressValue
                         )
                         .onAppear {
                             currentURL = url
-                            urlString = url.absoluteString
+                            isLoading = true
+                            progressValue = 0.0
+                            startLoadingAnimation()
 
                             // Check if the app was in background and restart the TCP server if needed
                             if OverlordDashboardApp.wasInBackground {
@@ -496,10 +505,8 @@ struct WebViewContainer: View {
                             navigationStateTimer?.invalidate()
                             navigationStateTimer = nil
                         }
-                        .onChange(of: currentURL) { _, newURL in
-                            if let newURL = newURL {
-                                urlString = newURL.absoluteString
-                            }
+                        .onChange(of: currentURL) { _, _ in
+                            // We still track URL changes but don't display the URL bar
                         }
                     }
 
@@ -529,6 +536,8 @@ struct WebViewContainer: View {
                                     )
                                     loadError = nil
                                     isLoading = true
+                                    progressValue = 0.0
+                                    startLoadingAnimation()
                                 },
                                 label: {
                                     Text("Retry")
@@ -549,21 +558,9 @@ struct WebViewContainer: View {
             }
             .navigationBarTitle(title, displayMode: .inline)
             .navigationBarItems(
-                leading: HStack {
-                    Button("Close") {
-                        // Safely dismiss the view
-                        presentationMode.wrappedValue.dismiss()
-                    }
-
-                    // Toggle URL bar button
-                    Button(
-                        action: {
-                            showURLBar.toggle()
-                        },
-                        label: {
-                            Image(systemName: showURLBar ? "chevron.up" : "chevron.down")
-                        }
-                    )
+                leading: Button("Close") {
+                    // Safely dismiss the view
+                    presentationMode.wrappedValue.dismiss()
                 },
                 trailing: HStack(spacing: 16) {
                     // Back button
@@ -571,6 +568,9 @@ struct WebViewContainer: View {
                         action: {
                             if let webView = getWebView() {
                                 webView.goBack()
+                                isLoading = true
+                                progressValue = 0.0
+                                startLoadingAnimation()
                             }
                         },
                         label: {
@@ -585,6 +585,9 @@ struct WebViewContainer: View {
                         action: {
                             if let webView = getWebView() {
                                 webView.goForward()
+                                isLoading = true
+                                progressValue = 0.0
+                                startLoadingAnimation()
                             }
                         },
                         label: {
@@ -594,17 +597,35 @@ struct WebViewContainer: View {
                     .disabled(!canGoForward)
                     .opacity(canGoForward ? 1.0 : 0.5)
 
-                    // Refresh button
-                    Button(
-                        action: {
-                            if let webView = getWebView() {
-                                webView.reload()
+                    // Menu button with options
+                    Menu {
+                        // Refresh option
+                        Button(
+                            action: {
+                                if let webView = getWebView() {
+                                    webView.reload()
+                                    isLoading = true
+                                    progressValue = 0.0
+                                    startLoadingAnimation()
+                                }
+                            },
+                            label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
                             }
-                        },
-                        label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    )
+                        )
+
+                        // Clear cookies option
+                        Button(
+                            action: {
+                                clearCookies()
+                            },
+                            label: {
+                                Label("Clear Website Data", systemImage: "trash")
+                            }
+                        )
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
             )
         }
@@ -618,20 +639,76 @@ struct WebViewContainer: View {
         }
     }
 
-    private func loadURL() {
-        guard let url = URL(string: urlString) else {
-            print("Invalid URL: \(urlString)")
+    private func startLoadingAnimation() {
+        isAnimating = true
+    }
+
+    // Function to clear cookies for the current website
+    private func clearCookies() {
+        guard let webView = getWebView(), let currentURL = currentURL else {
             return
         }
 
-        if let webView = getWebView() {
-            webView.load(URLRequest(url: url))
+        // Get the host from the current URL
+        guard let host = currentURL.host else {
+            print("Could not determine host from URL: \(currentURL)")
+            return
         }
 
-        // Hide keyboard
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        showClearDataConfirmationAlert(for: host) { confirmed in
+            if confirmed {
+                self.performDataClearing(for: host, webView: webView)
+            }
+        }
     }
+}
 
+// MARK: - Loading Progress Bar
+
+struct LoadingProgressBar: View {
+    @Binding var progress: Float
+    @Binding var isAnimating: Bool
+    @State private var animationWidth: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                // Main progress based on actual progress value
+                Rectangle()
+                    .foregroundColor(Color.blue)
+                    .frame(width: geometry.size.width * CGFloat(progress))
+
+                // Animated indeterminate progress indicator
+                if progress < 0.9 {
+                    Rectangle()
+                        .foregroundColor(Color.blue.opacity(0.5))
+                        .frame(width: geometry.size.width * 0.2)
+                        .offset(x: animationWidth)
+                        .onAppear {
+                            if isAnimating {
+                                withAnimation(Animation.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                                    animationWidth = geometry.size.width * 0.8
+                                }
+                            }
+                        }
+                        .onChange(of: isAnimating) { _, newValue in
+                            if newValue {
+                                withAnimation(Animation.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+                                    animationWidth = geometry.size.width * 0.8
+                                }
+                            } else {
+                                animationWidth = 0
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - WebViewContainer Helper Methods
+
+extension WebViewContainer {
     // Helper method to get the WKWebView from the view hierarchy
     private func getWebView() -> WKWebView? {
         // Find the WKWebView in the view hierarchy
@@ -669,5 +746,98 @@ struct WebViewContainer: View {
         }
 
         return nil
+    }
+
+    // Helper method to show confirmation alert
+    private func showClearDataConfirmationAlert(for host: String, completion: @escaping (Bool) -> Void) {
+        // Create a confirmation alert
+        let alert = UIAlertController(
+            title: "Clear Website Data",
+            message: "Are you sure you want to clear all cookies and website data for \(host)?",
+            preferredStyle: .alert
+        )
+
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in
+            completion(false)
+        })
+
+        alert.addAction(UIAlertAction(title: "Clear", style: .destructive) { _ in
+            completion(true)
+        })
+
+        // Present the alert
+        presentAlert(alert)
+    }
+
+    // Helper method to perform the actual data clearing
+    private func performDataClearing(for host: String, webView: WKWebView) {
+        // Show loading indicator
+        let loadingAlert = UIAlertController(
+            title: "Clearing Data",
+            message: "Please wait...",
+            preferredStyle: .alert
+        )
+
+        presentAlert(loadingAlert)
+
+        // Clear cookies and website data
+        clearCookiesAndData(for: host) {
+            // Dismiss loading alert and reload the page
+            DispatchQueue.main.async {
+                loadingAlert.dismiss(animated: true) {
+                    // Reload the page after clearing cookies
+                    webView.reload()
+                }
+            }
+        }
+    }
+
+    // Helper method to clear cookies and website data
+    private func clearCookiesAndData(for host: String, completion: @escaping () -> Void) {
+        // Clear cookies for the current website
+        WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+            for cookie in cookies where cookie.domain.contains(host) {
+                WKWebsiteDataStore.default().httpCookieStore.delete(cookie) {
+                    print("Deleted cookie: \(cookie.name)")
+                }
+            }
+
+            // Also clear from HTTPCookieStorage
+            if let cookies = HTTPCookieStorage.shared.cookies {
+                for cookie in cookies where cookie.domain.contains(host) {
+                    HTTPCookieStorage.shared.deleteCookie(cookie)
+                }
+            }
+
+            // Clear all website data types
+            let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
+
+            WKWebsiteDataStore.default().fetchDataRecords(ofTypes: dataTypes) { records in
+                let recordsToRemove = records.filter { record in
+                    record.displayName.contains(host)
+                }
+
+                WKWebsiteDataStore.default().removeData(
+                    ofTypes: dataTypes,
+                    for: recordsToRemove
+                ) {
+                    print("Removed website data for \(host)")
+                    completion()
+                }
+            }
+        }
+    }
+
+    // Helper method to present an alert
+    private func presentAlert(_ alert: UIAlertController) {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let rootViewController = windowScene.windows.first?.rootViewController
+        {
+            var currentController = rootViewController
+            while let presentedController = currentController.presentedViewController {
+                currentController = presentedController
+            }
+            currentController.present(alert, animated: true)
+        }
     }
 }

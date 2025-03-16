@@ -14,6 +14,7 @@ struct PortForward: Identifiable, Equatable {
     let remotePort: Int
     let localPort: Int
     let useHttps: Bool
+    let customName: String?
     var isActive: Bool = false
     var webSocket: URLSessionWebSocketTask?
 
@@ -26,6 +27,7 @@ struct PortForward: Identifiable, Equatable {
             lhs.remotePort == rhs.remotePort &&
             lhs.localPort == rhs.localPort &&
             lhs.useHttps == rhs.useHttps &&
+            lhs.customName == rhs.customName &&
             lhs.isActive == rhs.isActive
         // Note: we don't compare webSocket as it's not relevant for equality
     }
@@ -37,7 +39,8 @@ struct PortForward: Identifiable, Equatable {
         remoteHost: String,
         remotePort: Int,
         localPort: Int,
-        useHttps: Bool = false
+        useHttps: Bool = false,
+        customName: String? = nil
     ) {
         self.id = id
         self.clientId = clientId
@@ -46,9 +49,13 @@ struct PortForward: Identifiable, Equatable {
         self.remotePort = remotePort
         self.localPort = localPort
         self.useHttps = useHttps
+        self.customName = customName
     }
 
     var displayName: String {
+        if let customName = customName, !customName.isEmpty {
+            return customName
+        }
         return "\(clientName) - \(remoteHost):\(remotePort)\(useHttps ? " (https)" : "")"
     }
 
