@@ -155,6 +155,40 @@
             </div>
           </div>
         </div>
+
+        <!-- Spacer to push upgrade button to bottom -->
+        <div class="flex-grow"></div>
+
+        <!-- Upgrade Button -->
+        <div class="mt-auto">
+          <button
+            @click="triggerUpgrade"
+            class="btn btn-block bg-emerald-600 hover:bg-emerald-700 text-white border-none"
+            :class="{
+              'opacity-70 pointer-events-none': clientStore.isUpgrading,
+            }"
+            :disabled="clientStore.isUpgrading"
+          >
+            <span
+              v-if="clientStore.isUpgrading"
+              class="loading loading-spinner loading-sm mr-2"
+            ></span>
+            <svg
+              v-else
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5 mr-2"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                fill-rule="evenodd"
+                d="M10 17a1 1 0 001-1v-5.586l3.293 3.293a1 1 0 001.414-1.414l-5-5a1 1 0 00-1.414 0l-5 5a1 1 0 101.414 1.414L9 10.414V16a1 1 0 001 1z"
+                clip-rule="evenodd"
+              />
+            </svg>
+            {{ upgradeButtonText }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -167,6 +201,32 @@ import { ref, onMounted, provide, onBeforeUnmount, watch } from "vue";
 
 const clientStore = useClientStore();
 const terminalStore = useTerminalStore();
+const upgradeStatus = ref("idle"); // 'idle', 'success', 'error'
+const upgradeButtonText = ref("Upgrade All Clients");
+
+// Reset upgrade status after a delay
+const resetUpgradeStatus = () => {
+  setTimeout(() => {
+    upgradeStatus.value = "idle";
+    upgradeButtonText.value = "Upgrade All Clients";
+  }, 3000);
+};
+
+// Trigger client upgrade
+const triggerUpgrade = async () => {
+  upgradeButtonText.value = "Upgrading...";
+  const result = await clientStore.upgradeClients();
+
+  if (result.success) {
+    upgradeStatus.value = "success";
+    upgradeButtonText.value = "Upgrade Initiated!";
+  } else {
+    upgradeStatus.value = "error";
+    upgradeButtonText.value = "Upgrade Failed";
+  }
+
+  resetUpgradeStatus();
+};
 
 const selectClient = (client) => {
   clientStore.setActiveClientId(client.mid);

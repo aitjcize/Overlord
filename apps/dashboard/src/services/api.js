@@ -26,4 +26,15 @@ export const apiService = {
       throw error;
     }
   },
+
+  async upgradeClients() {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/agents/upgrade`);
+      return response.data;
+    } catch (error) {
+      console.error("Error triggering client upgrade:", error);
+      // Propagate the error so it can be handled by the caller
+      throw error;
+    }
+  },
 };

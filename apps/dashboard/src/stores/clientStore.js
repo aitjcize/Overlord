@@ -11,6 +11,7 @@ export const useClientStore = defineStore("clients", () => {
   const cameras = ref({});
   const activeClientId = ref(null);
   const filterPattern = ref("");
+  const isUpgrading = ref(false);
 
   // Getters
   const clientsArray = computed(() => Object.values(clients.value));
@@ -121,6 +122,19 @@ export const useClientStore = defineStore("clients", () => {
     activeClientId.value = mid;
   }
 
+  async function upgradeClients() {
+    try {
+      isUpgrading.value = true;
+      await apiService.upgradeClients();
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to upgrade clients:", error);
+      return { success: false, error };
+    } finally {
+      isUpgrading.value = false;
+    }
+  }
+
   // Return the store methods and state
   return {
     // State
@@ -130,6 +144,7 @@ export const useClientStore = defineStore("clients", () => {
     cameras,
     activeClientId,
     filterPattern,
+    isUpgrading,
 
     // Getters
     clientsArray,
@@ -146,5 +161,6 @@ export const useClientStore = defineStore("clients", () => {
     removeCamera,
     setFilterPattern,
     setActiveClientId,
+    upgradeClients,
   };
 });
