@@ -92,6 +92,14 @@ class ClientViewModel: ObservableObject {
     private func handleAgentLeft(_ client: Client) {
         clients.removeAll { $0.mid == client.mid }
         sortClients()
+
+        // Post a notification that a client has left
+        // This will be observed by PortForwardViewModel to clean up port forwards
+        NotificationCenter.default.post(
+            name: .clientDisconnected,
+            object: nil,
+            userInfo: ["clientId": client.mid]
+        )
     }
 
     func setFilterPattern(_ pattern: String) {
@@ -151,6 +159,7 @@ class ClientViewModel: ObservableObject {
 
 extension Notification.Name {
     static let logoutRequested = Notification.Name("logoutRequested")
+    static let clientDisconnected = Notification.Name("clientDisconnected")
 }
 
 // Extension to convert Publisher to async/await

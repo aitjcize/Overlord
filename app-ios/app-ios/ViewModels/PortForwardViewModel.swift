@@ -52,6 +52,30 @@ class PortForwardViewModel: ObservableObject {
 
     init(webSocketService: WebSocketService = WebSocketService()) {
         self.webSocketService = webSocketService
+
+        // Set up notification observer for client disconnection
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleClientDisconnected(_:)),
+            name: .clientDisconnected,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleClientDisconnected(_ notification: Notification) {
+        // Extract the client ID from the notification
+        guard let clientId = notification.userInfo?["clientId"] as? String else {
+            return
+        }
+
+        // Close all port forwards for this client
+        DispatchQueue.main.async { [weak self] in
+            self?.closeAllPortForwardsForClient(clientId: clientId)
+        }
     }
 
     // Helper method for logging errors
@@ -140,6 +164,17 @@ class PortForwardViewModel: ObservableObject {
 
         // Notify observers that a port forward was removed
         objectWillChange.send()
+    }
+
+    // Close all port forwards for a specific client
+    func closeAllPortForwardsForClient(clientId: String) {
+        // Get all port forward IDs for this client
+        let portForwardIds = portForwards.values.filter { $0.clientId == clientId }.map { $0.id }
+
+        // Close each port forward
+        for id in portForwardIds {
+            closePortForward(id: id)
+        }
     }
 
     private func startLocalServer(for portForward: PortForward) {
