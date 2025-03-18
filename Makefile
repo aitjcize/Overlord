@@ -15,7 +15,10 @@ PY_FILES=$(shell find py -name "*.py")
 
 # Supported architectures for ghost binary
 GHOST_ARCHS=amd64 386 arm64 arm
-GHOST_BINS=$(addprefix $(BIN)/ghost.linux., $(GHOST_ARCHS))
+GHOST_LINUX_BINS=$(addprefix $(BIN)/ghost.linux., $(GHOST_ARCHS))
+
+GHOST_DARWIN_ARCHS=amd64 arm64
+GHOST_DARWIN_BINS=$(addprefix $(BIN)/ghost.darwin., $(GHOST_DARWIN_ARCHS))
 
 # Get list of apps with package.json
 APP_DIRS=$(shell find apps -maxdepth 1 -mindepth 1 \
@@ -69,9 +72,24 @@ $(BIN)/ghost.linux.%:
 	$(call cmd_msg,GO,$(notdir $@))
 	@GOOS=linux GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
-ghost-all: $(GHOST_BINS) $(GHOST_BINS:=.sha1)
+ghost-linux: $(GHOST_LINUX_BINS) $(GHOST_LINUX_BINS:=.sha1)
 
-build-go: overlordd ghost ghost-all
+$(BIN)/ghost.darwin.%.sha1: $(BIN)/ghost.darwin.%
+	$(call cmd_msg,SHA1,$(notdir $<))
+	@cd $(BIN) && sha1sum $(notdir $<) | awk '{ print $$1 }' > $(notdir $@)
+
+$(BIN)/ghost.darwin.%:
+	$(call cmd_msg,GO,$(notdir $@))
+	@PATH="/osxcross/bin:$$PATH" \
+	LD_LIBRARY_PATH="/osxcross/lib:$$LD_LIBRARY_PATH" \
+	CC=o64-clang CXX=o64-clang++  \
+	MACOSX_DEPLOYMENT_TARGET=10.8 \
+	CGO_ENABLED=1 \
+	GOOS=darwin GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
+
+ghost-darwin: $(GHOST_DARWIN_BINS) $(GHOST_DARWIN_BINS:=.sha1)
+
+build-go: overlordd ghost ghost-linux
 
 build-py:
 	@ln -sf ../py/ghost.py bin

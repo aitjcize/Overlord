@@ -1,12 +1,17 @@
 # Build go app.
+
+FROM crazymax/osxcross:latest-alpine AS osxcross
 FROM golang:alpine AS gobuilder
 
 RUN mkdir -p /src
 WORKDIR /src
 COPY . .
 
-RUN apk update && apk add make gcc linux-headers libc-dev
+RUN apk update && apk add make gcc linux-headers libc-dev clang lld musl-dev
+
 RUN make STATIC=true build-go
+RUN --mount=type=bind,from=osxcross,source=/osxcross,target=/osxcross \
+    make ghost-darwin
 
 FROM python:alpine AS pybuilder
 
