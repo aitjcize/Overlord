@@ -847,6 +847,26 @@ class Ghost:
     self._last_ping = self.Timestamp()
     self.SendRequest('ping', {}, timeout_handler, _PING_TIMEOUT)
 
+  def _Fstat(self, path):
+    if not os.path.isabs(path):
+      raise RuntimeError(f"absolute path required: {path}")
+
+    entry = {'exists': os.path.exists(path)}
+    if entry['exists']:
+      stat_info = os.lstat(path)
+      entry['path'] = path
+      entry['perm'] = stat_info.st_mode
+      entry['size'] = stat_info.st_size
+      entry['mtime'] = int(stat_info.st_mtime)
+      entry['is_dir'] = os.path.isdir(path)
+      entry['is_symlink'] = stat.S_ISLNK(stat_info.st_mode)
+
+      if entry['is_symlink']:
+        entry['link_target'] = os.readlink(path)
+        entry['is_dir'] = False
+
+    return entry
+
   def HandleListTreeRequest(self, msg):
     """Handle a request to list directory contents recursively."""
     payload = msg['payload']
@@ -862,24 +882,12 @@ class Ghost:
         raise RuntimeError(f"No such file or directory: {path}")
 
       entries = []
+      entries.append(self._Fstat(path))
       for root, dirs, files in os.walk(path):
         for file in files:
           file_path = os.path.join(root, file)
           try:
-            file_stat = os.lstat(file_path)
-            entry = {
-              'name': file,
-              'path': file_path,
-              'size': file_stat.st_size,
-              'perm': file_stat.st_mode,
-              'mtime': int(file_stat.st_mtime),
-              'is_dir': False,
-              'is_symlink': stat.S_ISLNK(file_stat.st_mode),
-            }
-            if entry['is_symlink']:
-              entry['link_target'] = os.readlink(file_path)
-
-            entries.append(entry)
+            entries.append(self._Fstat(file_path))
           except OSError as e:
             logging.exception(e)
             pass
@@ -887,21 +895,7 @@ class Ghost:
         for dir in dirs:
           dir_path = os.path.join(root, dir)
           try:
-            dir_stat = os.lstat(dir_path)
-            entry = {
-              'name': dir,
-              'path': dir_path,
-              'size': dir_stat.st_size,
-              'perm': dir_stat.st_mode,
-              'mtime': int(dir_stat.st_mtime),
-              'is_dir': True,
-              'is_symlink': stat.S_ISLNK(dir_stat.st_mode),
-            }
-            if entry['is_symlink']:
-              entry['is_dir'] = False
-              entry['link_target'] = os.readlink(dir_path)
-
-            entries.append(entry)
+            entries.append(self._Fstat(dir_path))
           except OSError:
             pass
 
@@ -924,21 +918,7 @@ class Ghost:
     path = os.path.expanduser(path)
 
     try:
-      result = {'exists': os.path.exists(path)}
-
-      if result['exists']:
-        stat_info = os.stat(path)
-        result['is_dir'] = os.path.isdir(path)
-        result['perm'] = stat_info.st_mode
-        result['size'] = stat_info.st_size
-        result['mod_time'] = int(stat_info.st_mtime)
-        result['is_symlink'] = stat.S_ISLNK(stat_info.st_mode)
-
-        if result['is_symlink']:
-          result['link_target'] = os.readlink(path)
-          result['iis_dir'] = False
-
-      self.SendResponse(msg, SUCCESS, result)
+      self.SendResponse(msg, SUCCESS, self._Fstat(path))
     except Exception as e:
       self.SendErrorResponse(msg, str(e))
 

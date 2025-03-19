@@ -42,6 +42,7 @@ import yaml
 _CERT_DIR = os.path.expanduser('~/.config/ovl')
 
 _DEBUG = False
+_DEBUG_NO_KILL = False
 _ESCAPE = '~'
 _BUFSIZ = 8192
 _DEFAULT_HTTPS_PORT = 443
@@ -746,6 +747,29 @@ def ParseMethodSubCommands(cls):
   return cls
 
 
+class FileEntry:
+  """Class to represent a file entry with its metadata."""
+
+  def __init__(self, path, perm=0o644, is_symlink=False, link_target='', is_dir=False):
+    self.path = path
+    self.perm = perm
+    self.is_symlink = is_symlink
+    self.link_target = link_target
+    self.is_dir = is_dir
+
+  def __repr__(self):
+    return f"{self.ftype} {self.path} {oct(self.perm)[2:]} {self.link_target}"
+
+  @property
+  def name(self):
+    return os.path.basename(self.path.rstrip('/'))
+
+  @property
+  def ftype(self):
+    if self.is_dir:
+      return 'd'
+    return 'l' if self.is_symlink else 'f'
+
 @ParseMethodSubCommands
 class OverlordCliClient:
   """Overlord command line interface client."""
@@ -912,7 +936,7 @@ class OverlordCliClient:
     self._state = DaemonState.FromDict(self._server.State())
     sha1sum = GetVersionDigest()
 
-    if sha1sum != self._state.version_sha1sum:
+    if sha1sum != self._state.version_sha1sum and not _DEBUG_NO_KILL:
       print('ovl server is out of date.  killing...')
       KillGraceful(self._server.GetPid())
       self.StartServer()
@@ -1125,27 +1149,6 @@ class OverlordCliClient:
     if self._state.ssh_pid is not None:
       KillGraceful(self._state.ssh_pid)
 
-  # FileEntry class to represent file entries
-  class FileEntry:
-    """Class to represent a file entry with its metadata."""
-
-    def __init__(self, path, perm=0o644, is_symlink=False, link_target='', is_dir=False):
-      self.path = path
-      self.perm = perm
-      self.is_symlink = is_symlink
-      self.link_target = link_target
-      self.is_dir = is_dir
-
-    @property
-    def name(self):
-      return os.path.basename(self.path.rstrip('/'))
-
-    @property
-    def ftype(self):
-      if self.is_dir:
-        return 'd'
-      return 'l' if self.is_symlink else 'f'
-
   def _SizeToHuman(self, size_in_bytes):
     """Convert size in bytes to human readable format.
 
@@ -1318,7 +1321,7 @@ class OverlordCliClient:
         is_symlink = entry.get('is_symlink', False)
         link_target = entry.get('link_target', '')
 
-        entries.append(self.FileEntry(
+        entries.append(FileEntry(
             path=file_path,
             perm=perm,
             is_symlink=is_symlink,
@@ -1710,7 +1713,7 @@ class OverlordCliClient:
       is_symlink = os.path.islink(path)
       link_target = os.readlink(path) if is_symlink else ''
 
-      return [self.FileEntry(
+      return [FileEntry(
           path=path,
           perm=perm,
           is_symlink=is_symlink,
@@ -1728,7 +1731,7 @@ class OverlordCliClient:
         is_symlink = os.path.islink(dir_path)
         link_target = os.readlink(dir_path) if is_symlink else ''
 
-        results.append(self.FileEntry(
+        results.append(FileEntry(
             path=dir_path,
             perm=perm,
             is_symlink=is_symlink,
@@ -1744,7 +1747,7 @@ class OverlordCliClient:
         is_symlink = os.path.islink(file_path)
         link_target = os.readlink(file_path) if is_symlink else ''
 
-        results.append(self.FileEntry(
+        results.append(FileEntry(
             path=file_path,
             perm=perm,
             is_symlink=is_symlink,

@@ -572,7 +572,7 @@ func (ghost *Ghost) handleFstatRequest(req *Request) error {
 		result["is_dir"] = fileInfo.IsDir()
 		result["perm"] = fileInfo.Mode().Perm()
 		result["size"] = fileInfo.Size()
-		result["mod_time"] = fileInfo.ModTime().Unix()
+		result["mtime"] = fileInfo.ModTime().Unix()
 		isSymlink := (fileInfo.Mode() & os.ModeSymlink) != 0
 		result["is_symlink"] = isSymlink
 
@@ -1492,20 +1492,12 @@ func (ghost *Ghost) ListTree(path string) ([]map[string]interface{}, error) {
 			return err
 		}
 
-		relPath, err := filepath.Rel(path, filePath)
-		if err != nil {
-			return err
-		}
-		if relPath == "." {
-			return nil
-		}
 		isSymlink := (info.Mode() & os.ModeSymlink) != 0
 		entry := map[string]interface{}{
-			"name":       info.Name(),
 			"path":       filePath,
 			"size":       info.Size(),
 			"perm":       info.Mode().Perm(),
-			"mod_time":   info.ModTime().Unix(),
+			"mtime":      info.ModTime().Unix(),
 			"is_dir":     info.IsDir(),
 			"is_symlink": isSymlink,
 		}

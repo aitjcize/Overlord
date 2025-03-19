@@ -9,7 +9,7 @@ from unittest.mock import patch
 # Add scripts directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from ovl import OverlordCliClient
+from ovl import OverlordCliClient, FileEntry
 
 
 class FileSystemTestCase(unittest.TestCase):
@@ -60,7 +60,7 @@ class FileSystemTestCase(unittest.TestCase):
             abs_path = os.path.join(base_path, full_path)
 
             if info["is_dir"]:
-                entries.append(self.cli.FileEntry(path=abs_path, is_dir=True))
+                entries.append(FileEntry(path=abs_path, is_dir=True))
                 if "children" in info:
                     entries.extend(
                         self._build_file_entries(
@@ -68,7 +68,7 @@ class FileSystemTestCase(unittest.TestCase):
                         )
                     )
             else:
-                entries.append(self.cli.FileEntry(path=abs_path, is_dir=False))
+                entries.append(FileEntry(path=abs_path, is_dir=False))
 
         return entries
 
@@ -124,28 +124,31 @@ class PushUnittest(FileSystemTestCase):
             if self.remote_exists and self.remote_is_dir:
                 return {
                     "exists": True,
+                    "path": path,
                     "is_dir": True,
                     "mode": 0o755,
                     "size": 4096,
-                    "modTime": "2023-01-01T00:00:00Z",
+                    "mtime": "2023-01-01T00:00:00Z",
                 }
             elif self.remote_exists and not self.remote_is_dir:
                 return {
                     "exists": True,
+                    "path": path,
                     "is_dir": False,
                     "mode": 0o644,
                     "size": 1024,
-                    "modTime": "2023-01-01T00:00:00Z",
+                    "mtime": "2023-01-01T00:00:00Z",
                 }
             else:
                 return {"exists": False}
         elif path == os.path.join(self.user_home, "single_file"):
             return {
                 "exists": True,
+                "path": path,
                 "is_dir": False,
                 "mode": 0o644,
                 "size": 1024,
-                "modTime": "2023-01-01T00:00:00Z",
+                "mtime": "2023-01-01T00:00:00Z",
             }
         return {"exists": False}
 
@@ -443,42 +446,36 @@ class PullUnittest(FileSystemTestCase):
             path = os.path.join(self.remote_root, path)
 
         if path == os.path.join(self.remote_root, "single_file"):
-            return [self.cli.FileEntry(path=path, is_dir=False)]
+            return [FileEntry(path=path, is_dir=False)]
         elif path == os.path.join(self.remote_root, "some_dir"):
             # Create a list to hold all entries
             entries = []
 
-            # Add the root directory entry
-            entries.append(self.cli.FileEntry(path=path, is_dir=True))
+            entries.append(FileEntry(path=path, is_dir=True))
 
-            # Add entry for a/b file
             entries.append(
-                self.cli.FileEntry(
+                FileEntry(
                     path=os.path.join(path, "a/b"), is_dir=False
                 )
             )
 
-            # Add entry for a directory
             entries.append(
-                self.cli.FileEntry(
+                FileEntry(
                     path=os.path.join(path, "a"), is_dir=True
                 )
             )
 
-            # Add entry for a/c directory
             entries.append(
-                self.cli.FileEntry(
+                FileEntry(
                     path=os.path.join(path, "a/c"), is_dir=True
                 )
             )
 
-            # Add entry for a/c/d file
             entries.append(
-                self.cli.FileEntry(
+                FileEntry(
                     path=os.path.join(path, "a/c/d"), is_dir=False
                 )
             )
-
             return entries
         else:
             raise RuntimeError("ls: No such file or directory")
