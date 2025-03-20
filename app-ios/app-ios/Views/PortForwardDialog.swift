@@ -27,9 +27,6 @@ struct PortForwardDialog: View {
                         .onChange(of: remoteHost) { _ in updatePlaceholder() }
                         .onChange(of: remotePort) { _ in updatePlaceholder() }
                         .onChange(of: useHttps) { _ in updatePlaceholder() }
-                        .placeholder(when: customName.isEmpty) {
-                            Text(defaultName).foregroundColor(.gray.opacity(0.5))
-                        }
                 }
 
                 Section(header: Text("Remote Connection Details")) {
