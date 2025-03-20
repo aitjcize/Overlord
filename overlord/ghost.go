@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -77,6 +78,9 @@ const (
 const (
 	statusDisconnected = "disconnected"
 )
+
+// Escape sequence regex
+var escapeSeqRe = regexp.MustCompile(`\x1b\[([0-9;?]*)([A-Za-z])`)
 
 type ghostRPCStub struct {
 	ghost *Ghost
@@ -933,47 +937,51 @@ func (ghost *Ghost) Ping() error {
 
 func (ghost *Ghost) handleTTYControl(tty *os.File, data []byte) ([]byte, error) {
 	// Parse ANSI escape sequences
-	if len(data) < 2 || data[0] != 0x1b || data[1] != '[' {
-		return data, nil
+	matches := escapeSeqRe.FindSubmatch(data)
+	if len(matches) == 0 {
+		// Consume the first two bytes so we won't process it again.
+		tty.Write(data[:2])
+		return data[2:], nil
 	}
 
-	sequenceEnd := bytes.IndexByte(data, 't')
-	if sequenceEnd == -1 {
-		return data, nil
-	}
-	// Parse window operation command
-	params := strings.Split(string(data[2:sequenceEnd]), ";")
-	if len(params) >= 3 && params[0] == "8" {
-		// Window size in characters
-		rows, _ := strconv.Atoi(params[1])
-		cols, _ := strconv.Atoi(params[2])
+	args := string(matches[1])
+	command := string(matches[2])
 
-		log.Printf("Terminal resize request received: rows=%d, cols=%d", rows, cols)
+	if command == "t" {
+		params := strings.Split(args, ";")
+		if len(params) >= 3 && params[0] == "8" {
+			// Window size in characters
+			rows, _ := strconv.Atoi(params[1])
+			cols, _ := strconv.Atoi(params[2])
 
-		ws := &struct {
-			Row    uint16
-			Col    uint16
-			Xpixel uint16
-			Ypixel uint16
-		}{
-			Row:    uint16(rows),
-			Col:    uint16(cols),
-			Xpixel: 0,
-			Ypixel: 0,
+			log.Printf("Terminal resize request received: rows=%d, cols=%d", rows, cols)
+
+			ws := &struct {
+				Row    uint16
+				Col    uint16
+				Xpixel uint16
+				Ypixel uint16
+			}{
+				Row:    uint16(rows),
+				Col:    uint16(cols),
+				Xpixel: 0,
+				Ypixel: 0,
+			}
+
+			ret, _, err := syscall.Syscall(
+				syscall.SYS_IOCTL,
+				tty.Fd(),
+				syscall.TIOCSWINSZ,
+				uintptr(unsafe.Pointer(ws)),
+			)
+			if ret == ^uintptr(0) {
+				return nil, fmt.Errorf("handleTTYControl: TIOCSWINSZ failed: %v", err)
+			}
+			return data[len(matches[0]):], nil
 		}
-
-		ret, _, err := syscall.Syscall(
-			syscall.SYS_IOCTL,
-			tty.Fd(),
-			syscall.TIOCSWINSZ,
-			uintptr(unsafe.Pointer(ws)),
-		)
-		if ret == ^uintptr(0) {
-			return nil, fmt.Errorf("handleTTYControl: TIOCSWINSZ failed: %v", err)
-		}
-		return data[sequenceEnd+1:], nil
 	}
-	return data, nil
+	tty.Write(matches[0])
+	return data[len(matches[0]):], nil
 }
 
 func (ghost *Ghost) getTTYName() (string, error) {
@@ -1088,8 +1096,12 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 	}
 
 	feedInput := func(buffer []byte) error {
-		escapeStart := bytes.Index(buffer, []byte{0x1b, '['})
-		if escapeStart != -1 {
+		for {
+			escapeStart := bytes.Index(buffer, []byte{0x1b, '['})
+			if escapeStart == -1 {
+				break
+			}
+
 			tty.Write(buffer[:escapeStart])
 			rest, err := ghost.handleTTYControl(tty, buffer[escapeStart:])
 			if err != nil {

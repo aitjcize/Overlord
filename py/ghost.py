@@ -37,7 +37,9 @@ from xmlrpc.client import ServerProxy
 from xmlrpc.server import SimpleXMLRPCServer
 
 
-_GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', '4499'))
+_DEBUG = False
+
+_GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', '4500'))
 
 _OVERLORD_LAN_DISCOVERY_PORT = int(os.getenv('OVERLORD_LD_PORT', '4456'))
 _DEFAULT_HTTP_PORT = 80
@@ -65,6 +67,8 @@ FAILED = 'failed'
 DISCONNECTED = 'disconnected'
 
 _DEFAULT_FORWARD_HOST = '127.0.0.1'
+
+_ESCAPE_SEQ_RE = re.compile(r'\x1b\[([0-9;?]*)([A-Za-z])')
 
 
 class PingTimeoutError(Exception):
@@ -598,25 +602,30 @@ class Ghost:
     Returns:
       index of the next character after the control sequence
     """
-    if not buffer.startswith(b'\x1b['):
-      return 0
+    match = _ESCAPE_SEQ_RE.search(buffer.decode('utf-8'))
+    if not match:
+      # Consume the first two bytes so we won't process it again.
+      os.write(fd, buffer[:2])
+      return 2
 
-    t_pos = buffer.find(b't')
-    if t_pos == -1:
-      return 0
+    args = match.group(1)
+    command = match.group(2)
 
-    try:
-      params = buffer[2:t_pos].split(b';')
-      if len(params) >= 3 and params[0] == b'8':
-        rows = int(params[1])
-        cols = int(params[2])
-        logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
-        winsize = struct.pack('HHHH', rows, cols, 0, 0)
-        fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-        return t_pos + 1
-    except Exception as e:
-      logging.warning('Error handling terminal control: %s', e)
-    return 0
+    if command == 't':
+      try:
+        params = args.split(';')
+        if len(params) >= 3 and params[0] == '8':
+          rows = int(params[1])
+          cols = int(params[2])
+          logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
+          winsize = struct.pack('HHHH', rows, cols, 0, 0)
+          fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
+          return len(match.group(0))
+      except Exception as e:
+        logging.warning('Error handling terminal control: %s', e)
+
+    os.write(fd, match.group(0).encode('utf-8'))
+    return len(match.group(0))
 
   def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
@@ -657,16 +666,16 @@ class Ghost:
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
 
       def _ProcessBuffer(buf):
-        if buf == b'\x04':
-          raise RuntimeError('connection terminated')
+        while True:
+          pos = buf.find(b'\x1b[')
+          if pos == -1:
+            break
 
-        pos = buf.find(b'\x1b[')
-        if pos != -1:
           os.write(fd, buf[:pos])
           consumed = self.HandleTTYControl(fd, buf[pos:])
-          os.write(fd, buf[pos+consumed:])
-        else:
-          os.write(fd, buf)
+          buf = buf[pos + consumed:]
+
+        os.write(fd, buf)
 
       # Initial buffer processing
       _ProcessBuffer(self._sock.RecvBuf())
@@ -675,13 +684,19 @@ class Ghost:
         rd, unused_wd, unused_xd = select.select([self._sock, fd], [], [])
 
         if fd in rd:
-          self._sock.Send(os.read(fd, _BUFSIZE))
+          data = os.read(fd, _BUFSIZE)
+          if data == b'':
+            raise RuntimeError('connection terminated')
+          self._sock.Send(data)
 
         if self._sock in rd:
           buf = self._sock.Recv(_BUFSIZE)
           _ProcessBuffer(buf)
     except Exception as e:
-      logging.error('SpawnTTYServer: %s', e)
+      if _DEBUG:
+        logging.exception('SpawnTTYServer: %s', e)
+      else:
+        logging.error('SpawnTTYServer: %s', e)
     finally:
       self._sock.Close()
 
@@ -738,7 +753,10 @@ class Ghost:
         if p.returncode is not None:
           break
     except Exception as e:
-      logging.error('SpawnShellServer: %s', e, exc_info=True)
+      if _DEBUG:
+        logging.exception('SpawnShellServer: %s', e)
+      else:
+        logging.error('SpawnShellServer: %s', e)
     finally:
       # Check if the process is terminated. If not, Send SIGTERM to process,
       # then wait for 1 second. Send another SIGKILL to make sure the process is
