@@ -94,7 +94,7 @@ build-go: overlordd ghost ghost-linux
 build-py:
 	@ln -sf ../py/ghost.py bin
 	$(call cmd_msg,SHA1,ghost.py)
-	@sha1sum py/ghost.py > bin/ghost.py.sha1
+	@sha1sum py/ghost.py | awk '{ print $$1 }' > bin/ghost.py.sha1
 
 	@mkdir -p $(BUILD)
 	$(call cmd_msg,VENV,creating virtualenv)
@@ -111,14 +111,14 @@ build-py:
 	pyinstaller --onefile $(CURDIR)/py/ovl.py > /dev/null;
 	@mv $(BUILD)/dist/ovl $(BIN)/ovl.pybin
 	$(call cmd_msg,SHA1,ovl.pybin)
-	@cd $(BIN) && sha1sum ovl.pybin > ovl.pybin.sha1
+	@cd $(BIN) && sha1sum ovl.pybin | awk '{ print $$1 }' > ovl.pybin.sha1
 
 	$(call cmd_msg,GEN,ghost.pybin)
 	@cd $(BUILD); . $(BUILD)/.venv/bin/activate; \
 	pyinstaller --onefile $(CURDIR)/py/ghost.py > /dev/null
 	@mv $(BUILD)/dist/ghost $(BIN)/ghost.pybin
 	$(call cmd_msg,SHA1,ghost.pybin)
-	@cd $(BIN) && sha1sum ghost.pybin > ghost.pybin.sha1
+	@cd $(BIN) && sha1sum ghost.pybin | awk '{ print $$1 }' > ghost.pybin.sha1
 
 go-fmt:
 	$(call cmd_msg,FMT,$(GO_DIRS))
