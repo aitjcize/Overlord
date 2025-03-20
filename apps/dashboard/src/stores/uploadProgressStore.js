@@ -90,9 +90,9 @@ export const useUploadProgressStore = defineStore("uploadProgress", () => {
       .catch((error) => {
         let errorMessage = "Upload failed";
 
-        // Extract error message from response if available
-        if (error.response && error.response.data) {
-          errorMessage = error.response.data.error || errorMessage;
+        // Extract error message from standardized response format
+        if (error.response?.data?.status === "error") {
+          errorMessage = error.response.data.data;
         }
 
         addRecord({

@@ -468,25 +468,17 @@ func (ovl *Overlord) ghostConnectHandler(w http.ResponseWriter, r *http.Request)
 
 // List all apps available on Overlord.
 func (ovl *Overlord) appsListHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	apps, err := ovl.getAppNames()
 	if err != nil {
 		ResponseError(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	result, err := json.Marshal(map[string][]string{"apps": apps})
-	if err != nil {
-		ResponseError(w, err.Error(), http.StatusInternalServerError)
-	} else {
-		w.Write(result)
-	}
+	ResponseSuccess(w, apps)
 }
 
 // List all agents connected to the Overlord.
 func (ovl *Overlord) agentsListHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	var result []map[string]interface{}
 	username := GetUserFromContext(r.Context())
 
@@ -509,32 +501,32 @@ func (ovl *Overlord) agentsListHandler(w http.ResponseWriter, r *http.Request) {
 		return result[i]["mid"].(string) < result[j]["mid"].(string)
 	})
 
-	jsonResult, err := json.Marshal(result)
-	if err != nil {
-		ResponseError(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Write(jsonResult)
+	ResponseSuccess(w, result)
 }
 
 // Agent upgrade request handler.
 func (ovl *Overlord) agentsUpgradeHandler(w http.ResponseWriter, r *http.Request) {
+	var failedAgents []string
+
 	ovl.agentsMu.Lock()
 	for _, agent := range ovl.agents {
 		err := agent.SendUpgradeRequest()
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf("Failed to send upgrade request for `%s'.\n",
-				agent.Mid)))
+			failedAgents = append(failedAgents, agent.Mid)
 		}
 	}
 	ovl.agentsMu.Unlock()
+
+	if len(failedAgents) > 0 {
+		ResponseError(w, fmt.Sprintf("Failed to send upgrade request for agents: %s",
+			strings.Join(failedAgents, ", ")), http.StatusInternalServerError)
+		return
+	}
 	ResponseSuccess(w, nil)
 }
 
 // List all logcat clients connected to the Overlord.
 func (ovl *Overlord) logcatsListHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	var data = make([]map[string]interface{}, 0)
 	ovl.logcatsMu.Lock()
 	for mid, logcats := range ovl.logcats {
@@ -549,12 +541,7 @@ func (ovl *Overlord) logcatsListHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	ovl.logcatsMu.Unlock()
 
-	result, err := json.Marshal(data)
-	if err != nil {
-		ResponseError(w, err.Error(), http.StatusInternalServerError)
-	} else {
-		w.Write(result)
-	}
+	ResponseSuccess(w, data)
 }
 
 // Logcat request handler.
@@ -669,19 +656,12 @@ func (ovl *Overlord) modeShellHandler(w http.ResponseWriter, r *http.Request) {
 
 // Get agent properties as JSON.
 func (ovl *Overlord) agentPropertiesHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 	ovl.agentsMu.Lock()
 	if agent, ok := ovl.agents[mid]; ok {
 		ovl.agentsMu.Unlock()
-		jsonResult, err := json.Marshal(agent.Properties)
-		if err != nil {
-			ResponseError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Write(jsonResult)
+		ResponseSuccess(w, agent.Properties)
 	} else {
 		ovl.agentsMu.Unlock()
 		ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
@@ -754,7 +734,7 @@ func (ovl *Overlord) agentFileDownloadHandler(w http.ResponseWriter, r *http.Req
 	// Wait until download client connects
 	for {
 		if count++; count == fileOpMaxRetries {
-			http.NotFound(w, r)
+			ResponseError(w, "Download client connection timeout", http.StatusInternalServerError)
 			return
 		}
 		ovl.downloadsMu.Lock()
@@ -782,7 +762,7 @@ func (ovl *Overlord) sessionFileDownloadHandler(w http.ResponseWriter, r *http.R
 	ovl.downloadsMu.Lock()
 	if c, ok = ovl.downloads[sid]; !ok {
 		ovl.downloadsMu.Unlock()
-		http.NotFound(w, r)
+		ResponseError(w, "No download session with ID "+sid, http.StatusNotFound)
 		return
 	}
 	ovl.downloadsMu.Unlock()
@@ -837,8 +817,6 @@ func (ovl *Overlord) agentModeForwardHandler(w http.ResponseWriter, r *http.Requ
 
 // File listing and stat operations handler
 func (ovl *Overlord) agentFsHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 
@@ -875,13 +853,11 @@ func (ovl *Overlord) agentFsHandler(w http.ResponseWriter, r *http.Request) {
 		ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 		return
 	}
-	w.Write(res.Payload)
+	ResponseJSON(w, string(res.Payload), http.StatusOK)
 }
 
 // Symlink creation handler
 func (ovl *Overlord) agentFsSymlinkHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 
@@ -911,13 +887,11 @@ func (ovl *Overlord) agentFsSymlinkHandler(w http.ResponseWriter, r *http.Reques
 		ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 		return
 	}
-	w.Write(res.Payload)
+	ResponseJSON(w, string(res.Payload), http.StatusOK)
 }
 
 // Directory creation handler
 func (ovl *Overlord) agentFsDirHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 
@@ -952,13 +926,11 @@ func (ovl *Overlord) agentFsDirHandler(w http.ResponseWriter, r *http.Request) {
 		ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 		return
 	}
-	w.Write(res.Payload)
+	ResponseJSON(w, string(res.Payload), http.StatusOK)
 }
 
 // File upload handler
 func (ovl *Overlord) agentFileUploadHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 
@@ -1018,7 +990,7 @@ func (ovl *Overlord) agentFileUploadHandler(w http.ResponseWriter, r *http.Reque
 	var c *ConnServer
 	for {
 		if count++; count == fileOpMaxRetries {
-			http.Error(w, "no response from client", http.StatusInternalServerError)
+			ResponseError(w, "no response from client", http.StatusInternalServerError)
 			return
 		}
 		ovl.uploadsMu.Lock()
@@ -1047,7 +1019,7 @@ func (ovl *Overlord) monitorHandler(w http.ResponseWriter, r *http.Request) {
 	username := GetUserFromContext(r.Context())
 
 	// Upgrade the connection to WebSocket
-	conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
+	conn, err := ovl.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 		return
@@ -1090,11 +1062,11 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	publicRouter.HandleFunc("/auth/login", jwtAuth.Login).Methods("POST")
 
 	// Protected routes (authentication required)
-	authRouter := mainRouter.PathPrefix("/api").Subrouter()
-	authRouter.Use(jwtAuth.Middleware)
+	apiRouter := mainRouter.PathPrefix("/api").Subrouter()
+	apiRouter.Use(jwtAuth.Middleware)
 
 	// Register agent-specific routes with both auth and allowlist middleware
-	agentRoutes := authRouter.PathPrefix("/agents").Subrouter()
+	agentRoutes := apiRouter.PathPrefix("/agents").Subrouter()
 	agentRoutes.Use(ovl.allowlistMiddleware)
 
 	// Register agent-specific routes with the allowlist middleware
@@ -1109,25 +1081,24 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	agentRoutes.HandleFunc("/{mid}/forward", ovl.agentModeForwardHandler).Methods("GET")
 
 	// These routes need authentication but not allowlist check
-	authRouter.HandleFunc("/agents", ovl.agentsListHandler).Methods("GET")
-	authRouter.HandleFunc("/agents/upgrade", ovl.agentsUpgradeHandler).Methods("POST")
+	apiRouter.HandleFunc("/agents", ovl.agentsListHandler).Methods("GET")
+	apiRouter.HandleFunc("/agents/upgrade", ovl.agentsUpgradeHandler).Methods("POST")
 
 	// Other authenticated routes
-	authRouter.HandleFunc("/apps", ovl.appsListHandler).Methods("GET")
-	authRouter.HandleFunc("/logcats", ovl.logcatsListHandler).Methods("GET")
-	authRouter.HandleFunc("/logcats/{mid}/{sid}", ovl.logcatHandler).Methods("GET")
-	authRouter.HandleFunc("/monitor", ovl.monitorHandler).Methods("GET")
-	authRouter.HandleFunc("/sessions/{sid}/file", ovl.sessionFileDownloadHandler).Methods("GET")
-
-	// Register the routers with the HTTP server
-	http.Handle("/api/", mainRouter)
+	apiRouter.HandleFunc("/apps", ovl.appsListHandler).Methods("GET")
+	apiRouter.HandleFunc("/logcats", ovl.logcatsListHandler).Methods("GET")
+	apiRouter.HandleFunc("/logcats/{mid}/{sid}", ovl.logcatHandler).Methods("GET")
+	apiRouter.HandleFunc("/monitor", ovl.monitorHandler).Methods("GET")
+	apiRouter.HandleFunc("/sessions/{sid}/file", ovl.sessionFileDownloadHandler).Methods("GET")
 
 	// Connect endpoint (special case for agent connections)
-	http.HandleFunc("/connect", ovl.ghostConnectHandler)
+	mainRouter.HandleFunc("/connect", ovl.ghostConnectHandler)
 
 	// Serve static files
-	http.Handle("/", http.StripPrefix("/",
-		http.FileServer(http.Dir(webRootDir))))
+	mainRouter.PathPrefix("/").Handler(http.FileServer(http.Dir(webRootDir)))
+
+	// Set the router as the HTTP handler
+	http.Handle("/", mainRouter)
 }
 
 func (c *WebSocketClient) writePump() {

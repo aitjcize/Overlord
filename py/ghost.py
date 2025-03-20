@@ -924,7 +924,7 @@ class Ghost:
           except OSError:
             pass
 
-      self.SendResponse(msg, SUCCESS, {'entries': entries})
+      self.SendResponse(msg, SUCCESS, entries)
     except Exception as e:
       self.SendErrorResponse(msg, str(e))
 

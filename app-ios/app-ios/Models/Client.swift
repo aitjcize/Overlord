@@ -10,7 +10,7 @@ struct Client: Identifiable, Codable, Equatable {
     var id: String { mid }
     let mid: String
     let name: String?
-    var properties: [String: String]?
+    var properties: [String: StringOrArray]?
     var lastSeen: Date
     var hasCamera: Bool
     var pinned: Bool
@@ -23,11 +23,11 @@ struct Client: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mid = try container.decode(String.self, forKey: .mid)
         name = try container.decodeIfPresent(String.self, forKey: .name)
-        properties = try container.decodeIfPresent([String: String].self, forKey: .properties)
+        properties = try container.decodeIfPresent([String: StringOrArray].self, forKey: .properties)
         lastSeen = Date()
 
         // Determine if client has camera based on properties
-        hasCamera = properties?["has_camera"] == "true"
+        hasCamera = properties?["has_camera"]?.stringValue == "true"
         pinned = false
     }
 
@@ -38,12 +38,12 @@ struct Client: Identifiable, Codable, Equatable {
         try container.encodeIfPresent(properties, forKey: .properties)
     }
 
-    init(mid: String, name: String? = nil, properties: [String: String]? = nil, pinned: Bool = false) {
+    init(mid: String, name: String? = nil, properties: [String: StringOrArray]? = nil, pinned: Bool = false) {
         self.mid = mid
         self.name = name
         self.properties = properties
         lastSeen = Date()
-        hasCamera = properties?["has_camera"] == "true"
+        hasCamera = properties?["has_camera"]?.stringValue == "true"
         self.pinned = pinned
     }
 
@@ -57,5 +57,53 @@ struct Client: Identifiable, Codable, Equatable {
             lhs.hasCamera == rhs.hasCamera &&
             lhs.pinned == rhs.pinned &&
             lhs.properties == rhs.properties
+    }
+}
+
+// Custom type to handle either String or Array of Strings
+struct StringOrArray: Codable, Equatable {
+    private var stringValueStorage: String?
+    private var arrayValueStorage: [String]?
+
+    var stringValue: String? {
+        return stringValueStorage ?? (arrayValueStorage?.first)
+    }
+
+    var arrayValue: [String]? {
+        return arrayValueStorage ?? (stringValueStorage != nil ? [stringValueStorage!] : nil)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            stringValueStorage = value
+        } else if let value = try? container.decode([String].self) {
+            arrayValueStorage = value
+        } else {
+            throw DecodingError.typeMismatch(
+                StringOrArray.self,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Expected String or [String]"
+                )
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let value = stringValueStorage {
+            try container.encode(value)
+        } else if let value = arrayValueStorage {
+            try container.encode(value)
+        }
+    }
+
+    init(string: String) {
+        stringValueStorage = string
+    }
+
+    init(array: [String]) {
+        arrayValueStorage = array
     }
 }

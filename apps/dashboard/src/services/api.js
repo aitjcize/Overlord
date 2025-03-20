@@ -2,14 +2,28 @@ import axios from "axios";
 
 const API_BASE_URL = "/api";
 
+// Helper function to extract data from standardized response format
+const extractData = (response) => {
+  if (
+    !response.data ||
+    response.data.status !== "success" ||
+    response.data.data === undefined
+  ) {
+    throw new Error("Invalid response format from server");
+  }
+  return response.data.data;
+};
+
 export const apiService = {
   async getClients() {
     try {
       const response = await axios.get(`${API_BASE_URL}/agents`);
-      return response.data;
+      return extractData(response);
     } catch (error) {
+      if (error.response?.data?.status === "error") {
+        throw new Error(error.response.data.data);
+      }
       console.error("Error fetching clients:", error);
-      // Propagate the error so it can be handled by the caller
       throw error;
     }
   },
@@ -19,10 +33,12 @@ export const apiService = {
       const response = await axios.get(
         `${API_BASE_URL}/agents/${mid}/properties`,
       );
-      return response.data;
+      return extractData(response);
     } catch (error) {
+      if (error.response?.data?.status === "error") {
+        throw new Error(error.response.data.data);
+      }
       console.error(`Error fetching properties for client ${mid}:`, error);
-      // Propagate the error so it can be handled by the caller
       throw error;
     }
   },
@@ -30,10 +46,12 @@ export const apiService = {
   async upgradeClients() {
     try {
       const response = await axios.post(`${API_BASE_URL}/agents/upgrade`);
-      return response.data;
+      return extractData(response);
     } catch (error) {
+      if (error.response?.data?.status === "error") {
+        throw new Error(error.response.data.data);
+      }
       console.error("Error triggering client upgrade:", error);
-      // Propagate the error so it can be handled by the caller
       throw error;
     }
   },

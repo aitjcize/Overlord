@@ -5,13 +5,12 @@
 package overlord
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
 
 func TestGetFileSha1(t *testing.T) {
-	tmpfile, err := ioutil.TempFile("", "TestGetFileSha1")
+	tmpfile, err := os.CreateTemp("", "TestGetFileSha1")
 	if err != nil {
 		t.Fatal(err)
 	}

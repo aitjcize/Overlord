@@ -31,9 +31,38 @@ extension URLSession {
 
 // Extension to add a convenience method for decoding JSON responses
 extension Publisher where Output == (data: Data, response: URLResponse), Failure == Error {
-    func decodeAuth<T: Decodable>(type: T.Type, decoder: JSONDecoder = JSONDecoder()) -> AnyPublisher<T, Error> {
+    func decodeStandardResponse<T: Decodable>(
+        type: T.Type,
+        decoder: JSONDecoder = JSONDecoder()
+    ) -> AnyPublisher<T, Error> {
         return map { $0.data }
-            .decode(type: type, decoder: decoder)
+            .decode(type: StandardResponse<T>.self, decoder: decoder)
+            .flatMap { response -> AnyPublisher<T, Error> in
+                if let data = response.data {
+                    return Just(data)
+                        .setFailureType(to: Error.self)
+                        .eraseToAnyPublisher()
+                } else {
+                    // If data is nil, return an empty instance if possible, or throw an error
+                    if let emptyArray = [] as? T {
+                        return Just(emptyArray)
+                            .setFailureType(to: Error.self)
+                            .eraseToAnyPublisher()
+                    } else {
+                        return Fail(error: NSError(
+                            domain: "APIError",
+                            code: -1,
+                            userInfo: [NSLocalizedDescriptionKey: "No data returned from server"]
+                        ))
+                        .eraseToAnyPublisher()
+                    }
+                }
+            }
             .eraseToAnyPublisher()
+    }
+
+    // For backward compatibility
+    func decodeAuth<T: Decodable>(type: T.Type, decoder: JSONDecoder = JSONDecoder()) -> AnyPublisher<T, Error> {
+        return decodeStandardResponse(type: type, decoder: decoder)
     }
 }

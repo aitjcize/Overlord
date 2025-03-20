@@ -573,9 +573,7 @@ func (ghost *Ghost) handleListTreeRequest(req *Request) error {
 		return ghost.SendResponse(NewErrorResponse(req.Rid, err.Error()))
 	}
 	return ghost.SendResponse(
-		NewResponse(req.Rid, Success, map[string]interface{}{
-			"entries": entries,
-		}))
+		NewResponse(req.Rid, Success, entries))
 }
 
 func (ghost *Ghost) handleFstatRequest(req *Request) error {

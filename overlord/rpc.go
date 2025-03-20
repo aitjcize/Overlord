@@ -85,7 +85,7 @@ type Response struct {
 // rid is the request ID of the request this response is intended for.
 // response is the response status text.
 // params is map between string and any other JSON-serializable data structure.
-func NewResponse(rid, status string, params map[string]interface{}) *Response {
+func NewResponse(rid, status string, params interface{}) *Response {
 	res := &Response{
 		Rid:    rid,
 		Status: status,

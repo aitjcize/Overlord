@@ -35,11 +35,11 @@ class APIService {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         return session.authHandledDataTaskPublisher(for: request)
-            .decodeAuth(type: [Client].self)
+            .decodeStandardResponse(type: [Client].self)
             .eraseToAnyPublisher()
     }
 
-    func getClientProperties(mid: String, token: String) -> AnyPublisher<[String: String], Error> {
+    func getClientProperties(mid: String, token: String) -> AnyPublisher<[String: StringOrArray], Error> {
         guard let url = URL(string: "\(APIService.baseURL)/agents/\(mid)/properties") else {
             return Fail(error: URLError(.badURL)).eraseToAnyPublisher()
         }
@@ -47,7 +47,7 @@ class APIService {
         request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         return session.authHandledDataTaskPublisher(for: request)
-            .decodeAuth(type: [String: String].self)
+            .decodeStandardResponse(type: [String: StringOrArray].self)
             .eraseToAnyPublisher()
     }
 

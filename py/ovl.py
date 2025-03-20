@@ -183,6 +183,8 @@ def AutoRetry(action_name, retries):
         try:
           func(*args, **kwargs)
         except Exception as e:
+          if _DEBUG:
+            logging.exception(e)
           print('error: %s: %s: retrying ...' % (args[0], e))
         else:
           break
@@ -405,8 +407,12 @@ class OverlordClientDaemon:
     return os.getpid()
 
   def _GetJSON(self, url):
-    response = UrlOpen(self._state, url)
-    return json.loads(response.read())
+    try:
+      response = UrlOpen(self._state, url)
+      return json.loads(response.read().decode('utf-8')).get('data', [])
+    except urllib.error.HTTPError as e:
+      error = json.loads(e.read()).get('data', 'unknown error')
+      raise RuntimeError('GET %s: %s' % (url, error)) from e
 
   def _TLSEnabled(self):
     """Determine if TLS is enabled on given server address."""
@@ -473,14 +479,11 @@ class OverlordClientDaemon:
       context = self._state.SSLContext()
       with urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
                                   context=context) as response:
-        result = json.loads(response.read().decode('utf-8'))
+        result = json.loads(response.read().decode('utf-8')).get('data', {})
         return result.get('token')
     except urllib.error.HTTPError as e:
-      if e.code == 401:
-        raise RuntimeError('Authentication failed')
-      else:
-        raise RuntimeError('Error getting JWT token: %s' % e)
-      return None
+      error = json.loads(e.read().decode('utf-8')).get('data', 'unknown error')
+      raise RuntimeError(error) from e
 
   def Connect(self, host, port, ssh_pid=None,
               username=None, password=None, orig_host=None,
@@ -984,8 +987,8 @@ class OverlordCliClient:
 
     try:
       self._server.Clients()
-    except Exception:
-      raise RuntimeError('remote server disconnected, abort') from None
+    except Exception as e:
+      raise RuntimeError('remote server disconnected, abort') from e
 
     if self._state.ssh_pid is not None:
       with subprocess.Popen(
@@ -1106,7 +1109,8 @@ class OverlordCliClient:
           if ret[0] == 'HTTPError':
             code, except_str, body = ret[1:]
             if code == 401:
-              print('connect: %s' % body)
+              res = json.loads(str(body))
+              print('connect: %s' % res['data'])
               if not username_provided or not password_provided:
                 continue
               break
@@ -1224,7 +1228,7 @@ class OverlordCliClient:
     clients = self._FilterClients(self._server.Clients(), filters, mid=mid)
 
     if not clients:
-      raise RuntimeError('select: client not found')
+      raise RuntimeError('select: no clients found')
     if len(clients) == 1:
       mid = clients[0]['mid']
     else:
@@ -1237,10 +1241,10 @@ class OverlordCliClient:
       try:
         choice = int(input()) - 1
         mid = clients[choice]['mid']
-      except ValueError:
-        raise RuntimeError('select: invalid selection') from None
-      except IndexError:
-        raise RuntimeError('select: selection out of range') from None
+      except ValueError as e:
+        raise RuntimeError('select: invalid selection') from e
+      except IndexError as e:
+        raise RuntimeError('select: selection out of range') from e
 
     self._selected_mid = mid
     if store:
@@ -1300,43 +1304,37 @@ class OverlordCliClient:
             urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
-      data = json.loads(response.read().decode('utf-8'))
-
-      entries_data = data['entries']
-
-      entries = []
-      for entry in entries_data:
-        try:
-          perm = entry.get('perm', 0o644)
-        except (ValueError, TypeError):
-          perm = 0o644
-
-        is_dir = entry.get('is_dir', False)
-        file_path = entry.get('path', '')
-
-        # Add trailing slash to directories for consistency
-        if is_dir and not file_path.endswith('/'):
-          file_path += '/'
-
-        is_symlink = entry.get('is_symlink', False)
-        link_target = entry.get('link_target', '')
-
-        entries.append(FileEntry(
-            path=file_path,
-            perm=perm,
-            is_symlink=is_symlink,
-            link_target=link_target,
-            is_dir=is_dir
-        ))
-
-      return entries
+      data = json.loads(response.read().decode('utf-8')).get('data', [])
     except urllib.error.HTTPError as e:
+      error = json.loads(e.read()).get('data', 'unknown error')
+      raise RuntimeError('lstree: %s' % error) from e
+
+    entries = []
+    for entry in data:
       try:
-        error_data = json.loads(e.read().decode('utf-8'))
-        msg = error_data.get('error', 'unknown error')
-      except (ValueError, AttributeError):
-        msg = str(e)
-      raise RuntimeError('lstree: %s' % msg) from None
+        perm = entry.get('perm', 0o644)
+      except (ValueError, TypeError):
+        perm = 0o644
+
+      is_dir = entry.get('is_dir', False)
+      file_path = entry.get('path', '')
+
+      # Add trailing slash to directories for consistency
+      if is_dir and not file_path.endswith('/'):
+        file_path += '/'
+
+      is_symlink = entry.get('is_symlink', False)
+      link_target = entry.get('link_target', '')
+
+      entries.append(FileEntry(
+        path=file_path,
+        perm=perm,
+        is_symlink=is_symlink,
+        link_target=link_target,
+        is_dir=is_dir
+      ))
+
+    return entries
 
   def _Fstat(self, path):
     """Get file or directory status using the Overlord API.
@@ -1355,15 +1353,10 @@ class OverlordCliClient:
             urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
-      data = json.loads(response.read().decode('utf-8'))
-      return data
+      return json.loads(response.read().decode('utf-8'))['data']
     except urllib.error.HTTPError as e:
-      try:
-        error_data = json.loads(e.read().decode('utf-8'))
-        msg = error_data.get('error', 'unknown error')
-      except (ValueError, AttributeError):
-        msg = str(e)
-      raise RuntimeError('fstat failed: %s' % msg)
+      error = json.loads(e.read()).get('data', 'unknown error')
+      raise RuntimeError('fstat: %s' % error) from e
 
   def _Mkdir(self, path, perm=0o755):
     """Create a directory with specific permissions using the Overlord API.
@@ -1380,12 +1373,10 @@ class OverlordCliClient:
             urllib.parse.quote(path),
             perm))
     try:
-      response = UrlOpen(self._state, url, method='POST')
-      if response.status != 200:
-        raise RuntimeError(f"Failed to create directory: {response.read()}")
+      UrlOpen(self._state, url, method='POST')
     except urllib.error.HTTPError as e:
-      msg = json.loads(e.read()).get('error', 'unknown error')
-      raise RuntimeError(f'mkdir: {msg}')
+      error = json.loads(e.read()).get('data', 'unknown error') 
+      raise RuntimeError('mkdir: %s' % error) from e
 
   @AutoRetry('pull', _RETRY_TIMES)
   def _PullSingle(self, entry, dst):
@@ -1414,8 +1405,8 @@ class OverlordCliClient:
     try:
       h = UrlOpen(self._state, url)
     except urllib.error.HTTPError as e:
-      msg = json.loads(e.read()).get('error', 'unknown error')
-      raise RuntimeError('pull: %s' % msg) from None
+      msg = json.loads(e.read()).get('data', 'unknown error')
+      raise RuntimeError('pull: %s' % msg) from e
     except KeyboardInterrupt:
       return
 
@@ -1445,10 +1436,7 @@ class OverlordCliClient:
     self.CheckClient()
 
     # Get directory listing using the API
-    try:
-      entries = self._LsTree(args.src)
-    except RuntimeError as e:
-      raise RuntimeError(f"pull: {str(e)}")
+    entries = self._LsTree(args.src)
 
     if args.dst == '.':
       args.dst = os.path.basename(args.src)
@@ -1460,7 +1448,7 @@ class OverlordCliClient:
     common_prefix = os.path.commonpath([entry.path for entry in entries])
 
     if not os.path.isabs(common_prefix):
-      raise RuntimeError(f"common_prefix is not absolute: {common_prefix}")
+      raise RuntimeError('common_prefix is not absolute: %s' % common_prefix)
 
     while os.path.basename(common_prefix) != os.path.basename(args.src):
       common_prefix = os.path.dirname(common_prefix)
@@ -1509,11 +1497,9 @@ class OverlordCliClient:
               urllib.parse.quote(dst)))
 
       try:
-        response = UrlOpen(self._state, url, method='POST')
-        if response.status != 200:
-          raise RuntimeError(f"Failed to create symlink: {response.read()}")
+        UrlOpen(self._state, url, method='POST')
       except urllib.error.HTTPError as e:
-        msg = json.loads(e.read()).get('error', 'unknown error')
+        msg = json.loads(e.read()).get('data', 'unknown error')
         raise RuntimeError(f'push: {msg}')
 
       pbar.End()
@@ -1699,10 +1685,10 @@ class OverlordCliClient:
       RuntimeError: If the path doesn't exist or can't be accessed.
     """
     if not os.path.exists(path):
-      raise RuntimeError(f"local lstree: {path}: No such file or directory")
+      raise RuntimeError('local lstree: %s: No such file or directory' % path)
 
     if not os.access(path, os.R_OK):
-      raise RuntimeError(f"local lstree: {path}: Permission denied")
+      raise RuntimeError('local lstree: %s: Permission denied' % path)
 
     results = []
 

@@ -43,7 +43,12 @@ export const useAuthStore = defineStore("auth", {
           password,
         });
 
-        const { token } = response.data;
+        // Handle the standardized response format
+        if (response.data?.status !== "success" || !response.data?.data) {
+          throw new Error("Invalid response format from server");
+        }
+
+        const { token } = response.data.data;
 
         // Store token in localStorage and state
         localStorage.setItem("token", token);
@@ -55,9 +60,14 @@ export const useAuthStore = defineStore("auth", {
         return true;
       } catch (error) {
         console.error("Login failed:", error);
-        this.error =
-          error.response?.data?.error ||
-          "Login failed. Please check your credentials.";
+
+        // Extract error message from standardized response format
+        if (error.response?.data?.status === "error") {
+          this.error = error.response.data.data;
+        } else {
+          this.error = "Login failed. Please check your credentials.";
+        }
+
         return false;
       } finally {
         this.loading = false;

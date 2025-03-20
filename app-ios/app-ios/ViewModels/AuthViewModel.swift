@@ -65,7 +65,7 @@ class AuthViewModel: ObservableObject {
             // since we're not sending an auth token yet
             URLSession.shared.dataTaskPublisher(for: request)
                 .map { $0.data }
-                .decode(type: AuthResponse.self, decoder: JSONDecoder())
+                .decode(type: StandardResponse<AuthResponse>.self, decoder: JSONDecoder())
                 .receive(on: DispatchQueue.main)
                 .sink(receiveCompletion: { [weak self] completion in
                     self?.isLoading = false
@@ -74,11 +74,11 @@ class AuthViewModel: ObservableObject {
                         self?.handleLoginError(error)
                     }
                 }, receiveValue: { [weak self] response in
-                    self?.token = response.token
+                    self?.token = response.data?.token
                     self?.isAuthenticated = true
 
                     // Save token
-                    UserDefaults.standard.set(response.token, forKey: "authToken")
+                    UserDefaults.standard.set(response.data?.token, forKey: "authToken")
                 })
                 .store(in: &cancellables)
         }

@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -80,7 +79,7 @@ func (config *JWTConfig) LoadJWTSecret() error {
 		return errors.New("JWT secret file path not provided")
 	}
 
-	data, err := ioutil.ReadFile(config.SecretPath)
+	data, err := os.ReadFile(config.SecretPath)
 	if err != nil {
 		return fmt.Errorf("failed to read JWT secret file: %v", err)
 	}
@@ -184,55 +183,41 @@ func (auth *JWTAuth) loadHtpasswd(htpasswdPath string) error {
 }
 
 // Authenticate authenticates a user with the provided username and password
-func (auth *JWTAuth) Authenticate(user, passwd string) (bool, error) {
-	deniedError := errors.New("permission denied")
-
+func (auth *JWTAuth) Authenticate(user, passwd string) bool {
 	passwdHash, ok := auth.secrets[user]
 	if !ok {
 		log.Printf("JWTAuth: user %s not found in secrets", user)
-		return false, deniedError
+		return false
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(passwdHash), []byte(passwd))
 	if err != nil {
 		log.Printf("JWTAuth: password comparison failed for user %s: %v", user, err)
-		return false, deniedError
+		return false
 	}
-	return true, nil
+	return true
 }
 
 // Login handles login requests and returns a JWT token
 func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
-	// Check if IP is blocked
 	if auth.IsBlocked(r) {
-		log.Printf("JWTAuth: login attempt from blocked IP: %s", getRequestIP(r))
-		ResponseError(w, "too many retries", http.StatusUnauthorized)
+		auth.Unauthorized(w, r, "Too many failed attempts", true)
 		return
 	}
 
-	// Parse the login request
 	var loginReq LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&loginReq); err != nil {
-		log.Printf("JWTAuth: failed to parse login request: %v", err)
-		ResponseError(w, "Invalid request body", http.StatusBadRequest)
+		auth.Unauthorized(w, r, "Invalid request", true)
 		return
 	}
 
-	log.Printf("JWTAuth: login attempt for user: %s", loginReq.Username)
-
-	// Authenticate the user
-	pass, err := auth.Authenticate(loginReq.Username, loginReq.Password)
-	if !pass {
-		log.Printf("JWTAuth: authentication failed for user %s: %v",
-			loginReq.Username, err)
-		auth.Unauthorized(w, r, "Invalid username or password", true)
+	if !auth.Authenticate(loginReq.Username, loginReq.Password) {
+		auth.Unauthorized(w, r, "Authentication error", true)
 		return
 	}
 
-	// Reset fail count
 	auth.ResetFailCount(r)
 
-	// Generate JWT token
 	expirationTime := time.Now().Add(tokenExpirationTime)
 	claims := &JWTClaims{
 		Username: loginReq.Username,
@@ -247,7 +232,7 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := token.SignedString([]byte(auth.config.GetSecret()))
 	if err != nil {
 		log.Printf("JWTAuth: error generating token: %v", err)
-		http.Error(w, "Error generating token", http.StatusInternalServerError)
+		ResponseError(w, "Error generating token", http.StatusInternalServerError)
 		return
 	}
 
@@ -255,8 +240,7 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 		loginReq.Username)
 
 	// Return the token
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(LoginResponse{
+	ResponseSuccess(w, LoginResponse{
 		Token:  tokenString,
 		Expire: expirationTime.Unix(),
 	})
@@ -288,10 +272,8 @@ func (auth *JWTAuth) VerifyToken(tokenString string) (*JWTClaims, error) {
 // Middleware creates a JWT middleware for HTTP handlers
 func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get token from Authorization header or query parameter
 		var tokenString string
 
-		// First try to get token from Authorization header
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "" {
 			// Check if it's a Bearer token
@@ -303,19 +285,16 @@ func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 			}
 		}
 
-		// If no token in header, try query parameter
 		if tokenString == "" {
 			tokenString = r.URL.Query().Get("token")
 		}
 
-		// If still no token, return unauthorized
 		if tokenString == "" {
 			log.Printf("JWTAuth: no token found in header or query parameter")
 			auth.Unauthorized(w, r, "JWT token required", false)
 			return
 		}
 
-		// Verify token
 		claims, err := auth.VerifyToken(tokenString)
 		if err != nil {
 			log.Printf("JWTAuth: token verification failed: %v", err)
@@ -323,10 +302,7 @@ func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Add claims to request context
 		r = r.WithContext(WithAuthClaims(r.Context(), claims))
-
-		// Continue to the next handler
 		next.ServeHTTP(w, r)
 	})
 }
@@ -372,7 +348,6 @@ func (auth *JWTAuth) IsBlocked(r *http.Request) bool {
 
 	delete(auth.failedCount, ip)
 	delete(auth.blockedIps, ip)
-
 	return false
 }
 

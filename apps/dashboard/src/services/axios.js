@@ -18,7 +18,12 @@ axios.interceptors.response.use(
   (error) => {
     // Handle 401 Unauthorized errors
     if (error.response && error.response.status === 401) {
-      console.error("Authentication failed:", error.response.data);
+      // Extract error message from standardized response format
+      let errorMessage = "Authentication failed";
+      if (error.response.data?.status === "error") {
+        errorMessage = error.response.data.data;
+      }
+      console.error(errorMessage, error.response.data);
 
       try {
         // Get the auth store and log out the user

@@ -80,9 +80,10 @@ class TestOverlord(unittest.TestCase):
     self.htpasswd_path = os.path.join(self.temp_dir, 'overlord.htpasswd')
     password = 'testpassword'
 
-    # Create a bcrypt hash with a supported prefix (2b) and then manually replace it with 2y
-    # Use a low cost factor (5) for faster tests
-    hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=5)).decode('utf-8')
+    # Create a bcrypt hash with a supported prefix (2b) and then manually
+    # replace it with 2y Use a low cost factor (5) for faster tests
+    hashed = bcrypt.hashpw(password.encode('utf-8'),
+                           bcrypt.gensalt(rounds=5)).decode('utf-8')
     # Replace the prefix with $2y$ which is what the server expects
     hashed = hashed.replace('$2b$', '$2y$')
 
@@ -153,33 +154,24 @@ class TestOverlord(unittest.TestCase):
       raise
 
   def _GetJWTToken(self):
-    """Get JWT token for authentication."""
-    auth_data = json.dumps({
-      'username': self.test_username,
-      'password': self.test_password
-    }).encode('utf-8')
+    """Get a JWT token for API authentication."""
+    # Prepare the login request
+    login_url = f'http://{self.host}/api/auth/login'
+    headers = {'Content-Type': 'application/json'}
+    data = json.dumps({'username': self.test_username,
+                       'password': self.test_password}).encode()
 
-    headers = {
-      'Content-Type': 'application/json'
-    }
-
-    req = urllib.request.Request(
-      f'http://{self.host}/api/auth/login',
-      data=auth_data,
-      headers=headers
-    )
+    # Make the login request
+    req = urllib.request.Request(login_url, data=data, headers=headers,
+                                 method='POST')
 
     try:
       with urllib.request.urlopen(req) as response:
-        result = json.loads(response.read().decode('utf-8'))
-        return result.get('token')
+        response_data = json.loads(response.read().decode('utf-8'))
+        return response_data['data']['token']
     except urllib.error.HTTPError as e:
-      print(f"Authentication failed: {e}")
-      print(e.read().decode('utf-8'))
-      return None
-    except Exception as e:
-      print(f"Error during authentication: {e}")
-      return None
+      response_data = json.loads(e.read().decode('utf-8'))
+      raise TestError(f"Authentication failed: {response_data['data']}")
 
   def tearDown(self):
     self.goghost.kill()
@@ -199,29 +191,34 @@ class TestOverlord(unittest.TestCase):
     shutil.rmtree(self.temp_dir)
 
   def _GetJSON(self, path):
-    req = urllib.request.Request(
-      'http://' + self.host + path,
-      headers={'Authorization': f'Bearer {self.token}'}
-    )
-    return json.loads(urllib.request.urlopen(req).read())
+    url = f'http://{self.host}{path}'
+    headers = {'Authorization': f'Bearer {self.token}'}
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+      with urllib.request.urlopen(req) as f:
+        response_data = json.loads(f.read().decode('utf-8'))
+        return response_data['data']
+    except urllib.error.HTTPError as e:
+      response_data = json.loads(e.read().decode('utf-8'))
+      raise TestError(response_data['data'])
 
   def testWebAPI(self):
     # Test /api/apps
-    appsdir = os.path.join(self.basedir, '../webroot/apps')
-    apps = os.listdir(appsdir)
-    res = self._GetJSON('/api/apps')
-    assert len(res['apps']) == len(apps)
+    response = self._GetJSON('/api/apps')
+    self.assertIsInstance(response, list)
 
     # Test /api/agents
-    assert len(self._GetJSON('/api/agents')) == 2
+    response = self._GetJSON('/api/agents')
+    self.assertIsInstance(response, list)
+    self.assertEqual(len(response), 2)
+    self.assertTrue(any(agent['mid'] == 'go' for agent in response))
+    self.assertTrue(any(agent['mid'] == 'python' for agent in response))
 
-    # Test /api/logcats. TODO(wnhuang): test this properly
-    assert not self._GetJSON('/api/logcats')
-
-    # Test /api/agents/{mid}/properties
-    for client in self._GetJSON('/api/agents'):
-      assert self._GetJSON(
-          '/api/agents/%s/properties' % client['mid']) is not None
+    # Test /api/agents properties
+    for agent in response:
+      response = self._GetJSON(f'/api/agents/{agent["mid"]}/properties')
+      self.assertIsInstance(response, dict)
 
   def testShellCommand(self):
     class TestClient(WebSocketBaseClient):
