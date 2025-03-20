@@ -97,13 +97,16 @@ const initializeDashboard = async () => {
       clientStore.removeClient(client.mid);
     });
 
-    monitorService.on("file download", (sid) => {
-      const token = localStorage.getItem("token");
-      const url = `${window.location.protocol}//${window.location.host}/api/sessions/${sid}/file?token=${token}`;
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = url;
-      document.body.appendChild(iframe);
+    monitorService.on("file download", (sid, terminalSid) => {
+      // Check if the terminalSid is in our list of active terminals
+      if (terminalStore.hasTerminalSid(terminalSid)) {
+        const token = localStorage.getItem("token");
+        const url = `${window.location.protocol}//${window.location.host}/api/sessions/${sid}/file?token=${token}`;
+        const iframe = document.createElement("iframe");
+        iframe.style.display = "none";
+        iframe.src = url;
+        document.body.appendChild(iframe);
+      }
     });
   } catch (error) {
     console.error("Error initializing dashboard:", error);

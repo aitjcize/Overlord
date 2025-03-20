@@ -818,6 +818,7 @@ const setupWebSocket = () => {
           // Session ID received - use data.data as the SID (matches React implementation)
           // Store in our local ref instead of mutating the prop directly
           terminalSid.value = data.data;
+          terminalStore.addTerminalSid(terminalSid.value);
         } else {
           // If JSON but not a SID message, write to terminal
           xterm.write(event.data);
@@ -1131,6 +1132,11 @@ onMounted(async () => {
       },
       { immediate: true },
     );
+
+    // Store terminalSid when it's received
+    if (props.terminal.sid) {
+      terminalStore.addTerminalSid(props.terminal.sid);
+    }
   } catch (error) {
     console.error("Error in terminal mounting:", error);
   }
@@ -1177,6 +1183,11 @@ onBeforeUnmount(() => {
       console.error("Error disposing xterm:", error);
     }
   }
+
+  // Clean up terminalSid when component is unmounted
+  if (props.terminal.sid) {
+    terminalStore.removeTerminalSid(props.terminal.sid);
+  }
 });
 
 const toggleFullscreen = async () => {
@@ -1192,6 +1203,11 @@ const toggleFullscreen = async () => {
 };
 
 const closeTerminal = () => {
+  // Remove the terminalSid first if it exists
+  if (props.terminal.sid) {
+    terminalStore.removeTerminalSid(props.terminal.sid);
+  }
+  // Then remove the terminal from the store
   terminalStore.removeTerminal(props.terminal.id);
 };
 

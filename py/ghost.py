@@ -197,8 +197,9 @@ class Ghost:
   RANDOM_MID = '##random_mid##'
 
   def __init__(self, overlord_addrs, tls_settings=None, mode=AGENT, mid=None,
-               sid=None, prop_file=None, terminal_sid=None, tty_device=None,
-               command=None, file_op=None, host=None, port=None, tls_mode=None):
+               sid=None, allowlist=None, prop_file=None, terminal_sid=None,
+               tty_device=None, command=None, file_op=None, host=None, port=None,
+               tls_mode=None):
     """Constructor.
 
     Args:
@@ -209,6 +210,7 @@ class Ghost:
         id is randomly generated.
       sid: session ID. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
+      allowlist: comma-separated list of users/groups that can access this ghost.
       prop_file: properties file filename.
       terminal_sid: the terminal session ID associate with this client. This is
         use for file download.
@@ -243,6 +245,7 @@ class Ghost:
     self._terminal_session_id = terminal_sid
     self._ttyname_to_sid = {}
     self._terminal_sid_to_pid = {}
+    self._allowlist = allowlist
     self._prop_file = prop_file
     self._properties = {}
     self._register_status = DISCONNECTED
@@ -372,12 +375,33 @@ class Ghost:
     os.execve(scriptpath, [scriptpath] + sys.argv[1:], os.environ)
 
   def LoadProperties(self):
+    """Load properties from file and always set the allowlist."""
+    self._properties = {}
+
     try:
       if self._prop_file:
         with open(self._prop_file, 'r') as f:
           self._properties = json.loads(f.read())
     except Exception as e:
       logging.error('LoadProperties: %s', e)
+
+    if self._allowlist:
+      if 'allowlist' in self._properties and self._properties['allowlist']:
+        logging.warning('Overwriting existing allowlist from properties file with '
+                        'command line allowlist value')
+
+      allowed_entities = []
+      for entity in self._allowlist.split(','):
+        trimmed_entity = entity.strip()
+        if trimmed_entity:
+          allowed_entities.append(trimmed_entity)
+      self._properties['allowlist'] = allowed_entities
+    elif 'allowlist' not in self._properties:
+      self._properties['allowlist'] = [self.GetCurrentUser()]
+
+  def GetCurrentUser(self):
+    """Gets the current user's username."""
+    return os.getenv('USER')
 
   def CloseSockets(self):
     # Close sockets opened by parent process, since we don't use it anymore.
@@ -405,8 +429,9 @@ class Ghost:
       self.CloseSockets()
       g = Ghost([self._connected_addr], tls_settings=self._tls_settings,
                 mode=mode, mid=Ghost.RANDOM_MID, sid=sid,
-                terminal_sid=terminal_sid, tty_device=tty_device,
-                command=command, file_op=file_op, host=host, port=port)
+                allowlist=self._allowlist, terminal_sid=terminal_sid,
+                tty_device=tty_device, command=command, file_op=file_op,
+                host=host, port=port)
       g.Start()
       sys.exit(0)
     else:
@@ -1431,6 +1456,8 @@ def main():
   parser.add_argument('--status', dest='status', default=False,
                       action='store_true',
                       help='show status of the client')
+  parser.add_argument('--allowlist', dest='allowlist',
+                      help='comma-separated list of users/groups that can access this ghost')
   parser.add_argument('overlord_addr', metavar='OVERLORD_ADDR', type=str,
                       nargs='*',
                       help='overlord server address in format: host:port')
@@ -1467,8 +1494,8 @@ def main():
   tls_settings = TLSSettings(args.tls_cert_file, not args.tls_no_verify)
   tls_mode = args.tls_mode
   tls_mode = {'y': True, 'n': False, 'detect': None}[tls_mode]
-  g = Ghost(addrs, tls_settings, Ghost.AGENT, args.mid,
-            prop_file=prop_file, tls_mode=tls_mode)
+  g = Ghost(addrs, tls_settings, Ghost.AGENT, args.mid, None,
+            allowlist=args.allowlist, prop_file=prop_file, tls_mode=tls_mode)
   g.Start(args.lan_disc, args.rpc_server)
 
 

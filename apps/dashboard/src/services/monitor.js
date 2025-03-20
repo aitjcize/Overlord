@@ -71,9 +71,7 @@ export class MonitorService {
       try {
         const message = JSON.parse(event.data);
         const handlers = this.eventHandlers.get(message.event) || [];
-        const data =
-          message.data && message.data.length > 0 ? message.data[0] : null;
-        handlers.forEach((handler) => handler(data));
+        handlers.forEach((handler) => handler(...message.data));
       } catch (error) {
         console.error("Error processing WebSocket message:", error);
       }

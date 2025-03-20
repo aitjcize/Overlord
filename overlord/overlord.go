@@ -32,6 +32,8 @@ const (
 	usrShareDir        = "../share/overlord"
 	webRootDirName     = "webroot"
 	appsDirName        = "apps"
+	fileOpMaxRetries   = 100
+	fileOpRetryDelay   = 200 * time.Millisecond
 )
 
 // SpawnTerminalCmd is an overlord intend to launch a terminal.
@@ -119,7 +121,6 @@ type TLSCerts struct {
 // BroadcastMessage represents a message to be broadcast
 type BroadcastMessage struct {
 	Event string      `json:"event"`
-	Room  string      `json:"room"`
 	Data  interface{} `json:"data"`
 }
 
@@ -127,6 +128,7 @@ type BroadcastMessage struct {
 type WebSocketClient struct {
 	conn     *websocket.Conn
 	sendChan chan []byte
+	username string
 }
 
 // Overlord type is the main context for storing the overlord server state.
@@ -231,7 +233,7 @@ func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		}
 		ovl.agents[conn.Mid] = conn
 		ovl.agentsMu.Unlock()
-		ovl.BroadcastEvent("monitor", "agent joined", string(msg))
+		ovl.BroadcastEvent(conn.Mid, "agent joined", string(msg))
 	case ModeTerminal, ModeShell, ModeForward:
 		ovl.wsctxsMu.Lock()
 		ctx, ok := ovl.wsctxs[conn.Sid]
@@ -252,7 +254,7 @@ func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		}
 		ovl.logcats[conn.Mid][conn.Sid] = conn
 		ovl.logcatsMu.Unlock()
-		ovl.BroadcastEvent("monitor", "logcat joined", string(msg))
+		ovl.BroadcastEvent(conn.Mid, "logcat joined", string(msg))
 	case ModeFile:
 		// Do nothing, we wait until 'request_to_download' call from client to
 		// send the message to the browser
@@ -285,14 +287,14 @@ func (ovl *Overlord) Unregister(conn *ConnServer) {
 
 	switch conn.Mode {
 	case ModeControl:
-		ovl.BroadcastEvent("monitor", "agent left", string(msg))
+		ovl.BroadcastEvent(conn.Mid, "agent left", string(msg))
 		ovl.agentsMu.Lock()
 		delete(ovl.agents, conn.Mid)
 		ovl.agentsMu.Unlock()
 	case ModeLogcat:
 		ovl.logcatsMu.Lock()
 		if _, ok := ovl.logcats[conn.Mid]; ok {
-			ovl.BroadcastEvent("monitor", "logcat left", string(msg))
+			ovl.BroadcastEvent(conn.Mid, "logcat left", string(msg))
 			delete(ovl.logcats[conn.Mid], conn.Sid)
 			if len(ovl.logcats[conn.Mid]) == 0 {
 				delete(ovl.logcats, conn.Mid)
@@ -338,7 +340,7 @@ func (ovl *Overlord) AddWebsocketContext(wc *webSocketContext) {
 func (ovl *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 	// Use session ID as download session ID instead of machine ID, so a machine
 	// can have multiple download at the same time
-	ovl.BroadcastEvent(conn.TerminalSid, "file download", conn.Sid)
+	ovl.BroadcastEvent(conn.Mid, "file download", conn.Sid, conn.TerminalSid)
 	ovl.downloadsMu.Lock()
 	ovl.downloads[conn.Sid] = conn
 	ovl.downloadsMu.Unlock()
@@ -348,24 +350,18 @@ func (ovl *Overlord) RegisterDownloadRequest(conn *ConnServer) {
 func (ovl *Overlord) RegisterUploadRequest(conn *ConnServer) {
 	// Use session ID as upload session ID instead of machine ID, so a machine
 	// can have multiple upload at the same time
-	ovl.BroadcastEvent(conn.TerminalSid, "file upload", conn.Sid)
+	ovl.BroadcastEvent(conn.Mid, "file upload", conn.Sid, conn.TerminalSid)
 	ovl.uploadsMu.Lock()
 	ovl.uploads[conn.Sid] = conn
 	ovl.uploadsMu.Unlock()
 }
 
-// Handle TCP Connection.
-func (ovl *Overlord) handleConnection(conn net.Conn) {
-	handler := NewConnServer(ovl, conn)
-	go handler.Listen()
-	ovl.BroadcastEvent("monitor", "agent joined", handler.Mid)
-}
-
 // BroadcastEvent broadcasts an event to all monitor clients
-func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
+// If mid is not empty, the event will only be sent to clients with permission
+// to access that agent
+func (ovl *Overlord) BroadcastEvent(mid, event string, args ...interface{}) {
 	msg := BroadcastMessage{
 		Event: event,
-		Room:  room,
 		Data:  args,
 	}
 
@@ -377,6 +373,18 @@ func (ovl *Overlord) BroadcastEvent(room, event string, args ...interface{}) {
 
 	ovl.monitorClientsMu.RLock()
 	for client := range ovl.monitorClients {
+		// If mid is provided, check permissions
+		if mid != "" {
+			ovl.agentsMu.Lock()
+			agent, exists := ovl.agents[mid]
+			ovl.agentsMu.Unlock()
+
+			// Skip this client if agent exists and user doesn't have permission
+			if exists && !ovl.CheckAllowlist(client.username, agent) {
+				continue
+			}
+		}
+
 		select {
 		case client.sendChan <- jsonMsg:
 		default:
@@ -438,14 +446,6 @@ func (ovl *Overlord) GetAppNames() ([]string, error) {
 	return appNames, nil
 }
 
-type byMid []map[string]interface{}
-
-func (a byMid) Len() int      { return len(a) }
-func (a byMid) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
-func (a byMid) Less(i, j int) bool {
-	return a[i]["mid"].(string) < a[j]["mid"].(string)
-}
-
 // RegisterHTTPHandlers register handlers for http routes.
 func (ovl *Overlord) RegisterHTTPHandlers() {
 	var upgrader = websocket.Upgrader{
@@ -455,14 +455,6 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
-	}
-
-	// Helper function for writing error message to WebSocket
-	WebSocketSendError := func(ws *websocket.Conn, err string) {
-		log.Println(err)
-		msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
-		ws.WriteMessage(websocket.CloseMessage, msg)
-		ws.Close()
 	}
 
 	GhostConnectHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -483,12 +475,12 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		apps, err := ovl.GetAppNames()
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
+			ResponseError(w, err.Error(), http.StatusInternalServerError)
 		}
 
 		result, err := json.Marshal(map[string][]string{"apps": apps})
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
+			ResponseError(w, err.Error(), http.StatusInternalServerError)
 		} else {
 			w.Write(result)
 		}
@@ -497,24 +489,36 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// List all agents connected to the Overlord.
 	AgentsListHandler := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		var data = make([]map[string]interface{}, 0)
+
+		var result []map[string]interface{}
+		username := GetUserFromContext(r.Context())
+
 		ovl.agentsMu.Lock()
 		for _, agent := range ovl.agents {
-			data = append(data, map[string]interface{}{
+			if !ovl.CheckAllowlist(username, agent) {
+				continue
+			}
+
+			result = append(result, map[string]interface{}{
 				"mid":        agent.Mid,
 				"sid":        agent.Sid,
 				"properties": agent.Properties,
 			})
 		}
 		ovl.agentsMu.Unlock()
-		sort.Sort(byMid(data))
 
-		result, err := json.Marshal(data)
+		// Sort by machine ID for consistent output
+		sort.Slice(result, func(i, j int) bool {
+			return result[i]["mid"].(string) < result[j]["mid"].(string)
+		})
+
+		jsonResult, err := json.Marshal(result)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
-		} else {
-			w.Write(result)
+			ResponseError(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+
+		w.Write(jsonResult)
 	}
 
 	// Agent upgrade request handler.
@@ -528,7 +532,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			}
 		}
 		ovl.agentsMu.Unlock()
-		w.Write([]byte(`{"status": "success"}`))
+		ResponseSuccess(w, nil)
 	}
 
 	// List all logcat clients connected to the Overlord.
@@ -550,7 +554,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		result, err := json.Marshal(data)
 		if err != nil {
-			w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
+			ResponseError(w, err.Error(), http.StatusInternalServerError)
 		} else {
 			w.Write(result)
 		}
@@ -610,6 +614,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		ovl.agentsMu.Lock()
 		if agent, ok := ovl.agents[mid]; ok {
 			ovl.agentsMu.Unlock()
+
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnTerminalCmd{wc.Sid, ttyDevice}
@@ -647,6 +652,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		ovl.agentsMu.Lock()
 		if agent, ok := ovl.agents[mid]; ok {
 			ovl.agentsMu.Unlock()
+
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnShellCmd{wc.Sid, command}
@@ -675,13 +681,13 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			ovl.agentsMu.Unlock()
 			jsonResult, err := json.Marshal(agent.Properties)
 			if err != nil {
-				w.Write([]byte(fmt.Sprintf(`{"error": "%s"}`, err)))
+				ResponseError(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.Write(jsonResult)
 		} else {
 			ovl.agentsMu.Unlock()
-			w.Write([]byte(fmt.Sprintf(`{"error": "No client with mid %s"}`, mid)))
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
 		}
 	}
 
@@ -713,6 +719,8 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// Handler for file download request, the filename target machine is
 	// specified in the request URL.
 	AgentFileDownloadHandler := func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("File download request from %s\n", r.RemoteAddr)
+
 		vars := mux.Vars(r)
 		mid := vars["mid"]
 
@@ -722,14 +730,14 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		ovl.agentsMu.Lock()
 		if agent, ok = ovl.agents[mid]; !ok {
 			ovl.agentsMu.Unlock()
-			http.NotFound(w, r)
+			ResponseError(w, "No such agent exists", http.StatusBadRequest)
 			return
 		}
 		ovl.agentsMu.Unlock()
 
 		var filename []string
 		if filename, ok = r.URL.Query()["filename"]; !ok {
-			http.NotFound(w, r)
+			ResponseError(w, "No filename specified", http.StatusBadRequest)
 			return
 		}
 
@@ -739,17 +747,16 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		res := <-agent.Response
 		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusBadRequest)
+			ResponseJSON(w, string(res.Payload), http.StatusBadRequest)
 			return
 		}
 
 		var c *ConnServer
-		const maxTries = 100 // 20 seconds
 		count := 0
 
 		// Wait until download client connects
 		for {
-			if count++; count == maxTries {
+			if count++; count == fileOpMaxRetries {
 				http.NotFound(w, r)
 				return
 			}
@@ -759,7 +766,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 				break
 			}
 			ovl.downloadsMu.Unlock()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(fileOpRetryDelay)
 		}
 		serveFileHTTP(w, c)
 	}
@@ -799,6 +806,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		vars := mux.Vars(r)
 		mid := vars["mid"]
+
 		// default host to 127.0.0.1 if not specified
 		if _host, ok := r.URL.Query()["host"]; ok {
 			host = _host[0]
@@ -817,6 +825,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		ovl.agentsMu.Lock()
 		if agent, ok := ovl.agents[mid]; ok {
 			ovl.agentsMu.Unlock()
+
 			wc := newWebsocketContext(conn)
 			ovl.AddWebsocketContext(wc)
 			agent.Command <- SpawnModeForwarderCmd{wc.Sid, host, port}
@@ -840,13 +849,13 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		agent, ok := ovl.agents[mid]
 		ovl.agentsMu.Unlock()
 		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
 			return
 		}
 
 		path := r.URL.Query().Get("path")
 		if path == "" {
-			http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+			ResponseError(w, "path parameter is required", http.StatusBadRequest)
 			return
 		}
 
@@ -860,13 +869,13 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		} else if op == "fstat" {
 			agent.Command <- FstatCmd{Path: path}
 		} else {
-			http.Error(w, fmt.Sprintf(`{"error": "Unknown operation %s"}`, op), http.StatusBadRequest)
+			ResponseError(w, "Unknown operation "+op, http.StatusBadRequest)
 			return
 		}
 
 		res := <-agent.Response
 		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 			return
 		}
 		w.Write(res.Payload)
@@ -883,7 +892,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		agent, ok := ovl.agents[mid]
 		ovl.agentsMu.Unlock()
 		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
 			return
 		}
 
@@ -891,18 +900,18 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		dest := r.URL.Query().Get("dest")
 
 		if target == "" {
-			http.Error(w, `{"error": "target parameter is required"}`, http.StatusBadRequest)
+			ResponseError(w, "target parameter is required", http.StatusBadRequest)
 			return
 		}
 		if dest == "" {
-			http.Error(w, `{"error": "dest parameter is required"}`, http.StatusBadRequest)
+			ResponseError(w, "dest parameter is required", http.StatusBadRequest)
 			return
 		}
 
 		agent.Command <- CreateSymlinkCmd{Target: target, Dest: dest}
 		res := <-agent.Response
 		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 			return
 		}
 		w.Write(res.Payload)
@@ -919,22 +928,22 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		agent, ok := ovl.agents[mid]
 		ovl.agentsMu.Unlock()
 		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
 			return
 		}
 
 		path := r.URL.Query().Get("path")
 		if path == "" {
-			http.Error(w, `{"error": "path parameter is required"}`, http.StatusBadRequest)
+			ResponseError(w, "path parameter is required", http.StatusBadRequest)
 			return
 		}
 
-		perm := 0755 // Default permission
+		perm := 0755
 		if permStr := r.URL.Query().Get("perm"); permStr != "" {
 			var err error
 			perm64, err := strconv.ParseInt(permStr, 10, 32)
 			if err != nil {
-				http.Error(w, `{"error": "invalid perm parameter"}`, http.StatusBadRequest)
+				ResponseError(w, "invalid perm parameter", http.StatusBadRequest)
 				return
 			}
 			perm = int(perm64)
@@ -943,7 +952,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		agent.Command <- MkdirCmd{Path: path, Perm: perm}
 		res := <-agent.Response
 		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusInternalServerError)
+			ResponseJSON(w, string(res.Payload), http.StatusInternalServerError)
 			return
 		}
 		w.Write(res.Payload)
@@ -960,7 +969,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		agent, ok := ovl.agents[mid]
 		ovl.agentsMu.Unlock()
 		if !ok {
-			http.Error(w, fmt.Sprintf(`{"error": "No client with mid %s"}`, mid), http.StatusNotFound)
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
 			return
 		}
 
@@ -979,20 +988,20 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 			var err error
 			perm, err = strconv.ParseInt(perms[0], 8, 32)
 			if err != nil {
-				http.Error(w, `{"error": "invalid permission format"}`, http.StatusBadRequest)
+				ResponseError(w, "invalid permission format", http.StatusBadRequest)
 				return
 			}
 		}
 
 		mr, err := r.MultipartReader()
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusBadRequest)
+			ResponseError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
 		p, err := mr.NextPart()
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusBadRequest)
+			ResponseError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -1002,17 +1011,16 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 
 		res := <-agent.Response
 		if res.Status == Failed {
-			http.Error(w, string(res.Payload), http.StatusBadRequest)
+			ResponseJSON(w, string(res.Payload), http.StatusBadRequest)
 			return
 		}
 
-		const maxTries = 100 // 20 seconds
 		count := 0
 
 		// Wait until upload client connects
 		var c *ConnServer
 		for {
-			if count++; count == maxTries {
+			if count++; count == fileOpMaxRetries {
 				http.Error(w, "no response from client", http.StatusInternalServerError)
 				return
 			}
@@ -1022,22 +1030,24 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 				break
 			}
 			ovl.uploadsMu.Unlock()
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(fileOpRetryDelay)
 		}
 
 		_, err = io.Copy(c.Conn, p)
 		c.StopListen()
 
 		if err != nil {
-			http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err), http.StatusInternalServerError)
+			ResponseError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		w.Write([]byte(`{"status": "success"}`))
+		ResponseSuccess(w, nil)
 	}
 
 	// WebSocket monitor endpoint
 	MonitorHandler := func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Monitor request from %s\n", r.RemoteAddr)
+
+		username := GetUserFromContext(r.Context())
 
 		// Upgrade the connection to WebSocket
 		conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
@@ -1049,6 +1059,7 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		client := &WebSocketClient{
 			conn:     conn,
 			sendChan: make(chan []byte, 256),
+			username: username,
 		}
 
 		ovl.monitorClientsMu.Lock()
@@ -1071,67 +1082,50 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 		log.Fatalf("Failed to initialize JWT authentication: %v", err)
 	}
 
+	// Create a main router for all API endpoints
+	mainRouter := mux.NewRouter()
+
+	// Public routes (no authentication required)
+	publicRouter := mainRouter.PathPrefix("/api").Subrouter()
+	publicRouter.HandleFunc("/auth/login", jwtAuth.Login).Methods("POST")
+
+	// Protected routes (authentication required)
+	authRouter := mainRouter.PathPrefix("/api").Subrouter()
+	authRouter.Use(jwtAuth.Middleware)
+
+	// Register agent-specific routes with both auth and allowlist middleware
+	agentRoutes := authRouter.PathPrefix("/agents").Subrouter()
+	agentRoutes.Use(ovl.AllowlistMiddleware)
+
+	// Register agent-specific routes with the allowlist middleware
+	agentRoutes.HandleFunc("/{mid}/properties", AgentPropertiesHandler).Methods("GET")
+	agentRoutes.HandleFunc("/{mid}/file", AgentFileDownloadHandler).Methods("GET")
+	agentRoutes.HandleFunc("/{mid}/file", AgentFileUploadHandler).Methods("POST")
+	agentRoutes.HandleFunc("/{mid}/fs", AgentFsHandler).Methods("GET")
+	agentRoutes.HandleFunc("/{mid}/fs/symlinks", AgentFsSymlinkHandler).Methods("POST")
+	agentRoutes.HandleFunc("/{mid}/fs/directories", AgentFsDirHandler).Methods("POST")
+	agentRoutes.HandleFunc("/{mid}/tty", AgentTtyHandler).Methods("GET")
+	agentRoutes.HandleFunc("/{mid}/shell", ModeShellHandler).Methods("GET")
+	agentRoutes.HandleFunc("/{mid}/forward", AgentModeForwardHandler).Methods("GET")
+
+	// These routes need authentication but not allowlist check
+	authRouter.HandleFunc("/agents", AgentsListHandler).Methods("GET")
+	authRouter.HandleFunc("/agents/upgrade", AgentsUpgradeHandler).Methods("POST")
+
+	// Other authenticated routes
+	authRouter.HandleFunc("/apps", AppsListHandler).Methods("GET")
+	authRouter.HandleFunc("/logcats", LogcatsListHandler).Methods("GET")
+	authRouter.HandleFunc("/logcats/{mid}/{sid}", LogcatHandler).Methods("GET")
+	authRouter.HandleFunc("/monitor", MonitorHandler).Methods("GET")
+	authRouter.HandleFunc("/sessions/{sid}/file", SessionFileDownloadHandler).Methods("GET")
+
+	// Register the routers with the HTTP server
+	http.Handle("/api/", mainRouter)
+
+	// Connect endpoint (special case for agent connections)
 	http.HandleFunc("/connect", GhostConnectHandler)
 
-	// Create a single router for all API endpoints
-	apiRouter := mux.NewRouter()
-
-	// Add login endpoint for JWT authentication (public)
-	apiRouter.HandleFunc("/api/auth/login", jwtAuth.Login).Methods("POST")
-
-	// Apps
-	apiRouter.HandleFunc("/api/apps", AppsListHandler).Methods("GET")
-
-	// Agents
-	apiRouter.HandleFunc("/api/agents", AgentsListHandler).Methods("GET")
-	apiRouter.HandleFunc("/api/agents/upgrade", AgentsUpgradeHandler).Methods("POST")
-	apiRouter.HandleFunc("/api/agents/{mid}/properties", AgentPropertiesHandler).Methods("GET")
-
-	// File transfer operations
-	apiRouter.HandleFunc("/api/agents/{mid}/file", AgentFileDownloadHandler).Methods("GET")
-	apiRouter.HandleFunc("/api/agents/{mid}/file", AgentFileUploadHandler).Methods("POST")
-
-	// Filesystem operations
-	apiRouter.HandleFunc("/api/agents/{mid}/fs", AgentFsHandler).Methods("GET")
-	apiRouter.HandleFunc("/api/agents/{mid}/fs/symlinks", AgentFsSymlinkHandler).Methods("POST")
-	apiRouter.HandleFunc("/api/agents/{mid}/fs/directories", AgentFsDirHandler).Methods("POST")
-
-	// Terminal/Shell
-	apiRouter.HandleFunc("/api/agents/{mid}/tty", AgentTtyHandler).Methods("GET")
-	apiRouter.HandleFunc("/api/agents/{mid}/shell", ModeShellHandler).Methods("GET")
-
-	// Port forwarding
-	apiRouter.HandleFunc("/api/agents/{mid}/forward", AgentModeForwardHandler).Methods("GET")
-
-	// Logcat
-	apiRouter.HandleFunc("/api/logcats", LogcatsListHandler).Methods("GET")
-	apiRouter.HandleFunc("/api/logcats/{mid}/{sid}", LogcatHandler).Methods("GET")
-
-	// Monitor
-	apiRouter.HandleFunc("/api/monitor", MonitorHandler).Methods("GET")
-
-	// File download by session ID (internal endpoint)
-	apiRouter.HandleFunc("/api/sessions/{sid}/file", SessionFileDownloadHandler).Methods("GET")
-
-	// Create a middleware that conditionally applies authentication based on the path
-	conditionalAuthMiddleware := func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip authentication for login endpoint only
-			if strings.HasPrefix(r.URL.Path, "/api/auth/login") {
-				log.Printf("Auth: Skipping authentication for login endpoint: %s", r.URL.Path)
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Apply JWT authentication for all other API endpoints
-			jwtAuth.Middleware(next).ServeHTTP(w, r)
-		})
-	}
-
-	// Register the API router with conditional authentication
-	http.Handle("/api/", conditionalAuthMiddleware(apiRouter))
-
-	// /upgrade/ does not need authentication
+	// Serve static files
 	http.Handle("/", http.StripPrefix("/",
 		http.FileServer(http.Dir(webRootDir))))
 }
@@ -1309,6 +1303,82 @@ func (ovl *Overlord) Serv() {
 // StartOverlord starts the overlord server.
 func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool,
 	certsString string, linkTLS bool, htpasswdPath string, jwtSecretPath string) {
-	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, certsString, linkTLS, htpasswdPath, jwtSecretPath)
+	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, certsString,
+		linkTLS, htpasswdPath, jwtSecretPath)
 	ovl.Serv()
+}
+
+// CheckAllowlist checks if the provided username has access to the ghost agent
+// based on the allowlist property
+func (ovl *Overlord) CheckAllowlist(username string, agent *ConnServer) bool {
+	// If no allowlist is provided, deny access
+	if agent.Properties == nil {
+		return false
+	}
+
+	// Get the allowlist from agent properties
+	allowlistProp, ok := agent.Properties["allowlist"]
+	if !ok {
+		// No allowlist property, deny access
+		return false
+	}
+
+	// Handle the case where allowlist is an array of strings
+	if allowlistArray, ok := allowlistProp.([]interface{}); ok {
+		// Special case: check for "anyone" in the array
+		for _, entity := range allowlistArray {
+			if entityStr, ok := entity.(string); ok {
+				if entityStr == "anyone" {
+					return true
+				}
+				if entityStr == username {
+					return true
+				}
+				// TODO: Add group membership check here in the future
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// AllowlistMiddleware checks if the user has permission to access the requested agent
+func (ovl *Overlord) AllowlistMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Skip non-agent routes
+		vars := mux.Vars(r)
+		mid, ok := vars["mid"]
+		if !ok {
+			// Route doesn't have a mid parameter, pass through
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if mid == "" {
+			ResponseError(w, "Invalid agent ID", http.StatusBadRequest)
+			return
+		}
+
+		username := GetUserFromContext(r.Context())
+
+		// Check if agent exists and user has permission
+		ovl.agentsMu.Lock()
+		agent, exists := ovl.agents[mid]
+		ovl.agentsMu.Unlock()
+
+		if !exists {
+			log.Printf("AllowlistMiddleware: Agent %s not found", mid)
+			ResponseError(w, "No client with mid "+mid, http.StatusNotFound)
+			return
+		}
+
+		if !ovl.CheckAllowlist(username, agent) {
+			log.Printf("AllowlistMiddleware: User %s not authorized to access agent %s", username, mid)
+			ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// User has permission, continue to the next handler
+		next.ServeHTTP(w, r)
+	})
 }

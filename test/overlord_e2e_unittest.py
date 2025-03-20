@@ -112,6 +112,7 @@ class TestOverlord(unittest.TestCase):
         '-no-lan-disc',
         '-no-rpc-server',
         '-tls=n',
+        '-allowlist=testuser',
         'localhost:%d' % overlord_http_port
     ], env=env)
 
@@ -122,6 +123,7 @@ class TestOverlord(unittest.TestCase):
         '--no-lan-disc',
         '--no-rpc-server',
         '--tls=n',
+        '--allowlist=testuser',
         'localhost:%d' % overlord_http_port
     ], env=env)
 

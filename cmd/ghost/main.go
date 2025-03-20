@@ -19,6 +19,8 @@ var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
 var noRPCServer = flag.Bool("no-rpc-server", false, "disable RPC server")
 var propFile = flag.String("prop-file", "",
 	"file containing the JSON representation of client properties")
+var allowlist = flag.String("allowlist", "",
+	"comma-separated list of users/groups that can access this ghost")
 var tlsCertFile = flag.String("tls-cert-file", "",
 	"file containing the server TLS certificate in PEM format")
 var tlsNoVerify = flag.Bool("tls-no-verify", false,
@@ -62,5 +64,5 @@ func main() {
 	}
 
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,
-		!*tlsNoVerify, *propFile, *download, *reset, *status, tlsMode)
+		!*tlsNoVerify, *allowlist, *propFile, *download, *reset, *status, tlsMode)
 }

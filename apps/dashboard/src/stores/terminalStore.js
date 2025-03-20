@@ -8,6 +8,9 @@ export const useTerminalStore = defineStore("terminals", () => {
   // Track terminal counts per client
   const clientTerminalCounts = ref({});
 
+  // Store active terminal session IDs
+  const activeTerminalSids = ref(new Set());
+
   // Getters
   const terminalsArray = computed(() => Object.values(terminals.value));
 
@@ -258,6 +261,21 @@ export const useTerminalStore = defineStore("terminals", () => {
     }
   }
 
+  // Add a terminal session ID
+  const addTerminalSid = (sid) => {
+    activeTerminalSids.value.add(sid);
+  };
+
+  // Remove a terminal session ID
+  const removeTerminalSid = (sid) => {
+    activeTerminalSids.value.delete(sid);
+  };
+
+  // Check if a terminal session ID exists
+  const hasTerminalSid = (sid) => {
+    return activeTerminalSids.value.has(sid);
+  };
+
   // Return the store methods and state
   return {
     terminals,
@@ -273,5 +291,9 @@ export const useTerminalStore = defineStore("terminals", () => {
     hasMultipleTerminals,
     getClientTerminals,
     updateTerminalProperty,
+    activeTerminalSids,
+    addTerminalSid,
+    removeTerminalSid,
+    hasTerminalSid,
   };
 });

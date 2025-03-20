@@ -206,6 +206,7 @@ type Ghost struct {
 	terminalSid     string                 // Associated terminal session ID
 	ttyName2Sid     sync.Map               // Mapping between ttyName and Sid
 	terminalSid2Pid sync.Map               // Mapping between terminalSid and pid
+	allowlist       string                 // Allowlist for permission control
 	propFile        string                 // Properties file filename
 	properties      map[string]interface{} // Client properties
 	RegisterStatus  string                 // Register status from server response
@@ -309,6 +310,12 @@ func (ghost *Ghost) SetTLSMode(mode int) *Ghost {
 	return ghost
 }
 
+// SetAllowlist sets the allowlist of users and groups that can access this ghost
+func (ghost *Ghost) SetAllowlist(allowlist string) *Ghost {
+	ghost.allowlist = allowlist
+	return ghost
+}
+
 func (ghost *Ghost) existsInAddr(target string) bool {
 	for _, x := range ghost.addrs {
 		if target == x {
@@ -319,19 +326,40 @@ func (ghost *Ghost) existsInAddr(target string) bool {
 }
 
 func (ghost *Ghost) loadProperties() {
-	if ghost.propFile == "" {
-		return
+	ghost.properties = make(map[string]interface{})
+
+	if ghost.propFile != "" {
+		bytes, err := os.ReadFile(ghost.propFile)
+		if err != nil {
+			log.Printf("loadProperties: %s\n", err)
+		} else {
+			if err := json.Unmarshal(bytes, &ghost.properties); err != nil {
+				log.Printf("loadProperties: %s\n", err)
+			}
+		}
 	}
 
-	bytes, err := os.ReadFile(ghost.propFile)
-	if err != nil {
-		log.Printf("loadProperties: %s\n", err)
-		return
+	if ghost.allowlist != "" {
+		// Check if allowlist exists in properties file
+		if existingAllowlist, ok := ghost.properties["allowlist"]; ok &&
+			existingAllowlist != nil {
+			log.Printf("Warning: Overwriting existing allowlist from properties " +
+				"file with command line allowlist value")
+		}
+
+		// Split the allowlist string and convert to an array
+		allowedEntities := []string{}
+		for _, entity := range strings.Split(ghost.allowlist, ",") {
+			trimmedEntity := strings.TrimSpace(entity)
+			if trimmedEntity != "" {
+				allowedEntities = append(allowedEntities, trimmedEntity)
+			}
+		}
+		ghost.properties["allowlist"] = allowedEntities
 	}
 
-	if err := json.Unmarshal(bytes, &ghost.properties); err != nil {
-		log.Printf("loadProperties: %s\n", err)
-		return
+	if ghost.properties["allowlist"] == nil {
+		ghost.properties["allowlist"] = []string{getCurrentUser()}
 	}
 }
 
@@ -482,8 +510,10 @@ func (ghost *Ghost) handleTerminalRequest(req *Request) error {
 		addrs := []string{ghost.connectedAddr}
 		// Terminal sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, ghost.tls, ModeTerminal, RandomMID).SetSid(
-			params.Sid).SetTtyDevice(params.TtyDevice)
+		g := NewGhost(addrs, ghost.tls, ModeTerminal, RandomMID).
+			SetSid(params.Sid).
+			SetAllowlist(ghost.allowlist).
+			SetTtyDevice(params.TtyDevice)
 		g.Start(false, false)
 	}()
 
@@ -508,8 +538,10 @@ func (ghost *Ghost) handleShellRequest(req *Request) error {
 		addrs := []string{ghost.connectedAddr}
 		// Shell sessions are identified with session ID, thus we don't care
 		// machine ID and can make them random.
-		g := NewGhost(addrs, ghost.tls, ModeShell, RandomMID).SetSid(
-			params.Sid).SetShellCommand(params.Cmd)
+		g := NewGhost(addrs, ghost.tls, ModeShell, RandomMID).
+			SetSid(params.Sid).
+			SetAllowlist(ghost.allowlist).
+			SetShellCommand(params.Cmd)
 		g.Start(false, false)
 	}()
 
@@ -621,8 +653,10 @@ func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
 	go func() {
 		log.Printf("Received file_download command, File agent %s spawned\n", params.Sid)
 		addrs := []string{ghost.connectedAddr}
-		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetSid(
-			params.Sid).SetFileOp("download", filename, 0)
+		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).
+			SetSid(params.Sid).
+			SetAllowlist(ghost.allowlist).
+			SetFileOp("download", filename, 0)
 		g.Start(false, false)
 	}()
 
@@ -689,8 +723,10 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 			log.Printf("Received file_upload command, File agent %s spawned\n",
 				params.Sid)
 			addrs := []string{ghost.connectedAddr}
-			g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetSid(
-				params.Sid).SetFileOp("upload", destPath, params.Perm)
+			g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).
+				SetSid(params.Sid).
+				SetAllowlist(ghost.allowlist).
+				SetFileOp("upload", destPath, params.Perm)
 			g.Start(false, false)
 		}()
 	}
@@ -714,8 +750,10 @@ func (ghost *Ghost) handleModeForwardRequest(req *Request) error {
 	go func() {
 		log.Printf("Received forward command, ModeForward agent %s spawned\n", params.Sid)
 		addrs := []string{ghost.connectedAddr}
-		g := NewGhost(addrs, ghost.tls, ModeForward, RandomMID).SetSid(
-			params.Sid).SetForwardTarget(params.Host, params.Port)
+		g := NewGhost(addrs, ghost.tls, ModeForward, RandomMID).
+			SetSid(params.Sid).
+			SetAllowlist(ghost.allowlist).
+			SetForwardTarget(params.Host, params.Port)
 		g.Start(false, false)
 	}()
 
@@ -1390,8 +1428,10 @@ func (ghost *Ghost) InitiateDownload(info downloadInfo) {
 			return
 		}
 
-		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).SetTerminalSid(
-			val.(string)).SetFileOp("download", info.Filename, 0)
+		g := NewGhost(addrs, ghost.tls, ModeFile, RandomMID).
+			SetAllowlist(ghost.allowlist).
+			SetTerminalSid(val.(string)).
+			SetFileOp("download", info.Filename, 0)
 		g.Start(false, false)
 	}()
 }
@@ -1712,8 +1752,8 @@ fail:
 
 // StartGhost starts the Ghost client.
 func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
-	tlsCertFile string, verify bool, propFile string, download string,
-	reset bool, status bool, tlsMode int) {
+	tlsCertFile string, verify bool, allowlist string, propFile string,
+	download string, reset bool, status bool, tlsMode int) {
 	var addrs []string
 
 	if status {
@@ -1776,8 +1816,10 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 		}
 	}
 
-	g := NewGhost(addrs, tlsSettings, ModeControl, mid)
-	g.SetPropFile(propFile).SetTLSMode(tlsMode)
+	g := NewGhost(addrs, tlsSettings, ModeControl, mid).
+		SetAllowlist(allowlist).
+		SetPropFile(propFile).
+		SetTLSMode(tlsMode)
 	go g.Start(!noLanDisc, !noRPCServer)
 
 	ticker := time.NewTicker(time.Duration(60 * time.Second))
@@ -1788,4 +1830,8 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 			log.Printf("Num of Goroutines: %d\n", runtime.NumGoroutine())
 		}
 	}
+}
+
+func getCurrentUser() string {
+	return os.Getenv("USER")
 }

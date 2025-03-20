@@ -71,8 +71,8 @@ type LoginResponse struct {
 // Key type for context values
 type contextKey string
 
-// Define a key for JWT claims in context
 const jwtClaimsContextKey contextKey = "jwtClaims"
+const userContextKey contextKey = "user"
 
 // LoadJWTSecret loads the JWT secret from the specified file
 func (config *JWTConfig) LoadJWTSecret() error {
@@ -206,8 +206,7 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 	// Check if IP is blocked
 	if auth.IsBlocked(r) {
 		log.Printf("JWTAuth: login attempt from blocked IP: %s", getRequestIP(r))
-		http.Error(w, fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized),
-			"too many retries"), http.StatusUnauthorized)
+		ResponseError(w, "too many retries", http.StatusUnauthorized)
 		return
 	}
 
@@ -215,7 +214,7 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 	var loginReq LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&loginReq); err != nil {
 		log.Printf("JWTAuth: failed to parse login request: %v", err)
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		ResponseError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -325,22 +324,30 @@ func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 		}
 
 		// Add claims to request context
-		r = r.WithContext(WithJWTClaims(r.Context(), claims))
+		r = r.WithContext(WithAuthClaims(r.Context(), claims))
 
 		// Continue to the next handler
 		next.ServeHTTP(w, r)
 	})
 }
 
-// WithJWTClaims adds JWT claims to the context
-func WithJWTClaims(ctx context.Context, claims *JWTClaims) context.Context {
-	return context.WithValue(ctx, jwtClaimsContextKey, claims)
+// WithAuthClaims adds JWT claims to the context
+func WithAuthClaims(ctx context.Context, claims *JWTClaims) context.Context {
+	ctx = context.WithValue(ctx, jwtClaimsContextKey, claims)
+	ctx = context.WithValue(ctx, userContextKey, claims.Username)
+	return ctx
 }
 
 // GetJWTClaimsFromContext retrieves JWT claims from context
 func GetJWTClaimsFromContext(ctx context.Context) *JWTClaims {
 	claims, _ := ctx.Value(jwtClaimsContextKey).(*JWTClaims)
 	return claims
+}
+
+// GetUserFromContext retrieves the username from context
+func GetUserFromContext(ctx context.Context) string {
+	user, _ := ctx.Value(userContextKey).(string)
+	return user
 }
 
 // IsBlocked returns true if the given IP is blocked.
@@ -404,13 +411,7 @@ func (auth *JWTAuth) Unauthorized(w http.ResponseWriter, r *http.Request,
 			log.Printf("JWTAuth: IP %s (%s) is blocked\n", ip, r.UserAgent())
 		}
 	}
-
-	// Return 401 Unauthorized response
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error": fmt.Sprintf("%s: %s", http.StatusText(http.StatusUnauthorized), msg),
-	})
+	ResponseError(w, msg, http.StatusUnauthorized)
 }
 
 func getRequestIP(r *http.Request) string {
