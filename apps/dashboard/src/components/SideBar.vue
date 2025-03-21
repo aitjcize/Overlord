@@ -22,14 +22,101 @@
         ref="sidebarRef"
         class="bg-gradient-to-b from-slate-900 to-slate-800 w-80 min-h-full p-4 flex flex-col gap-6 border-r border-slate-700/50"
       >
-        <!-- Search Filter -->
-        <div class="form-control">
-          <input
-            type="text"
-            placeholder="Search clients..."
-            class="input bg-slate-800/50 border-slate-700 w-full text-slate-300 placeholder:text-slate-500 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50"
-            v-model="clientStore.filterPattern"
-          />
+        <!-- Navigation Links -->
+        <div class="mb-2">
+          <router-link
+            to="/"
+            class="flex items-center gap-2 p-2 rounded-md text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all"
+            :class="{ 'bg-slate-700/70 text-white': $route.path === '/' }"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+            >
+              <path
+                d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"
+              />
+            </svg>
+            <span>Dashboard</span>
+          </router-link>
+        </div>
+
+        <!-- Admin Navigation - Only visible to admin users -->
+        <div v-if="authStore.userIsAdmin" class="space-y-4 mb-6">
+          <h3 class="font-semibold text-sm uppercase text-emerald-500/80 px-2">
+            Administration
+          </h3>
+          <div class="space-y-1">
+            <router-link
+              to="/admin/users"
+              class="flex items-center gap-2 p-2 rounded-md text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all"
+              :class="{
+                'bg-slate-700/70 text-white': $route.path === '/admin/users',
+              }"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"
+                />
+              </svg>
+              <span>User Management</span>
+            </router-link>
+            <router-link
+              to="/admin/groups"
+              class="flex items-center gap-2 p-2 rounded-md text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all"
+              :class="{
+                'bg-slate-700/70 text-white': $route.path === '/admin/groups',
+              }"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"
+                />
+              </svg>
+              <span>Group Management</span>
+            </router-link>
+
+            <!-- Upgrade All Clients Button -->
+            <button
+              @click="triggerUpgrade"
+              class="flex items-center gap-2 p-2 rounded-md text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all w-full"
+              :disabled="clientStore.isUpgrading"
+              :class="{
+                'opacity-70': clientStore.isUpgrading,
+              }"
+            >
+              <span
+                v-if="clientStore.isUpgrading"
+                class="loading loading-spinner loading-sm"
+              ></span>
+              <svg
+                v-else
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 17a1 1 0 001-1v-5.586l3.293 3.293a1 1 0 001.414-1.414l-5-5a1 1 0 00-1.414 0l-5 5a1 1 0 101.414 1.414L9 10.414V16a1 1 0 001 1z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span>{{ upgradeButtonText }}</span>
+            </button>
+          </div>
         </div>
 
         <!-- Connected Clients -->
@@ -37,6 +124,17 @@
           <h3 class="font-semibold text-sm uppercase text-emerald-500/80">
             Connected Clients
           </h3>
+
+          <!-- Search Filter - Moved under Connected Clients title -->
+          <div class="form-control mb-2">
+            <input
+              type="text"
+              placeholder="Search clients..."
+              class="input bg-slate-800/50 border-slate-700 w-full text-slate-300 placeholder:text-slate-500 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50"
+              v-model="clientStore.filterPattern"
+            />
+          </div>
+
           <div class="space-y-2">
             <div
               v-for="client in clientStore.filteredClients"
@@ -156,39 +254,10 @@
           </div>
         </div>
 
-        <!-- Spacer to push upgrade button to bottom -->
+        <!-- Spacer to fill the remaining space -->
         <div class="flex-grow"></div>
 
-        <!-- Upgrade Button -->
-        <div class="mt-auto">
-          <button
-            @click="triggerUpgrade"
-            class="btn btn-block bg-emerald-600 hover:bg-emerald-700 text-white border-none"
-            :class="{
-              'opacity-70 pointer-events-none': clientStore.isUpgrading,
-            }"
-            :disabled="clientStore.isUpgrading"
-          >
-            <span
-              v-if="clientStore.isUpgrading"
-              class="loading loading-spinner loading-sm mr-2"
-            ></span>
-            <svg
-              v-else
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5 mr-2"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M10 17a1 1 0 001-1v-5.586l3.293 3.293a1 1 0 001.414-1.414l-5-5a1 1 0 00-1.414 0l-5 5a1 1 0 101.414 1.414L9 10.414V16a1 1 0 001 1z"
-                clip-rule="evenodd"
-              />
-            </svg>
-            {{ upgradeButtonText }}
-          </button>
-        </div>
+        <!-- Note: Upgrade button has been moved to the Admin section -->
       </div>
     </div>
   </div>
@@ -197,10 +266,12 @@
 <script setup>
 import { useClientStore } from "@/stores/clientStore";
 import { useTerminalStore } from "@/stores/terminalStore";
+import { useAuthStore } from "@/stores/authStore";
 import { ref, onMounted, provide, onBeforeUnmount, watch } from "vue";
 
 const clientStore = useClientStore();
 const terminalStore = useTerminalStore();
+const authStore = useAuthStore();
 const upgradeStatus = ref("idle"); // 'idle', 'success', 'error'
 const upgradeButtonText = ref("Upgrade All Clients");
 

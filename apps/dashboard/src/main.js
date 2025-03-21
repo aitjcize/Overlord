@@ -1,9 +1,13 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
+import { createRouter, createWebHistory } from "vue-router";
 import App from "./App.vue";
 import "./assets/tailwind.css";
 import "./assets/mobile-viewport-fix.css"; // Import mobile viewport fix
 import "./services/axios"; // Import axios configuration
+
+// Import auth store for router guard
+import { useAuthStore } from "./stores/authStore";
 
 // Fix for mobile Safari viewport height
 const setVhVariable = () => {
@@ -41,12 +45,53 @@ if ("standalone" in navigator && navigator.standalone) {
   });
 }
 
-// Create the app instance
+// Create the app instance and Pinia
 const app = createApp(App);
-
-// Add Pinia to the app
 const pinia = createPinia();
 app.use(pinia);
+
+// Create router instance
+const router = createRouter({
+  history: createWebHistory(),
+  routes: [
+    {
+      path: "/",
+      name: "dashboard",
+      component: () => import("./views/DashboardView.vue"),
+    },
+    {
+      path: "/admin/users",
+      name: "users",
+      component: () => import("./views/UserManagementView.vue"),
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: "/admin/groups",
+      name: "groups",
+      component: () => import("./views/GroupManagementView.vue"),
+      meta: { requiresAdmin: true },
+    },
+  ],
+});
+
+// Navigation guard to check for admin routes
+router.beforeEach((to, from, next) => {
+  // Check for routes that require admin access
+  if (to.matched.some((record) => record.meta.requiresAdmin)) {
+    const authStore = useAuthStore();
+    if (!authStore.userIsAdmin) {
+      // Redirect to dashboard if not admin
+      next({ name: "dashboard" });
+    } else {
+      next();
+    }
+  } else {
+    next();
+  }
+});
+
+// Add Router to the app
+app.use(router);
 
 // Mount the app
 app.mount("#app");

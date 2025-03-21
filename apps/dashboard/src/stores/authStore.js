@@ -12,6 +12,8 @@ export const useAuthStore = defineStore("auth", {
     loading: false,
     // Login error message
     error: null,
+    // Admin status
+    isAdmin: false,
   }),
 
   getters: {
@@ -29,6 +31,9 @@ export const useAuthStore = defineStore("auth", {
           }
         : {};
     },
+
+    // Check if user is admin
+    userIsAdmin: (state) => state.isAdmin,
   },
 
   actions: {
@@ -57,6 +62,18 @@ export const useAuthStore = defineStore("auth", {
         // Set user data
         this.user = { username };
 
+        // Extract admin status from JWT token
+        try {
+          const payload = token.split(".")[1];
+          if (payload) {
+            const decodedPayload = JSON.parse(atob(payload));
+            this.isAdmin = !!decodedPayload.is_admin;
+          }
+        } catch (error) {
+          console.error("Error extracting admin status from token:", error);
+          this.isAdmin = false;
+        }
+
         return true;
       } catch (error) {
         console.error("Login failed:", error);
@@ -83,6 +100,7 @@ export const useAuthStore = defineStore("auth", {
       localStorage.removeItem("token");
       this.token = null;
       this.user = null;
+      this.isAdmin = false;
     },
 
     // Check if token is valid (can be extended to verify expiration)
@@ -105,6 +123,7 @@ export const useAuthStore = defineStore("auth", {
             const decodedPayload = JSON.parse(atob(payload));
             if (decodedPayload.username) {
               this.user = { username: decodedPayload.username };
+              this.isAdmin = !!decodedPayload.is_admin;
               return;
             }
           }
@@ -114,6 +133,7 @@ export const useAuthStore = defineStore("auth", {
 
         // Fallback to default user if token parsing fails
         this.user = { username: "User" };
+        this.isAdmin = false;
       }
     },
   },

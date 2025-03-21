@@ -35,7 +35,7 @@
 </template>
 
 <script setup>
-import { onMounted, watch } from "vue";
+import { onMounted, watch, computed } from "vue";
 import { monitorService } from "@/services/monitor";
 import NavBar from "@/components/NavBar.vue";
 import SideBar from "@/components/SideBar.vue";
@@ -52,6 +52,8 @@ const clientStore = useClientStore();
 const terminalStore = useTerminalStore();
 const uploadProgressStore = useUploadProgressStore();
 const authStore = useAuthStore();
+const isLoggedIn = computed(() => authStore.isLoggedIn);
+const isAdmin = computed(() => authStore.userIsAdmin);
 
 onMounted(async () => {
   // Initialize authentication
