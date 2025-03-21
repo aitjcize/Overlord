@@ -861,6 +861,8 @@ class OverlordCliClient:
       self.Pull(args)
     elif command == 'forward':
       self.Forward(args)
+    elif command == 'admin':
+      self.Admin(args)
 
   def _SaveTLSCertificate(self, host, cert_pem):
     try:
@@ -1375,7 +1377,7 @@ class OverlordCliClient:
     try:
       UrlOpen(self._state, url, method='POST')
     except urllib.error.HTTPError as e:
-      error = json.loads(e.read()).get('data', 'unknown error') 
+      error = json.loads(e.read()).get('data', 'unknown error')
       raise RuntimeError('mkdir: %s' % error) from e
 
   @AutoRetry('pull', _RETRY_TIMES)
@@ -1742,6 +1744,178 @@ class OverlordCliClient:
         ))
 
     return results
+
+  @Command('admin', 'manage users and groups', [
+      Arg('action', metavar='ACTION',
+          choices=['list-users', 'add-user', 'del-user', 'change-password',
+                   'list-groups', 'add-group', 'del-group', 'add-user-to-group',
+                   'del-user-from-group', 'list-group-users'],
+          help='admin action to perform: list-users, add-user, del-user, '
+               'change-password, list-groups, add-group, del-group, '
+               'add-user-to-group, del-user-from-group, list-group-users'),
+      Arg('args', metavar='ARGS', nargs='*', help='arguments for the action')])
+  def Admin(self, args):
+    """Manage users and groups using the Overlord API."""
+    self.CheckConnection()
+
+    action = args.action
+    action_args = args.args
+
+    # User management
+    if action == 'list-users':
+      self._AdminListUsers()
+    elif action == 'add-user':
+      if len(action_args) < 2:
+        raise RuntimeError('Usage: admin add-user USERNAME PASSWORD [is_admin]')
+      username = action_args[0]
+      password = action_args[1]
+      is_admin = False
+      if (len(action_args) >= 3 and
+          action_args[2].lower() in ('true', 'yes', '1', 'y')):
+        is_admin = True
+      self._AdminAddUser(username, password, is_admin)
+    elif action == 'del-user':
+      if len(action_args) < 1:
+        raise RuntimeError('Usage: admin del-user USERNAME')
+      self._AdminDelUser(action_args[0])
+    elif action == 'change-password':
+      if len(action_args) < 2:
+        raise RuntimeError('Usage: admin change-password USERNAME NEW_PASSWORD')
+      self._AdminChangePassword(action_args[0], action_args[1])
+
+    # Group management
+    elif action == 'list-groups':
+      self._AdminListGroups()
+    elif action == 'add-group':
+      if len(action_args) < 1:
+        raise RuntimeError('Usage: admin add-group GROUP_NAME')
+      self._AdminAddGroup(action_args[0])
+    elif action == 'del-group':
+      if len(action_args) < 1:
+        raise RuntimeError('Usage: admin del-group GROUP_NAME')
+      self._AdminDelGroup(action_args[0])
+
+    # User-group management
+    elif action == 'add-user-to-group':
+      if len(action_args) < 2:
+        raise RuntimeError('Usage: admin add-user-to-group USERNAME GROUP_NAME')
+      self._AdminAddUserToGroup(action_args[0], action_args[1])
+    elif action == 'del-user-from-group':
+      if len(action_args) < 2:
+        raise RuntimeError('Usage: admin del-user-from-group USERNAME GROUP_NAME')
+      self._AdminDelUserFromGroup(action_args[0], action_args[1])
+    elif action == 'list-group-users':
+      if len(action_args) < 1:
+        raise RuntimeError('Usage: admin list-group-users GROUP_NAME')
+      self._AdminListGroupUsers(action_args[0])
+    else:
+      raise RuntimeError(f'Unknown admin action: {action}')
+
+  def _AdminApiCall(self, url, method='GET', data=None):
+    """Make an API call to the admin endpoints."""
+    try:
+      if method == 'GET':
+        response = UrlOpen(self._state, url)
+        return json.loads(response.read().decode('utf-8')).get('data', [])
+      else:
+        response = UrlOpen(self._state, url, data=data, method=method)
+        return json.loads(response.read().decode('utf-8')).get('data', {})
+    except urllib.error.HTTPError as e:
+      try:
+        error_data = json.loads(e.read().decode('utf-8'))
+        error_msg = error_data.get('data', str(e))
+      except:
+        error_msg = str(e)
+      raise RuntimeError(error_msg)
+
+  def _AdminListUsers(self):
+    """List all users."""
+    users = self._AdminApiCall('/api/users')
+
+    # Format output as a table
+    print(f"{'USERNAME':<20} {'ADMIN':<10} {'GROUPS'}")
+    print("-" * 50)
+
+    for user in users:
+      username = user.get('username', '')
+      is_admin = 'Yes' if user.get('is_admin', False) else 'No'
+      groups = ', '.join(user.get('groups', []))
+      print(f"{username:<20} {is_admin:<10} {groups}")
+
+  def _AdminAddUser(self, username, password, is_admin=False):
+    """Add a new user."""
+    data = {
+      'username': username,
+      'password': password,
+      'is_admin': is_admin
+    }
+    self._AdminApiCall('/api/users', method='POST', data=data)
+    print(f"User '{username}' created successfully")
+
+    if is_admin:
+      # Add user to admin group if specified
+      self._AdminAddUserToGroup(username, 'admin')
+
+  def _AdminDelUser(self, username):
+    """Delete a user."""
+    self._AdminApiCall(f'/api/users/{username}', method='DELETE')
+    print(f"User '{username}' deleted successfully")
+
+  def _AdminChangePassword(self, username, new_password):
+    """Change a user's password."""
+    data = {'password': new_password}
+    self._AdminApiCall(f'/api/users/{username}/password', method='PUT',
+                       data=data)
+    print(f"Password for user '{username}' updated successfully")
+
+  def _AdminListGroups(self):
+    """List all groups."""
+    groups = self._AdminApiCall('/api/groups')
+
+    # Format output as a table
+    print(f"{'GROUP NAME':<20} {'USER COUNT'}")
+    print("-" * 30)
+
+    for group in groups:
+      name = group.get('name', '')
+      user_count = group.get('user_count', 0)
+      print(f"{name:<20} {user_count}")
+
+  def _AdminAddGroup(self, group_name):
+    """Add a new group."""
+    data = {'name': group_name}
+    self._AdminApiCall('/api/groups', method='POST', data=data)
+    print(f"Group '{group_name}' created successfully")
+
+  def _AdminDelGroup(self, group_name):
+    """Delete a group."""
+    self._AdminApiCall(f'/api/groups/{group_name}', method='DELETE')
+    print(f"Group '{group_name}' deleted successfully")
+
+  def _AdminAddUserToGroup(self, username, group_name):
+    """Add a user to a group."""
+    data = {'username': username}
+    self._AdminApiCall(f'/api/groups/{group_name}/users', method='POST',
+                       data=data)
+    print(f"User '{username}' added to group '{group_name}' successfully")
+
+  def _AdminDelUserFromGroup(self, username, group_name):
+    """Remove a user from a group."""
+    self._AdminApiCall(f'/api/groups/{group_name}/users/{username}',
+                       method='DELETE')
+    print(f"User '{username}' removed from group '{group_name}' successfully")
+
+  def _AdminListGroupUsers(self, group_name):
+    """List all users in a group."""
+    users = self._AdminApiCall(f'/api/groups/{group_name}/users')
+
+    if not users:
+      print(f"No users in group '{group_name}'")
+      return
+
+    print(f"Users in group '{group_name}':")
+    for username in users:
+      print(f"  - {username}")
 
 
 def main():

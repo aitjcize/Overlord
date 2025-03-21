@@ -129,6 +129,7 @@ type WebSocketClient struct {
 	conn     *websocket.Conn
 	sendChan chan []byte
 	username string
+	isAdmin  bool
 }
 
 // Overlord type is the main context for storing the overlord server state.
@@ -137,10 +138,10 @@ type Overlord struct {
 	port             int                               // Port number to listen to
 	lanDiscInterface string                            // Network interface used for broadcasting LAN discovery packet
 	lanDisc          bool                              // Enable LAN discovery broadcasting
-	jwtSecretPath    string                            // Path to the file containing the JWT secret
+	dbPath           string                            // Path to the SQLite database file
+	dbManager        *DatabaseManager                  // Database manager for users and groups
 	certs            *TLSCerts                         // TLS certificate
 	linkTLS          bool                              // Enable TLS between ghost and overlord
-	htpasswdPath     string                            // Path to .htpasswd file
 	agents           map[string]*ConnServer            // Normal ghost agents
 	logcats          map[string]map[string]*ConnServer // logcat clients
 	wsctxs           map[string]*webSocketContext      // (sid, webSocketContext) mapping
@@ -162,7 +163,7 @@ func NewOverlord(
 	lanDiscInterface string,
 	lanDisc bool,
 	certsString string, linkTLS bool,
-	htpasswdPath string, jwtSecretPath string) *Overlord {
+	dbPath string) *Overlord {
 
 	var certs *TLSCerts
 	if certsString != "" {
@@ -173,28 +174,6 @@ func NewOverlord(
 			certs = &TLSCerts{parts[0], parts[1]}
 		}
 	}
-	if !filepath.IsAbs(htpasswdPath) && htpasswdPath != "" {
-		execPath, err := os.Executable()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		execDir := filepath.Dir(execPath)
-		htpasswdPath, err = filepath.Abs(filepath.Join(execDir, htpasswdPath))
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
-	if !filepath.IsAbs(jwtSecretPath) && jwtSecretPath != "" {
-		execPath, err := os.Executable()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		execDir := filepath.Dir(execPath)
-		jwtSecretPath, err = filepath.Abs(filepath.Join(execDir, jwtSecretPath))
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
 	upgrader := websocket.Upgrader{
 		ReadBufferSize:  bufferSize,
 		WriteBufferSize: bufferSize,
@@ -203,15 +182,21 @@ func NewOverlord(
 			return true
 		},
 	}
-	return &Overlord{
+
+	dbManager := NewDatabaseManager(dbPath)
+	if err := dbManager.Connect(); err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	ovl := &Overlord{
 		bindAddr:         bindAddr,
 		port:             port,
 		lanDiscInterface: lanDiscInterface,
 		lanDisc:          lanDisc,
-		jwtSecretPath:    jwtSecretPath,
+		dbPath:           dbPath,
+		dbManager:        dbManager,
 		certs:            certs,
 		linkTLS:          linkTLS,
-		htpasswdPath:     htpasswdPath,
 		agents:           make(map[string]*ConnServer),
 		logcats:          make(map[string]map[string]*ConnServer),
 		wsctxs:           make(map[string]*webSocketContext),
@@ -220,6 +205,7 @@ func NewOverlord(
 		monitorClients:   make(map[*WebSocketClient]bool),
 		upgrader:         upgrader,
 	}
+	return ovl
 }
 
 // Register a client.
@@ -390,7 +376,7 @@ func (ovl *Overlord) BroadcastEvent(mid, event string, args ...interface{}) {
 			ovl.agentsMu.Unlock()
 
 			// Skip this client if agent exists and user doesn't have permission
-			if exists && !ovl.checkAllowlist(client.username, agent) {
+			if exists && !ovl.checkAllowlist(client.username, client.isAdmin, agent) {
 				continue
 			}
 		}
@@ -479,12 +465,22 @@ func (ovl *Overlord) appsListHandler(w http.ResponseWriter, r *http.Request) {
 
 // List all agents connected to the Overlord.
 func (ovl *Overlord) agentsListHandler(w http.ResponseWriter, r *http.Request) {
-	var result []map[string]interface{}
-	username := GetUserFromContext(r.Context())
+	username, ok := GetUserFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
+	isAdmin, ok := GetAdminStatusFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	result := make([]map[string]interface{}, 0)
 	ovl.agentsMu.Lock()
 	for _, agent := range ovl.agents {
-		if !ovl.checkAllowlist(username, agent) {
+		if !ovl.checkAllowlist(username, isAdmin, agent) {
 			continue
 		}
 
@@ -1016,7 +1012,17 @@ func (ovl *Overlord) agentFileUploadHandler(w http.ResponseWriter, r *http.Reque
 func (ovl *Overlord) monitorHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Monitor request from %s\n", r.RemoteAddr)
 
-	username := GetUserFromContext(r.Context())
+	username, ok := GetUserFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	isAdmin, ok := GetAdminStatusFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	// Upgrade the connection to WebSocket
 	conn, err := ovl.upgrader.Upgrade(w, r, nil)
@@ -1029,6 +1035,7 @@ func (ovl *Overlord) monitorHandler(w http.ResponseWriter, r *http.Request) {
 		conn:     conn,
 		sendChan: make(chan []byte, 256),
 		username: username,
+		isAdmin:  isAdmin,
 	}
 
 	ovl.monitorClientsMu.Lock()
@@ -1040,14 +1047,11 @@ func (ovl *Overlord) monitorHandler(w http.ResponseWriter, r *http.Request) {
 	go client.readPump(ovl)
 }
 
-// RegisterHTTPHandlers register handlers for http routes.
-func (ovl *Overlord) RegisterHTTPHandlers() {
-	webRootDir := ovl.getWebRoot()
-
-	// JWT Auth
+// register handlers for http routes.
+func (ovl *Overlord) registerRoutes() *mux.Router {
+	// JWT Auth with database
 	jwtConfig := &JWTConfig{
-		SecretPath:   ovl.jwtSecretPath,
-		HtpasswdPath: ovl.htpasswdPath,
+		DBPath: ovl.dbPath,
 	}
 	jwtAuth, err := NewJWTAuth(jwtConfig)
 	if err != nil {
@@ -1094,11 +1098,32 @@ func (ovl *Overlord) RegisterHTTPHandlers() {
 	// Connect endpoint (special case for agent connections)
 	mainRouter.HandleFunc("/connect", ovl.ghostConnectHandler)
 
-	// Serve static files
-	mainRouter.PathPrefix("/").Handler(http.FileServer(http.Dir(webRootDir)))
+	// User management API routes
+	userRoutes := apiRouter.PathPrefix("/users").Subrouter()
 
-	// Set the router as the HTTP handler
-	http.Handle("/", mainRouter)
+	// Route for users to change their own password (no admin check)
+	userRoutes.HandleFunc("/self/password", ovl.updateOwnPasswordHandler).Methods("PUT")
+
+	// Routes that require admin privileges
+	adminUserRoutes := userRoutes.NewRoute().Subrouter()
+	adminUserRoutes.Use(ovl.adminRequired)
+	adminUserRoutes.HandleFunc("", ovl.listUsersHandler).Methods("GET")
+	adminUserRoutes.HandleFunc("", ovl.createUserHandler).Methods("POST")
+	adminUserRoutes.HandleFunc("/{username}", ovl.deleteUserHandler).Methods("DELETE")
+	adminUserRoutes.HandleFunc("/{username}/password", ovl.updateUserPasswordHandler).Methods("PUT")
+
+	// Group management API routes
+	groupRoutes := apiRouter.PathPrefix("/groups").Subrouter()
+	// All group management requires admin privileges
+	groupRoutes.Use(ovl.adminRequired)
+	groupRoutes.HandleFunc("", ovl.listGroupsHandler).Methods("GET")
+	groupRoutes.HandleFunc("", ovl.createGroupHandler).Methods("POST")
+	groupRoutes.HandleFunc("/{groupname}", ovl.deleteGroupHandler).Methods("DELETE")
+	groupRoutes.HandleFunc("/{groupname}/users", ovl.addUserToGroupHandler).Methods("POST")
+	groupRoutes.HandleFunc("/{groupname}/users/{username}", ovl.removeUserFromGroupHandler).Methods("DELETE")
+	groupRoutes.HandleFunc("/{groupname}/users", ovl.listGroupUsersHandler).Methods("GET")
+
+	return mainRouter
 }
 
 func (c *WebSocketClient) writePump() {
@@ -1254,7 +1279,13 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 
 // Serv is the main routine for starting all the overlord sub-server.
 func (ovl *Overlord) Serv() {
-	ovl.RegisterHTTPHandlers()
+	router := ovl.registerRoutes()
+
+	// Serve static files
+	router.PathPrefix("/").Handler(http.FileServer(http.Dir(ovl.getWebRoot())))
+
+	http.Handle("/", router)
+
 	go ovl.ServHTTP()
 	if ovl.lanDisc {
 		go ovl.StartUDPBroadcast(OverlordLDPort)
@@ -1271,17 +1302,13 @@ func (ovl *Overlord) Serv() {
 	}
 }
 
-// StartOverlord starts the overlord server.
-func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool,
-	certsString string, linkTLS bool, htpasswdPath string, jwtSecretPath string) {
-	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, certsString,
-		linkTLS, htpasswdPath, jwtSecretPath)
-	ovl.Serv()
-}
-
 // checkAllowlist checks if the provided username has access to the ghost agent
 // based on the allowlist property
-func (ovl *Overlord) checkAllowlist(username string, agent *ConnServer) bool {
+func (ovl *Overlord) checkAllowlist(username string, isAdmin bool, agent *ConnServer) bool {
+	if isAdmin {
+		return true
+	}
+
 	// If no allowlist is provided, deny access
 	if agent.Properties == nil {
 		return false
@@ -1294,22 +1321,22 @@ func (ovl *Overlord) checkAllowlist(username string, agent *ConnServer) bool {
 		return false
 	}
 
-	// Handle the case where allowlist is an array of strings
 	if allowlistArray, ok := allowlistProp.([]interface{}); ok {
-		// Special case: check for "anyone" in the array
+		var allowlist []string
 		for _, entity := range allowlistArray {
 			if entityStr, ok := entity.(string); ok {
-				if entityStr == "anyone" {
-					return true
-				}
-				if entityStr == username {
-					return true
-				}
-				// TODO: Add group membership check here in the future
+				allowlist = append(allowlist, entityStr)
 			}
 		}
-		return false
+
+		hasAccess, err := ovl.dbManager.CheckAllowlist(username, allowlist)
+		if err != nil {
+			log.Printf("Error checking allowlist: %v", err)
+			return false
+		}
+		return hasAccess
 	}
+
 	return false
 }
 
@@ -1330,7 +1357,17 @@ func (ovl *Overlord) allowlistMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		username := GetUserFromContext(r.Context())
+		username, ok := GetUserFromContext(r.Context())
+		if !ok {
+			ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		isAdmin, ok := GetAdminStatusFromContext(r.Context())
+		if !ok {
+			ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		// Check if agent exists and user has permission
 		ovl.agentsMu.Lock()
@@ -1343,7 +1380,7 @@ func (ovl *Overlord) allowlistMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if !ovl.checkAllowlist(username, agent) {
+		if !ovl.checkAllowlist(username, isAdmin, agent) {
 			log.Printf("AllowlistMiddleware: User %s not authorized to access agent %s", username, mid)
 			ResponseError(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -1352,4 +1389,12 @@ func (ovl *Overlord) allowlistMiddleware(next http.Handler) http.Handler {
 		// User has permission, continue to the next handler
 		next.ServeHTTP(w, r)
 	})
+}
+
+// StartOverlord starts the overlord server.
+func StartOverlord(bindAddr string, port int, lanDiscInterface string, lanDisc bool,
+	certsString string, linkTLS bool, dbPath string) {
+	ovl := NewOverlord(bindAddr, port, lanDiscInterface, lanDisc, certsString,
+		linkTLS, dbPath)
+	ovl.Serv()
 }

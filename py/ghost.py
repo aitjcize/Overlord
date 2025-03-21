@@ -398,14 +398,19 @@ class Ghost:
       for entity in self._allowlist.split(','):
         trimmed_entity = entity.strip()
         if trimmed_entity:
+          # Support the new format (u/username or g/groupname)
+          # If no prefix is provided, assume it's a username and add "u/" prefix
+          if '/' not in trimmed_entity:
+            trimmed_entity = 'u/' + trimmed_entity
           allowed_entities.append(trimmed_entity)
       self._properties['allowlist'] = allowed_entities
-    elif 'allowlist' not in self._properties:
-      self._properties['allowlist'] = [self.GetCurrentUser()]
+    elif 'allowlist' not in self._properties or len(self._properties['allowlist']) == 0:
+      # Default allowlist to current user
+      self._properties['allowlist'] = ['u/' + self.GetCurrentUser()]
 
   def GetCurrentUser(self):
     """Gets the current user's username."""
-    return os.getenv('USER')
+    return os.getenv('USER', 'root')
 
   def CloseSockets(self):
     # Close sockets opened by parent process, since we don't use it anymore.
@@ -1529,7 +1534,10 @@ def try_main():
   try:
     main()
   except Exception as e:
-    logging.error(e)
+    if _DEBUG:
+      logging.exception(e)
+    else:
+      logging.error(e)
 
 
 if __name__ == '__main__':

@@ -5,22 +5,17 @@
 package overlord
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -32,24 +27,20 @@ const (
 
 // JWTConfig holds the JWT configuration
 type JWTConfig struct {
-	// SecretPath is the path to the file containing the JWT secret
-	SecretPath string
-	// Path to the htpasswd file for username/password validation
-	HtpasswdPath string
-	// Secret is the loaded JWT secret
-	secret string
+	DBPath string
 }
 
 // JWTClaims represents the claims in the JWT token
 type JWTClaims struct {
 	Username string `json:"username"`
+	IsAdmin  bool   `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
 // JWTAuth handles JWT authentication
 type JWTAuth struct {
 	config      *JWTConfig
-	secrets     map[string]string
+	dbManager   *DatabaseManager
 	mutex       sync.RWMutex
 	blockedIps  map[string]time.Time
 	failedCount map[string]int
@@ -67,135 +58,44 @@ type LoginResponse struct {
 	Expire int64  `json:"expire"`
 }
 
-// Key type for context values
+// Context keys
 type contextKey string
 
-const jwtClaimsContextKey contextKey = "jwtClaims"
-const userContextKey contextKey = "user"
-
-// LoadJWTSecret loads the JWT secret from the specified file
-func (config *JWTConfig) LoadJWTSecret() error {
-	if config.SecretPath == "" {
-		return errors.New("JWT secret file path not provided")
-	}
-
-	data, err := os.ReadFile(config.SecretPath)
-	if err != nil {
-		return fmt.Errorf("failed to read JWT secret file: %v", err)
-	}
-
-	// Trim any whitespace or newlines
-	config.secret = strings.TrimSpace(string(data))
-	if config.secret == "" {
-		return errors.New("JWT secret file is empty")
-	}
-
-	return nil
-}
-
-// GetSecret returns the loaded JWT secret
-func (config *JWTConfig) GetSecret() string {
-	return config.secret
-}
+const (
+	userContextKey        contextKey = "user"
+	adminStatusContextKey contextKey = "isAdmin"
+	jwtClaimsContextKey   contextKey = "jwtClaims"
+)
 
 // NewJWTAuth creates a new JWTAuth instance
 func NewJWTAuth(config *JWTConfig) (*JWTAuth, error) {
-	secrets := make(map[string]string)
+	dbManager := NewDatabaseManager(config.DBPath)
 
 	auth := &JWTAuth{
 		config:      config,
-		secrets:     secrets,
+		dbManager:   dbManager,
 		blockedIps:  make(map[string]time.Time),
 		failedCount: make(map[string]int),
 	}
 
-	log.Printf("JWTAuth: initialized with htpasswd path: %s",
-		config.HtpasswdPath)
-
-	// Load JWT secret from file
-	if err := config.LoadJWTSecret(); err != nil {
-		log.Printf("JWTAuth Error: %s", err.Error())
-		return nil, fmt.Errorf("failed to load JWT secret: %v", err)
-	}
-	log.Printf("JWTAuth: successfully loaded JWT secret from %s",
-		config.SecretPath)
-
-	// Load users from htpasswd file
-	if err := auth.loadHtpasswd(config.HtpasswdPath); err != nil {
-		log.Printf("JWTAuth Error: %s", err.Error())
-		return nil, fmt.Errorf("failed to load htpasswd file: %v", err)
+	// Initialize database
+	if err := dbManager.Connect(); err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %v", err)
 	}
 
+	log.Printf("JWTAuth: initialized with database path: %s", config.DBPath)
 	return auth, nil
-}
-
-// loadHtpasswd loads user credentials from the htpasswd file
-func (auth *JWTAuth) loadHtpasswd(htpasswdPath string) error {
-	if htpasswdPath == "" {
-		return errors.New("htpasswd file path not provided")
-	}
-
-	f, err := os.Open(htpasswdPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	b := bufio.NewReader(f)
-	userCount := 0
-	for {
-		line, _, err := b.ReadLine()
-		if err == io.EOF {
-			break
-		}
-		if len(line) == 0 || line[0] == '#' {
-			continue
-		}
-		parts := strings.Split(string(line), ":")
-		if len(parts) != 2 {
-			log.Printf("JWTAuth: invalid line format in htpasswd file: %s",
-				string(line))
-			continue
-		}
-
-		matched, err := regexp.Match("^\\$2[ay]\\$.*$", []byte(parts[1]))
-		if err != nil {
-			log.Printf("JWTAuth: regex error: %v", err)
-			panic(err)
-		}
-		if !matched {
-			log.Printf("JWTAuth: user %s: password encryption scheme not supported (hash: %s), ignored.",
-				parts[0], parts[1])
-			continue
-		}
-
-		auth.secrets[parts[0]] = parts[1]
-		userCount++
-	}
-
-	log.Printf("JWTAuth: loaded %d users from htpasswd file", userCount)
-
-	if userCount == 0 {
-		return fmt.Errorf("no valid users found in htpasswd file")
-	}
-
-	return nil
 }
 
 // Authenticate authenticates a user with the provided username and password
 func (auth *JWTAuth) Authenticate(user, passwd string) bool {
-	passwdHash, ok := auth.secrets[user]
-	if !ok {
-		log.Printf("JWTAuth: user %s not found in secrets", user)
-		return false
-	}
-
-	err := bcrypt.CompareHashAndPassword([]byte(passwdHash), []byte(passwd))
+	// Use database manager to authenticate
+	authenticated, err := auth.dbManager.AuthenticateUser(user, passwd)
 	if err != nil {
-		log.Printf("JWTAuth: password comparison failed for user %s: %v", user, err)
+		log.Printf("JWTAuth: authentication error for user %s: %v", user, err)
 		return false
 	}
-	return true
+	return authenticated
 }
 
 // Login handles login requests and returns a JWT token
@@ -218,9 +118,17 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 
 	auth.ResetFailCount(r)
 
+	isAdmin, err := auth.dbManager.IsUserAdmin(loginReq.Username)
+	if err != nil {
+		log.Printf("JWTAuth: error checking if user %s is admin: %v", loginReq.Username, err)
+		auth.Unauthorized(w, r, "Error checking admin status", true)
+		return
+	}
+
 	expirationTime := time.Now().Add(tokenExpirationTime)
 	claims := &JWTClaims{
 		Username: loginReq.Username,
+		IsAdmin:  isAdmin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -229,7 +137,7 @@ func (auth *JWTAuth) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(auth.config.GetSecret()))
+	tokenString, err := token.SignedString([]byte(auth.dbManager.GetJWTSecret()))
 	if err != nil {
 		log.Printf("JWTAuth: error generating token: %v", err)
 		ResponseError(w, "Error generating token", http.StatusInternalServerError)
@@ -254,7 +162,7 @@ func (auth *JWTAuth) VerifyToken(tokenString string) (*JWTClaims, error) {
 			log.Printf("JWTAuth: unexpected signing method: %v", token.Header["alg"])
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(auth.config.GetSecret()), nil
+		return []byte(auth.dbManager.GetJWTSecret()), nil
 	})
 
 	if err != nil {
@@ -302,6 +210,20 @@ func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// If a user is admin, we need to double check if the user is still an admin
+		if claims.IsAdmin {
+			isAdmin, err := auth.dbManager.IsUserAdmin(claims.Username)
+			if err != nil {
+				log.Printf("JWTAuth: error checking if user %s is admin: %v",
+					claims.Username, err)
+				auth.Unauthorized(w, r, "Error checking admin status", false)
+				return
+			}
+			if !isAdmin {
+				auth.Unauthorized(w, r, "User is not an admin", false)
+				return
+			}
+		}
 		r = r.WithContext(WithAuthClaims(r.Context(), claims))
 		next.ServeHTTP(w, r)
 	})
@@ -309,21 +231,22 @@ func (auth *JWTAuth) Middleware(next http.Handler) http.Handler {
 
 // WithAuthClaims adds JWT claims to the context
 func WithAuthClaims(ctx context.Context, claims *JWTClaims) context.Context {
-	ctx = context.WithValue(ctx, jwtClaimsContextKey, claims)
 	ctx = context.WithValue(ctx, userContextKey, claims.Username)
+	ctx = context.WithValue(ctx, adminStatusContextKey, claims.IsAdmin)
 	return ctx
 }
 
-// GetJWTClaimsFromContext retrieves JWT claims from context
-func GetJWTClaimsFromContext(ctx context.Context) *JWTClaims {
-	claims, _ := ctx.Value(jwtClaimsContextKey).(*JWTClaims)
-	return claims
+// GetUserFromContext gets the username from the request context
+// and returns the username and a boolean indicating if it was found.
+func GetUserFromContext(ctx context.Context) (string, bool) {
+	username, ok := ctx.Value(userContextKey).(string)
+	return username, ok
 }
 
-// GetUserFromContext retrieves the username from context
-func GetUserFromContext(ctx context.Context) string {
-	user, _ := ctx.Value(userContextKey).(string)
-	return user
+// GetAdminStatusFromContext gets the admin status from the request context
+func GetAdminStatusFromContext(ctx context.Context) (bool, bool) {
+	isAdmin, ok := ctx.Value(adminStatusContextKey).(bool)
+	return isAdmin, ok
 }
 
 // IsBlocked returns true if the given IP is blocked.
@@ -395,4 +318,22 @@ func getRequestIP(r *http.Request) string {
 	}
 	idx := strings.LastIndex(r.RemoteAddr, ":")
 	return r.RemoteAddr[:idx]
+}
+
+// JWTAuthConfig contains configuration for JWT authentication
+type JWTAuthConfig struct {
+	ExpiresIn int // The expiration time of the token in seconds
+}
+
+// getTokenFromRequest extracts the JWT token from the request
+func getTokenFromRequest(r *http.Request, cookieName string) (string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		bearerToken := strings.Split(authHeader, " ")
+		if len(bearerToken) == 2 && strings.ToLower(bearerToken[0]) == "bearer" {
+			return bearerToken[1], nil
+		}
+	}
+
+	return "", errors.New("no token found in request")
 }

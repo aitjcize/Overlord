@@ -4,7 +4,6 @@
 # found in the LICENSE file.
 
 from contextlib import closing
-import bcrypt
 import json
 import os
 import shutil
@@ -68,38 +67,36 @@ class TestOverlord(unittest.TestCase):
     env['OVERLORD_LD_PORT'] = str(FindUnusedPort())
     env['GHOST_RPC_PORT'] = str(FindUnusedPort())
 
-    # Create temporary auth files
+    # Create temporary database file
     self.temp_dir = tempfile.mkdtemp()
-
-    # Create JWT secret file
-    self.jwt_secret_path = os.path.join(self.temp_dir, 'jwt-secret')
-    with open(self.jwt_secret_path, 'w') as f:
-      f.write('test-secret-key-for-jwt-authentication')
-
-    # Create htpasswd file with test user
-    self.htpasswd_path = os.path.join(self.temp_dir, 'overlord.htpasswd')
-    password = 'testpassword'
-
-    # Create a bcrypt hash with a supported prefix (2b) and then manually
-    # replace it with 2y Use a low cost factor (5) for faster tests
-    hashed = bcrypt.hashpw(password.encode('utf-8'),
-                           bcrypt.gensalt(rounds=5)).decode('utf-8')
-    # Replace the prefix with $2y$ which is what the server expects
-    hashed = hashed.replace('$2b$', '$2y$')
-
-    with open(self.htpasswd_path, 'w') as f:
-      f.write(f'testuser:{hashed}\n')
+    self.db_path = os.path.join(self.temp_dir, 'overlord-test.db')
 
     # Store test credentials
     self.test_username = 'testuser'
     self.test_password = 'testpassword'
+    self.admin_username = 'admin'
+    self.admin_password = 'adminpass'
 
-    # Launch overlord with proper authentication parameters
+    # Launch overlord with database path and admin credentials
+    # Use the new command line arguments for initialization
     self.ovl = subprocess.Popen([
         '%s/overlordd' % bindir,
         '-port', str(overlord_http_port),
-        '-htpasswd-path', self.htpasswd_path,
-        '-jwt-secret-path', self.jwt_secret_path,
+        '-db-path', self.db_path,
+        '-init',
+        '-admin-user', self.admin_username,
+        '-admin-pass', self.admin_password,
+        '-no-lan-disc'  # Disable LAN discovery to avoid network issues
+    ], env=env)
+
+    # Wait for the process to finish initialization
+    self.ovl.wait()
+
+    # Start the server again without initialization
+    self.ovl = subprocess.Popen([
+        '%s/overlordd' % bindir,
+        '-port', str(overlord_http_port),
+        '-db-path', self.db_path,
         '-no-lan-disc'  # Disable LAN discovery to avoid network issues
     ], env=env)
 
@@ -113,7 +110,6 @@ class TestOverlord(unittest.TestCase):
         '-no-lan-disc',
         '-no-rpc-server',
         '-tls=n',
-        '-allowlist=testuser',
         'localhost:%d' % overlord_http_port
     ], env=env)
 
@@ -124,7 +120,6 @@ class TestOverlord(unittest.TestCase):
         '--no-lan-disc',
         '--no-rpc-server',
         '--tls=n',
-        '--allowlist=testuser',
         'localhost:%d' % overlord_http_port
     ], env=env)
 
@@ -158,8 +153,8 @@ class TestOverlord(unittest.TestCase):
     # Prepare the login request
     login_url = f'http://{self.host}/api/auth/login'
     headers = {'Content-Type': 'application/json'}
-    data = json.dumps({'username': self.test_username,
-                       'password': self.test_password}).encode()
+    data = json.dumps({'username': self.admin_username,
+                       'password': self.admin_password}).encode()
 
     # Make the login request
     req = urllib.request.Request(login_url, data=data, headers=headers,

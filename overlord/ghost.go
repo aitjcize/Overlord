@@ -356,14 +356,18 @@ func (ghost *Ghost) loadProperties() {
 		for _, entity := range strings.Split(ghost.allowlist, ",") {
 			trimmedEntity := strings.TrimSpace(entity)
 			if trimmedEntity != "" {
+				if trimmedEntity != "anyone" && !strings.Contains(trimmedEntity, "/") {
+					trimmedEntity = "u/" + trimmedEntity
+				}
 				allowedEntities = append(allowedEntities, trimmedEntity)
 			}
 		}
 		ghost.properties["allowlist"] = allowedEntities
 	}
 
-	if ghost.properties["allowlist"] == nil {
-		ghost.properties["allowlist"] = []string{getCurrentUser()}
+	// Default allowlist to current user
+	if ghost.properties["allowlist"] == nil || len(ghost.properties["allowlist"].([]string)) == 0 {
+		ghost.properties["allowlist"] = []string{"u/" + getCurrentUser()}
 	}
 }
 
@@ -1843,5 +1847,9 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 }
 
 func getCurrentUser() string {
-	return os.Getenv("USER")
+	user := os.Getenv("USER")
+	if user == "" {
+		return "root"
+	}
+	return user
 }
