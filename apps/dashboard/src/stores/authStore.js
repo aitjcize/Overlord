@@ -14,6 +14,11 @@ export const useAuthStore = defineStore("auth", {
     error: null,
     // Admin status
     isAdmin: false,
+    // User preferences
+    preferences: {
+      hideAdminButtons:
+        localStorage.getItem("hideAdminButtons") === "false" ? false : true,
+    },
   }),
 
   getters: {
@@ -34,9 +39,22 @@ export const useAuthStore = defineStore("auth", {
 
     // Check if user is admin
     userIsAdmin: (state) => state.isAdmin,
+
+    // Check if admin buttons should be shown
+    showAdminButtons: (state) =>
+      state.isAdmin && !state.preferences.hideAdminButtons,
   },
 
   actions: {
+    // Toggle admin buttons visibility
+    toggleAdminButtons() {
+      this.preferences.hideAdminButtons = !this.preferences.hideAdminButtons;
+      localStorage.setItem(
+        "hideAdminButtons",
+        this.preferences.hideAdminButtons,
+      );
+    },
+
     // Login user with username and password
     async login(username, password) {
       this.loading = true;
@@ -61,6 +79,12 @@ export const useAuthStore = defineStore("auth", {
 
         // Set user data
         this.user = { username };
+
+        // Set default for admin buttons to be hidden if not already set
+        if (localStorage.getItem("hideAdminButtons") === null) {
+          localStorage.setItem("hideAdminButtons", "true");
+          this.preferences.hideAdminButtons = true;
+        }
 
         // Extract admin status from JWT token
         try {

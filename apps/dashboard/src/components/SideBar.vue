@@ -44,11 +44,49 @@
         </div>
 
         <!-- Admin Navigation - Only visible to admin users -->
-        <div v-if="authStore.userIsAdmin" class="space-y-4 mb-6">
-          <h3 class="font-semibold text-sm uppercase text-emerald-500/80 px-2">
-            Administration
-          </h3>
-          <div class="space-y-1">
+        <div v-if="authStore.userIsAdmin" class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-sm uppercase text-emerald-500/80">
+              Administration
+            </h3>
+            <button
+              @click="toggleAdminSection"
+              class="text-emerald-500/80 hover:text-emerald-400 p-1 rounded-full"
+              :title="
+                authStore.preferences.hideAdminButtons
+                  ? 'Show admin buttons'
+                  : 'Hide admin buttons'
+              "
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                v-if="!authStore.preferences.hideAdminButtons"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M5 10a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-4 w-4"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                v-else
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </button>
+          </div>
+          <div class="space-y-1" v-if="authStore.showAdminButtons">
             <router-link
               to="/admin/users"
               class="flex items-center gap-2 p-2 rounded-md text-slate-300 hover:bg-slate-700/50 hover:text-white transition-all"
@@ -402,6 +440,11 @@ provide("sidebarWidth", sidebarWidth);
 onMounted(() => {
   updateSidebarWidth();
 });
+
+// Function to toggle admin section visibility
+const toggleAdminSection = () => {
+  authStore.toggleAdminButtons();
+};
 </script>
 
 <style lang="scss" scoped>
