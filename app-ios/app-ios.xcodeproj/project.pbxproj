@@ -28,7 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "app-ios.app"; path = "Overlord Dashboard.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "app-ios.app"; path = "Overlord.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A4870512D7AC17600AC952B /* app-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A48705B2D7AC17600AC952B /* app-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -115,11 +115,11 @@
 			fileSystemSynchronizedGroups = (
 				3A4870422D7AC17500AC952B /* app-ios */,
 			);
-			name = "Overlord Dashboard";
+			name = "Overlord";
 			packageProductDependencies = (
 				3A4870712D7AC17600AC952B /* SwiftTerm */,
 			);
-			productName = "Overlord Dashboard";
+			productName = "Overlord";
 			productReference = 3A4870402D7AC17500AC952B /* app-ios.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -405,7 +405,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Overlord Dashboard";
+				INFOPLIST_KEY_CFBundleDisplayName = "Overlord";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -445,7 +445,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Overlord Dashboard";
+				INFOPLIST_KEY_CFBundleDisplayName = "Overlord";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

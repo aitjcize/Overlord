@@ -106,7 +106,7 @@ struct LoginView: View {
                         .font(.system(size: 60))
                         .foregroundColor(Color(hex: "10b981"))
 
-                    Text("Overlord Dashboard")
+                    Text("Overlord")
                         .font(.largeTitle)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
