@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory } from "vue-router";
 import App from "./App.vue";
 import "./assets/tailwind.css";
 import "./assets/mobile-viewport-fix.css"; // Import mobile viewport fix
@@ -52,7 +52,7 @@ app.use(pinia);
 
 // Create router instance
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     {
       path: "/",
