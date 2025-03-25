@@ -2,6 +2,7 @@ import SwiftUI
 @preconcurrency import WebKit
 
 struct PortForwardsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var portForwardViewModel: PortForwardViewModel
     @State private var selectedPortForward: PortForward?
     @State private var showingWebView = false
@@ -60,14 +61,6 @@ struct PortForwardsView: View {
                     }
                 }
                 .listStyle(PlainListStyle())
-            }
-        }
-        .onAppear {
-            // Check if the app was in background and restart all TCP servers if needed
-            if OverlordDashboardApp.wasInBackground {
-                print("PortForwardsView: App was in background, restarting all TCP servers")
-                // Restart all TCP servers
-                portForwardViewModel.restartAllTCPServers()
             }
         }
         .sheet(isPresented: Binding<Bool>(
@@ -135,6 +128,14 @@ struct PortForwardsView: View {
                 }
             }
         })
+        .onChange(of: scenePhase) {
+            switch scenePhase {
+            case .active:
+                self.portForwardViewModel.restartAllTCPServers()
+            default:
+                break
+            }
+        }
     }
 }
 
@@ -437,6 +438,7 @@ struct WebViewContainer: View {
     let title: String
     let portForward: PortForward
     let viewModel: PortForwardViewModel
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationMode) var presentationMode
     @State private var loadError: Error?
     @State private var isLoading = true
@@ -483,14 +485,7 @@ struct WebViewContainer: View {
                             progressValue = 0.0
                             startLoadingAnimation()
 
-                            // Check if the app was in background and restart the TCP server if needed
-                            if OverlordDashboardApp.wasInBackground {
-                                print(
-                                    "WebViewContainer: App was in background, " +
-                                        "restarting TCP server for port forward \(portForward.id)"
-                                )
-                                viewModel.restartTCPServerIfNeeded(for: portForward.id)
-                            }
+                            viewModel.restartTCPServerIfNeeded(for: portForward.id)
 
                             // Start a timer to update navigation state
                             navigationStateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
@@ -635,6 +630,14 @@ struct WebViewContainer: View {
             if viewModel.lastCreatedPortForward?.id == portForward.id && viewModel.shouldShowPortForwardWebView {
                 viewModel.lastCreatedPortForward = nil
                 viewModel.shouldShowPortForwardWebView = false
+            }
+        }
+        .onChange(of: scenePhase) {
+            switch scenePhase {
+            case .active:
+                self.viewModel.restartTCPServerIfNeeded(for: self.portForward.id)
+            default:
+                break
             }
         }
     }

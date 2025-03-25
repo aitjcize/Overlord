@@ -128,13 +128,6 @@ struct DashboardView: View {
         .accentColor(Color(hex: "10b981"))
         .onAppear {
             setupServices()
-
-            // Check if the app was in background and restart all TCP servers if needed
-            if OverlordDashboardApp.wasInBackground {
-                print("DashboardView: App was in background, restarting all TCP servers")
-                // Restart all TCP servers
-                portForwardViewModel.restartAllTCPServers()
-            }
         }
         .sheet(isPresented: Binding<Bool>(
             get: { portForwardViewModel.shouldShowPortForwardWebView },
