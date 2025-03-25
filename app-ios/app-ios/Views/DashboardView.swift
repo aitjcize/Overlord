@@ -108,20 +108,7 @@ struct DashboardView: View {
             .tag(2)
             .reducedNavigationTitleSpacing()
 
-            // Cameras Tab
-            NavigationView {
-                CamerasView(clientViewModel: clientViewModel)
-                    .navigationTitle("Cameras")
-                    .navigationBarTitleDisplayMode(.large)
-                    .toolbarColorScheme(.dark, for: .navigationBar)
-                    .toolbarBackground(Color(hex: "1e293b"), for: .navigationBar)
-                    .toolbarBackground(.visible, for: .navigationBar)
-            }
-            .tabItem {
-                Label("Cameras", systemImage: "video")
-            }
-            .tag(3)
-            .reducedNavigationTitleSpacing()
+
 
             // Settings Tab
             NavigationView {
@@ -135,7 +122,7 @@ struct DashboardView: View {
             .tabItem {
                 Label("Settings", systemImage: "gear")
             }
-            .tag(4)
+            .tag(3)
             .reducedNavigationTitleSpacing()
         }
         .accentColor(Color(hex: "10b981"))
