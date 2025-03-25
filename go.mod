@@ -7,7 +7,7 @@ toolchain go1.24.0
 require (
 	github.com/creack/pty v1.1.24
 	github.com/glebarez/sqlite v1.11.0
-	github.com/golang-jwt/jwt/v4 v4.5.1
+	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/term v1.1.0
