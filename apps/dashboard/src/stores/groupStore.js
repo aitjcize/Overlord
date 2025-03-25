@@ -96,23 +96,9 @@ export const useGroupStore = defineStore("group", {
       }
     },
 
-    async addUserToGroup(usernameOrGroup, groupNameOrUsername) {
+    async addUserToGroup(groupName, username) {
       this.loading = true;
       this.error = null;
-
-      // Handle both argument orders for flexibility:
-      // addUserToGroup(username, groupName) or addUserToGroup(groupName, username)
-      let username, groupName;
-
-      // Check if first argument looks like a group name
-      if (this.getGroupByName(usernameOrGroup)) {
-        groupName = usernameOrGroup;
-        username = groupNameOrUsername;
-      } else {
-        // Default to first being username, second being group name
-        username = usernameOrGroup;
-        groupName = groupNameOrUsername;
-      }
 
       try {
         await apiService.addUserToGroup(groupName, username);

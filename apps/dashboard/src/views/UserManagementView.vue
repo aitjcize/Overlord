@@ -262,7 +262,7 @@ const createUser = async () => {
     // Add user to selected groups
     if (newUser.groups.length > 0) {
       for (const groupName of newUser.groups) {
-        await groupStore.addUserToGroup(newUser.username, groupName);
+        await groupStore.addUserToGroup(groupName, newUser.username);
       }
     }
 

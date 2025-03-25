@@ -94,14 +94,14 @@
                     <button
                       v-if="
                         canRemoveUserFromGroup(
-                          typeof user === 'string' ? user : user.username,
                           group.name,
+                          typeof user === 'string' ? user : user.username,
                         )
                       "
                       @click="
                         removeUserFromGroup(
-                          typeof user === 'string' ? user : user.username,
                           group.name,
+                          typeof user === 'string' ? user : user.username,
                         )
                       "
                       class="text-red-400 hover:text-red-300 text-xs"
@@ -298,7 +298,7 @@ const addUserToGroup = async (groupName) => {
 
   try {
     // Pass username first, then groupName to match the store method
-    await groupStore.addUserToGroup(username, groupName);
+    await groupStore.addUserToGroup(groupName, username);
 
     // Refresh group users using our enhanced method
     await refreshGroupUsers(groupName);
@@ -316,9 +316,9 @@ const addUserToGroup = async (groupName) => {
 };
 
 // Remove a user from a group
-const removeUserFromGroup = async (username, groupName) => {
+const removeUserFromGroup = async (groupName, username) => {
   try {
-    await groupStore.removeUserFromGroup(username, groupName);
+    await groupStore.removeUserFromGroup(groupName, username);
 
     // Refresh group users using our enhanced method
     await refreshGroupUsers(groupName);
