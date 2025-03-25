@@ -101,7 +101,7 @@ export const apiService = {
       const response = await axios.put(
         `${API_BASE_URL}/users/${username}/password`,
         {
-          new_password: newPassword,
+          password: newPassword,
         },
       );
       return extractData(response);
