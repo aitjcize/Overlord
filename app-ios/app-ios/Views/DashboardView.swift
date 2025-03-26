@@ -108,8 +108,6 @@ struct DashboardView: View {
             .tag(2)
             .reducedNavigationTitleSpacing()
 
-
-
             // Settings Tab
             NavigationView {
                 SettingsView()
