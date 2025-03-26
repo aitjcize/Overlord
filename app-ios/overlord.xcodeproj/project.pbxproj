@@ -28,9 +28,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "app-ios.app"; path = "Overlord.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		3A4870512D7AC17600AC952B /* app-iosTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		3A48705B2D7AC17600AC952B /* app-iosUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "app-iosUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A4870402D7AC17500AC952B /* app-ios.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "app-ios.app"; path = Overlord.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A4870512D7AC17600AC952B /* overlordTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = overlordTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A48705B2D7AC17600AC952B /* overlordUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = overlordUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -91,8 +91,8 @@
 			isa = PBXGroup;
 			children = (
 				3A4870402D7AC17500AC952B /* app-ios.app */,
-				3A4870512D7AC17600AC952B /* app-iosTests.xctest */,
-				3A48705B2D7AC17600AC952B /* app-iosUITests.xctest */,
+				3A4870512D7AC17600AC952B /* overlordTests.xctest */,
+				3A48705B2D7AC17600AC952B /* overlordUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,9 +100,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3A48703F2D7AC17500AC952B /* Overlord Dashboard */ = {
+		3A48703F2D7AC17500AC952B /* Overlord */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord Dashboard" */;
+			buildConfigurationList = 3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord" */;
 			buildPhases = (
 				3A48703C2D7AC17500AC952B /* Sources */,
 				3A48703D2D7AC17500AC952B /* Frameworks */,
@@ -115,17 +115,17 @@
 			fileSystemSynchronizedGroups = (
 				3A4870422D7AC17500AC952B /* app-ios */,
 			);
-			name = "Overlord";
+			name = Overlord;
 			packageProductDependencies = (
 				3A4870712D7AC17600AC952B /* SwiftTerm */,
 			);
-			productName = "Overlord";
+			productName = Overlord;
 			productReference = 3A4870402D7AC17500AC952B /* app-ios.app */;
 			productType = "com.apple.product-type.application";
 		};
-		3A4870502D7AC17600AC952B /* app-iosTests */ = {
+		3A4870502D7AC17600AC952B /* overlordTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3A4870682D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-iosTests" */;
+			buildConfigurationList = 3A4870682D7AC17600AC952B /* Build configuration list for PBXNativeTarget "overlordTests" */;
 			buildPhases = (
 				3A48704D2D7AC17600AC952B /* Sources */,
 				3A48704E2D7AC17600AC952B /* Frameworks */,
@@ -139,16 +139,16 @@
 			fileSystemSynchronizedGroups = (
 				3A4870542D7AC17600AC952B /* app-iosTests */,
 			);
-			name = "app-iosTests";
+			name = overlordTests;
 			packageProductDependencies = (
 			);
 			productName = "app-iosTests";
-			productReference = 3A4870512D7AC17600AC952B /* app-iosTests.xctest */;
+			productReference = 3A4870512D7AC17600AC952B /* overlordTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		3A48705A2D7AC17600AC952B /* app-iosUITests */ = {
+		3A48705A2D7AC17600AC952B /* overlordUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 3A48706B2D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-iosUITests" */;
+			buildConfigurationList = 3A48706B2D7AC17600AC952B /* Build configuration list for PBXNativeTarget "overlordUITests" */;
 			buildPhases = (
 				3A4870572D7AC17600AC952B /* Sources */,
 				3A4870582D7AC17600AC952B /* Frameworks */,
@@ -162,11 +162,11 @@
 			fileSystemSynchronizedGroups = (
 				3A48705E2D7AC17600AC952B /* app-iosUITests */,
 			);
-			name = "app-iosUITests";
+			name = overlordUITests;
 			packageProductDependencies = (
 			);
 			productName = "app-iosUITests";
-			productReference = 3A48705B2D7AC17600AC952B /* app-iosUITests.xctest */;
+			productReference = 3A48705B2D7AC17600AC952B /* overlordUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -192,7 +192,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 3A48703B2D7AC17500AC952B /* Build configuration list for PBXProject "app-ios" */;
+			buildConfigurationList = 3A48703B2D7AC17500AC952B /* Build configuration list for PBXProject "overlord" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -209,9 +209,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3A48703F2D7AC17500AC952B /* Overlord Dashboard */,
-				3A4870502D7AC17600AC952B /* app-iosTests */,
-				3A48705A2D7AC17600AC952B /* app-iosUITests */,
+				3A48703F2D7AC17500AC952B /* Overlord */,
+				3A4870502D7AC17600AC952B /* overlordTests */,
+				3A48705A2D7AC17600AC952B /* overlordUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -267,12 +267,12 @@
 /* Begin PBXTargetDependency section */
 		3A4870532D7AC17600AC952B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 3A48703F2D7AC17500AC952B /* Overlord Dashboard */;
+			target = 3A48703F2D7AC17500AC952B /* Overlord */;
 			targetProxy = 3A4870522D7AC17600AC952B /* PBXContainerItemProxy */;
 		};
 		3A48705D2D7AC17600AC952B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 3A48703F2D7AC17500AC952B /* Overlord Dashboard */;
+			target = 3A48703F2D7AC17500AC952B /* Overlord */;
 			targetProxy = 3A48705C2D7AC17600AC952B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -405,7 +405,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Overlord";
+				INFOPLIST_KEY_CFBundleDisplayName = Overlord;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -445,7 +445,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Overlord";
+				INFOPLIST_KEY_CFBundleDisplayName = Overlord;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -490,7 +490,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/app-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/app-ios";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/overlord.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/overlord";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Debug;
@@ -513,7 +513,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/app-ios.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/app-ios";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/overlord.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/overlord";
 				XROS_DEPLOYMENT_TARGET = 2.0;
 			};
 			name = Release;
@@ -565,7 +565,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		3A48703B2D7AC17500AC952B /* Build configuration list for PBXProject "app-ios" */ = {
+		3A48703B2D7AC17500AC952B /* Build configuration list for PBXProject "overlord" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A4870632D7AC17600AC952B /* Debug */,
@@ -574,7 +574,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord Dashboard" */ = {
+		3A4870652D7AC17600AC952B /* Build configuration list for PBXNativeTarget "Overlord" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A4870662D7AC17600AC952B /* Debug */,
@@ -583,7 +583,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3A4870682D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-iosTests" */ = {
+		3A4870682D7AC17600AC952B /* Build configuration list for PBXNativeTarget "overlordTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A4870692D7AC17600AC952B /* Debug */,
@@ -592,7 +592,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		3A48706B2D7AC17600AC952B /* Build configuration list for PBXNativeTarget "app-iosUITests" */ = {
+		3A48706B2D7AC17600AC952B /* Build configuration list for PBXNativeTarget "overlordUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				3A48706C2D7AC17600AC952B /* Debug */,
