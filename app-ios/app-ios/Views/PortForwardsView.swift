@@ -542,7 +542,9 @@ struct WebViewContainer: View {
                                         .foregroundColor(.white)
                                         .cornerRadius(8)
                                 }
-                            )
+                            ).onAppear {
+                                viewModel.restartTCPServerIfNeeded(for: portForward.id)
+                            }
                         }
                         .padding()
                         .background(Color(.systemBackground))
