@@ -539,7 +539,7 @@ class OverlordClientDaemon:
     try:
       unused_mid, unused_remote, pid = self._state.forwards[str(local_port)]
       KillGraceful(pid)
-      del self._state.forwards[local_port]
+      del self._state.forwards[str(local_port)]
     except (KeyError, OSError):
       pass
 
