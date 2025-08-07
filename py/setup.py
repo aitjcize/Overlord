@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2023 The Overlord Authors. All rights reserved.
 
 from setuptools import setup
