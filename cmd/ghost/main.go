@@ -30,6 +30,7 @@ var tlsModeFlag = flag.String("tls", "detect",
 var download = flag.String("download", "", "file to download")
 var reset = flag.Bool("reset", false, "reset ghost and reload all configs")
 var status = flag.Bool("status", false, "show status of the client")
+var install = flag.Bool("install", false, "install system service")
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "Usage: ghost OVERLORD_ADDR\n")
@@ -61,6 +62,15 @@ func main() {
 		tlsMode = overlord.TLSForceEnable
 	} else if *tlsModeFlag == "n" {
 		tlsMode = overlord.TLSForceDisable
+	}
+
+	if *install {
+		err := overlord.Install()
+		if err != nil {
+			log.Fatalf("Failed to install system service: %v", err)
+		}
+		fmt.Println("System service installed successfully")
+		os.Exit(0)
 	}
 
 	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,

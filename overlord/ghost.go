@@ -1845,11 +1845,3 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 		}
 	}
 }
-
-func getCurrentUser() string {
-	user := os.Getenv("USER")
-	if user == "" {
-		return "root"
-	}
-	return user
-}

@@ -13,7 +13,7 @@ require (
 	github.com/pkg/term v1.1.0
 	github.com/satori/go.uuid v1.2.0
 	golang.org/x/crypto v0.36.0
-	golang.org/x/sys v0.31.0
+	golang.org/x/sys v0.34.0
 	golang.org/x/term v0.30.0
 	gorm.io/gorm v1.25.7
 )
