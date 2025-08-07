@@ -19,6 +19,7 @@ import platform
 import queue
 import re
 import select
+import shutil
 import signal
 import socket
 import ssl
@@ -1444,6 +1445,247 @@ def DownloadFile(filename):
   sys.exit(0)
 
 
+def install_service_linux(args):
+  """Install ghost as a systemd service on Linux."""
+  import pwd
+  import getpass
+
+  # Get current user info
+  try:
+    current_user = getpass.getuser()
+    user_info = pwd.getpwnam(current_user)
+    home_dir = user_info.pw_dir
+  except Exception as e:
+    print(f"Failed to get user info: {e}")
+    return False
+
+  # Get the current executable path
+  exec_path = os.path.abspath(sys.argv[0])
+  target_path = "/opt/bin/ghost"
+
+  # Create /opt/bin directory if it doesn't exist
+  try:
+    subprocess.run(["sudo", "mkdir", "-p", "/opt/bin"], check=True)
+  except subprocess.CalledProcessError as e:
+    print(f"Failed to create /opt/bin directory: {e}")
+    return False
+
+  # Copy ghost binary to /opt/bin
+  try:
+    subprocess.run(["sudo", "cp", exec_path, target_path], check=True)
+    subprocess.run(["sudo", "chmod", "755", target_path], check=True)
+  except subprocess.CalledProcessError as e:
+    print(f"Failed to install ghost binary: {e}")
+    return False
+
+  # Build service command arguments (filter out --install)
+  service_args = [arg for arg in sys.argv[1:] if arg != "--install"]
+  service_command = f"{target_path} {' '.join(service_args)}"
+
+  # Create systemd service file content
+  service_content = f"""[Unit]
+Description=Ghost Client
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={current_user}
+Environment=SHELL=/bin/bash
+Environment=HOME={home_dir}
+Environment=TERM=xterm-256color
+ExecStart={service_command}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+  # Find systemd service directory
+  service_dirs = ["/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"]
+  service_dir = None
+  for d in service_dirs:
+    if os.path.exists(d):
+      service_dir = d
+      break
+
+  if not service_dir:
+    print("No systemd service directory found")
+    return False
+
+  service_file_path = os.path.join(service_dir, "ghost.service")
+
+  # Write service file
+  try:
+    with open("/tmp/ghost.service", "w") as f:
+      f.write(service_content)
+    subprocess.run(["sudo", "mv", "/tmp/ghost.service", service_file_path], check=True)
+    print(f"Systemd service file installed at {service_file_path}")
+  except Exception as e:
+    print(f"Failed to install systemd service file: {e}")
+    return False
+
+  # Reload systemd and enable service
+  try:
+    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+    subprocess.run(["sudo", "systemctl", "enable", "ghost.service"], check=True)
+    print("Ghost service enabled for automatic startup")
+
+    # Start service if not already running
+    result = subprocess.run(["systemctl", "is-active", "ghost.service"], 
+                          capture_output=True, text=True)
+    if result.returncode != 0:
+      print("Starting ghost service...")
+      subprocess.run(["sudo", "systemctl", "start", "ghost.service"], check=True)
+      print("Ghost service started successfully")
+    else:
+      print("Ghost service is already running")
+
+  except subprocess.CalledProcessError as e:
+    print(f"Failed to enable/start ghost service: {e}")
+    return False
+
+  print("Ghost service installation completed successfully!")
+  print("The ghost service will start automatically on system boot.")
+  print("To check service status, run: sudo systemctl status ghost.service")
+  print("To stop the service, run: sudo systemctl stop ghost.service")
+
+  return True
+
+
+def install_service_darwin(args):
+  """Install ghost as a launchd service on macOS."""
+  import pwd
+  import getpass
+
+  # Get current user info
+  try:
+    current_user = getpass.getuser()
+    user_info = pwd.getpwnam(current_user)
+    home_dir = user_info.pw_dir
+  except Exception as e:
+    print(f"Failed to get user info: {e}")
+    return False
+
+  # Get the current executable path
+  exec_path = os.path.abspath(sys.argv[0])
+  bin_dir = os.path.join(home_dir, ".local", "bin")
+  target_path = os.path.join(bin_dir, "ghost")
+
+  try:
+    os.makedirs(bin_dir, mode=0o755, exist_ok=True)
+  except Exception as e:
+    print(f"Failed to create ~/.local/bin directory: {e}")
+    return False
+
+  try:
+    shutil.copy2(exec_path, target_path)
+    os.chmod(target_path, 0o755)
+  except Exception as e:
+    print(f"Failed to install ghost binary: {e}")
+    return False
+
+  # Build service command arguments (filter out --install)
+  service_args = [arg for arg in sys.argv[1:] if arg != "--install"]
+  program_args = [target_path] + service_args
+
+  # Create program arguments XML for plist
+  args_xml = ""
+  for arg in program_args:
+    if arg:  # Skip empty strings
+      args_xml += f"\t\t<string>{arg}</string>\n"
+
+  # Create launchd plist content
+  plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>Label</key>
+\t<string>com.overlord.ghost</string>
+\t<key>ProgramArguments</key>
+\t<array>
+{args_xml}\t</array>
+\t<key>EnvironmentVariables</key>
+\t<dict>
+\t\t<key>SHELL</key>
+\t\t<string>/bin/bash</string>
+\t\t<key>HOME</key>
+\t\t<string>{home_dir}</string>
+\t\t<key>TERM</key>
+\t\t<string>xterm-256color</string>
+\t</dict>
+\t<key>RunAtLoad</key>
+\t<true/>
+\t<key>KeepAlive</key>
+\t<true/>
+\t<key>StandardOutPath</key>
+\t<string>/var/log/ghost.log</string>
+\t<key>StandardErrorPath</key>
+\t<string>/var/log/ghost.log</string>
+</dict>
+</plist>
+"""
+
+  # Create LaunchAgents directory and plist file
+  launch_agents_dir = os.path.join(home_dir, "Library", "LaunchAgents")
+  plist_file_path = os.path.join(launch_agents_dir, "com.overlord.ghost.plist")
+
+  try:
+    os.makedirs(launch_agents_dir, mode=0o755, exist_ok=True)
+
+    with open(plist_file_path, "w") as f:
+      f.write(plist_content)
+
+    print(f"Launchd service installed at {plist_file_path}")
+  except Exception as e:
+    print(f"Failed to install launchd plist file: {e}")
+    return False
+
+  # Load the service with launchctl
+  try:
+    subprocess.run(["launchctl", "load", plist_file_path], check=True)
+    print("Ghost service loaded and enabled for automatic startup")
+
+    # Check if ghost is already running and start if not
+    try:
+      # Try to connect to RPC server to check if running
+      GhostRPCServer().GetStatus()
+      print("Ghost service is already running")
+    except:
+      print("Starting ghost service...")
+      try:
+        subprocess.run(["launchctl", "start", "com.overlord.ghost"], check=True)
+        print("Ghost service started successfully")
+      except subprocess.CalledProcessError as e:
+        print(f"Warning: failed to start ghost service: {e}")
+        print("The service should start automatically on next login")
+
+  except subprocess.CalledProcessError as e:
+    print(f"Failed to load ghost service: {e}")
+    return False
+
+  print("Ghost service installation completed successfully!")
+  print("The ghost service will start automatically on user login.")
+  print("To check if service is loaded, run: launchctl list | grep ghost")
+  print(f"To unload the service, run: launchctl unload {plist_file_path}")
+
+  return True
+
+
+def install_service(args):
+  """Install ghost as a system service."""
+  system = platform.system()
+
+  if system == "Linux":
+    return install_service_linux(args)
+  elif system == "Darwin":
+    return install_service_darwin(args)
+  else:
+    print(f"Service installation not supported on {system}")
+    return False
+
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--fork', dest='fork', action='store_true', default=False,
@@ -1481,6 +1723,8 @@ def main():
                       help='show status of the client')
   parser.add_argument('--allowlist', dest='allowlist',
                       help='comma-separated list of users/groups that can access this ghost')
+  parser.add_argument('--install', dest='install', action='store_true',
+                      default=False, help='install ghost as a system service')
   parser.add_argument('overlord_addr', metavar='OVERLORD_ADDR', type=str,
                       nargs='*',
                       help='overlord server address in format: host:port')
@@ -1489,6 +1733,12 @@ def main():
   if args.status:
     print(GhostRPCServer().GetStatus())
     sys.exit()
+
+  if args.install:
+    if install_service(args):
+      sys.exit(0)
+    else:
+      sys.exit(1)
 
   if args.fork:
     ForkToBackground()

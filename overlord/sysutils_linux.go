@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	uuid "github.com/satori/go.uuid"
@@ -106,4 +107,165 @@ func Ttyname(fd uintptr) (string, error) {
 	}
 
 	return ttyPath, nil
+}
+
+// getCurrentUserHomeDir gets the home directory for the current user on Linux
+func getCurrentUserHomeDir() string {
+	// Fallback to HOME environment variable
+	if homeDir := os.Getenv("HOME"); homeDir != "" {
+		return homeDir
+	}
+
+	// Linux-specific fallback using /etc/passwd
+	if username := getCurrentUser(); username != "unknown" {
+		// Try to read from /etc/passwd
+		if file, err := os.Open("/etc/passwd"); err == nil {
+			defer file.Close()
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := scanner.Text()
+				fields := strings.Split(line, ":")
+				if len(fields) >= 6 && fields[0] == username {
+					return fields[5] // Home directory is the 6th field
+				}
+			}
+		}
+	}
+
+	return "/home/" + getCurrentUser()
+}
+
+// Install installs and configures the ghost service for automatic startup on Linux
+func Install() error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+
+	targetPath := "/opt/bin/ghost"
+
+	err = runWithSudo("mkdir", "-p", "/opt/bin")
+	if err != nil {
+		return fmt.Errorf("failed to create /opt/bin directory: %v", err)
+	}
+
+	err = cpWithSudo(execPath, targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to copy ghost binary: %v", err)
+	}
+	err = chmodWithSudo("755", targetPath)
+	if err != nil {
+		return fmt.Errorf("failed to set executable permissions: %v", err)
+	}
+
+	homeDir := getCurrentUserHomeDir()
+	currentUser := getCurrentUser()
+
+	cmdParts := getServiceCommand()
+	cmdArgs := strings.Join(cmdParts, " ")
+
+	serviceContent := fmt.Sprintf(`[Unit]
+Description=Overlord Ghost Client
+After=network-online.target local-fs.target
+Wants=network-online.target
+RequiresMountsFor=%s
+
+[Service]
+Type=simple
+User=%s
+Environment=SHELL=/bin/bash
+Environment=HOME=%s
+Environment=TERM=xterm-256color
+ExecStart=%s %s
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+`, homeDir, currentUser, homeDir, targetPath, cmdArgs)
+
+	serviceFilePath, err := getSystemdServicePath()
+	if err != nil {
+		return fmt.Errorf("failed to determine systemd directory: %v", err)
+	}
+
+	tempServiceFile, err := os.CreateTemp("", "ghost-*.service")
+	if err != nil {
+		return fmt.Errorf("failed to create temp service file: %v", err)
+	}
+	defer os.Remove(tempServiceFile.Name())
+
+	_, err = tempServiceFile.WriteString(serviceContent)
+	if err != nil {
+		return fmt.Errorf("failed to write temp service file: %v", err)
+	}
+	tempServiceFile.Close()
+
+	err = cpWithSudo(tempServiceFile.Name(), serviceFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to install systemd service file: %v", err)
+	}
+
+	fmt.Printf("Systemd service installed at %s\n", serviceFilePath)
+
+	err = runWithSudo("systemctl", "daemon-reload")
+	if err != nil {
+		return fmt.Errorf("failed to reload systemd daemon: %v", err)
+	}
+	fmt.Printf("Systemd daemon reloaded\n")
+
+	err = runWithSudo("systemctl", "enable", "ghost")
+	if err != nil {
+		return fmt.Errorf("failed to enable ghost service: %v", err)
+	}
+	fmt.Printf("Ghost service enabled for automatic startup\n")
+
+	if !isGhostRunning() {
+		fmt.Printf("Starting ghost service...\n")
+		err = runWithSudo("systemctl", "start", "ghost")
+		if err != nil {
+			fmt.Printf("Warning: failed to start ghost service: %v\n", err)
+			fmt.Printf("You can start it manually with: sudo systemctl start ghost\n")
+		} else {
+			fmt.Printf("Ghost service started successfully\n")
+		}
+	} else {
+		fmt.Printf("Ghost service is already running\n")
+	}
+
+	fmt.Printf("Ghost service installation completed successfully!\n")
+	fmt.Printf("The ghost service will start automatically on system boot.\n")
+	fmt.Printf("To check service status, run: sudo systemctl status ghost\n")
+
+	return nil
+}
+
+// getSystemdServicePath determines the best systemd directory for service installation
+func getSystemdServicePath() (string, error) {
+	// Systemd service directories in order of preference:
+	// 1. /etc/systemd/system - Local configuration (highest priority, for admin-installed services)
+	// 2. /usr/lib/systemd/system - Package manager installed services (RHEL/CentOS/Fedora)
+	// 3. /lib/systemd/system - Package manager installed services (Debian/Ubuntu)
+
+	serviceDirs := []string{
+		"/usr/lib/systemd/system",
+		"/etc/systemd/system",
+		"/lib/systemd/system",
+	}
+
+	// Try to find an existing systemd directory
+	for _, dir := range serviceDirs {
+		if _, err := os.Stat(dir); err == nil {
+			return filepath.Join(dir, "ghost.service"), nil
+		}
+	}
+
+	// If no existing directory found, try to create /etc/systemd/system (preferred for admin installs)
+	preferredDir := "/etc/systemd/system"
+	err := runWithSudo("mkdir", "-p", preferredDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to create systemd directory %s: %v", preferredDir, err)
+	}
+
+	return filepath.Join(preferredDir, "ghost.service"), nil
 }

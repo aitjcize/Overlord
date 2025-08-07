@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -72,4 +73,77 @@ func GetenvInt(key string, defaultValue int) int {
 		return defaultValue
 	}
 	return value
+}
+
+// runWithSudo executes a command with sudo privileges
+func runWithSudo(args ...string) error {
+	cmd := exec.Command("sudo", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// cpWithSudo copies a file to a destination that requires sudo
+func cpWithSudo(src, dst string) error {
+	// Copy the file with sudo
+	err := runWithSudo("cp", src, dst)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: %v", err)
+	}
+	return nil
+}
+
+// chmodWithSudo changes file permissions using sudo
+func chmodWithSudo(mode, path string) error {
+	err := runWithSudo("chmod", mode, path)
+	if err != nil {
+		return fmt.Errorf("failed to set permissions: %v", err)
+	}
+	return nil
+}
+
+// getCurrentUser gets the current user name with multiple fallbacks
+func getCurrentUser() string {
+	if envUser := os.Getenv("USER"); envUser != "" {
+		return envUser
+	}
+
+	if logName := os.Getenv("LOGNAME"); logName != "" {
+		return logName
+	}
+
+	return "unknown"
+}
+
+// isGhostRunning checks if ghost is running by calling the RPC GetStatus method
+func isGhostRunning() bool {
+	// isGhostRunning checks if the ghost service is already running by attempting an RPC connection
+	client, err := ghostRPCStubServer()
+	if err != nil {
+		return false
+	}
+	defer client.Close()
+
+	// Try to call GetStatus to verify the service is responsive
+	var status string
+	err = client.Call("GhostRPCStub.GetStatus", "", &status)
+	return err == nil
+}
+
+// getServiceCommand constructs the command line arguments for the service
+// by filtering out the --install flag from os.Args
+func getServiceCommand() []string {
+	var cmdParts []string
+
+	// Skip program name (os.Args[0]) and filter out --install flag
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--install" || arg == "-install" {
+			continue // Skip the install flag
+		}
+		cmdParts = append(cmdParts, arg)
+	}
+
+	return cmdParts
 }
