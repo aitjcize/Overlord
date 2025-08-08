@@ -171,12 +171,14 @@ go-fmt:
 	@$(GO) fmt $(GO_DIRS)
 
 go-lint:
-	$(call cmd_msg,VET,$(GO_DIRS))
-	@$(GO) vet $(GO_DIRS)
-	$(call cmd_msg,GO,installing golint)
-	@$(GO) install golang.org/x/lint/golint@latest
-	$(call cmd_msg,LINT,$(GO_DIRS))
-	@golint -set_exit_status $(GO_DIRS)
+	$(call cmd_msg,GOLANGCI-LINT,$(GO_DIRS))
+	@which golangci-lint > /dev/null || (echo "Installing latest golangci-lint..." && \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin latest)
+	@golangci-lint run ./overlord/... ./cmd/...
+
+go-test:
+	$(call cmd_msg,TEST,$(GO_DIRS))
+	@$(GO) test ./overlord/... ./cmd/...
 
 py-lint:
 	$(call cmd_msg,PYLINT,$(PY_FILES))

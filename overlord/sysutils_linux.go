@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -135,6 +136,34 @@ func getCurrentUserHomeDir() string {
 	return "/home/" + getCurrentUser()
 }
 
+// runWithSudo executes a command with sudo privileges
+func runWithSudo(args ...string) error {
+	cmd := exec.Command("sudo", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	return cmd.Run()
+}
+
+// cpWithSudo copies a file to a destination that requires sudo
+func cpWithSudo(src, dst string) error {
+	// Copy the file with sudo
+	err := runWithSudo("cp", src, dst)
+	if err != nil {
+		return fmt.Errorf("failed to copy file: %v", err)
+	}
+	return nil
+}
+
+// chmodWithSudo changes file permissions using sudo
+func chmodWithSudo(mode, path string) error {
+	err := runWithSudo("chmod", mode, path)
+	if err != nil {
+		return fmt.Errorf("failed to set permissions: %v", err)
+	}
+	return nil
+}
+
 // Install installs and configures the ghost service for automatic startup on Linux
 func Install() error {
 	execPath, err := os.Executable()
@@ -142,6 +171,7 @@ func Install() error {
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
+	// Install binary to filesystem
 	targetPath := "/opt/bin/ghost"
 
 	err = runWithSudo("mkdir", "-p", "/opt/bin")
@@ -161,6 +191,7 @@ func Install() error {
 	homeDir := getCurrentUserHomeDir()
 	currentUser := getCurrentUser()
 
+	// Install service
 	cmdParts := getServiceCommand()
 	cmdArgs := strings.Join(cmdParts, " ")
 
@@ -208,18 +239,21 @@ WantedBy=multi-user.target
 
 	fmt.Printf("Systemd service installed at %s\n", serviceFilePath)
 
+	// Reload systemd daemon
 	err = runWithSudo("systemctl", "daemon-reload")
 	if err != nil {
 		return fmt.Errorf("failed to reload systemd daemon: %v", err)
 	}
 	fmt.Printf("Systemd daemon reloaded\n")
 
+	// Enable service
 	err = runWithSudo("systemctl", "enable", "ghost")
 	if err != nil {
 		return fmt.Errorf("failed to enable ghost service: %v", err)
 	}
 	fmt.Printf("Ghost service enabled for automatic startup\n")
 
+	// Start service
 	if !isGhostRunning() {
 		fmt.Printf("Starting ghost service...\n")
 		err = runWithSudo("systemctl", "start", "ghost")

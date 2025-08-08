@@ -84,15 +84,8 @@ func TestDatabaseInitialization(t *testing.T) {
 }
 
 // TestUserManagement tests user management functions
-func TestUserManagement(t *testing.T) {
-	dbManager, cleanup := setupTestDatabaseManager(t)
-	defer cleanup()
-
-	// Initialize database
-	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
-
+// Helper functions for TestUserManagement
+func testUserCreation(t *testing.T, dbManager *DatabaseManager) {
 	// Test creating a new user
 	if err := dbManager.CreateUser("testuser", "testpass", false); err != nil {
 		t.Fatalf("Failed to create user: %v", err)
@@ -102,7 +95,9 @@ func TestUserManagement(t *testing.T) {
 	if err := dbManager.CreateUser("testuser", "testpass", false); err == nil {
 		t.Error("Creating duplicate user should fail")
 	}
+}
 
+func testUserAuthentication(t *testing.T, dbManager *DatabaseManager) {
 	// Test user authentication
 	authenticated, err := dbManager.AuthenticateUser("testuser", "testpass")
 	if err != nil {
@@ -120,21 +115,25 @@ func TestUserManagement(t *testing.T) {
 	if authenticated {
 		t.Error("User should not be authenticated with incorrect password")
 	}
+}
 
+func testPasswordUpdate(t *testing.T, dbManager *DatabaseManager) {
 	// Test updating password
 	if err := dbManager.UpdateUserPassword("testuser", "newpass"); err != nil {
 		t.Fatalf("Failed to update password: %v", err)
 	}
 
 	// Test authentication with new password
-	authenticated, err = dbManager.AuthenticateUser("testuser", "newpass")
+	authenticated, err := dbManager.AuthenticateUser("testuser", "newpass")
 	if err != nil {
 		t.Fatalf("Failed to authenticate user: %v", err)
 	}
 	if !authenticated {
 		t.Error("User should be authenticated with new password")
 	}
+}
 
+func testAdminUser(t *testing.T, dbManager *DatabaseManager) {
 	// Test creating an admin user
 	if err := dbManager.CreateUser("adminuser", "adminpass", true); err != nil {
 		t.Fatalf("Failed to create admin user: %v", err)
@@ -148,16 +147,117 @@ func TestUserManagement(t *testing.T) {
 	if !isAdmin {
 		t.Error("User should be admin")
 	}
+}
 
+func testUserDeletion(t *testing.T, dbManager *DatabaseManager) {
 	// Test deleting user
 	if err := dbManager.DeleteUser("testuser"); err != nil {
 		t.Fatalf("Failed to delete user: %v", err)
 	}
 
 	// Verify user was deleted
-	_, err = dbManager.GetUserByUsername("testuser")
+	_, err := dbManager.GetUserByUsername("testuser")
 	if err == nil {
 		t.Error("User should have been deleted")
+	}
+}
+
+func TestUserManagement(t *testing.T) {
+	dbManager, cleanup := setupTestDatabaseManager(t)
+	defer cleanup()
+
+	// Initialize database
+	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	testUserCreation(t, dbManager)
+	testUserAuthentication(t, dbManager)
+	testPasswordUpdate(t, dbManager)
+	testAdminUser(t, dbManager)
+	testUserDeletion(t, dbManager)
+}
+
+// Helper functions for TestGroupManagement
+func testGroupCreation(t *testing.T, dbManager *DatabaseManager) {
+	// Test creating a new group
+	if err := dbManager.CreateGroup("testgroup"); err != nil {
+		t.Fatalf("Failed to create group: %v", err)
+	}
+
+	// Test creating a duplicate group (should fail)
+	if err := dbManager.CreateGroup("testgroup"); err == nil {
+		t.Error("Creating duplicate group should fail")
+	}
+}
+
+func testUserGroupMembership(t *testing.T, dbManager *DatabaseManager) {
+	// Test adding user to group
+	if err := dbManager.AddUserToGroup("testuser", "testgroup"); err != nil {
+		t.Fatalf("Failed to add user to group: %v", err)
+	}
+
+	// Test if user is in group
+	isInGroup, err := dbManager.IsUserInGroup("testuser", "testgroup")
+	if err != nil {
+		t.Fatalf("Failed to check if user is in group: %v", err)
+	}
+	if !isInGroup {
+		t.Error("User should be in group")
+	}
+}
+
+func testGroupQueries(t *testing.T, dbManager *DatabaseManager) {
+	// Test getting user groups
+	groups, err := dbManager.GetUserGroups("testuser")
+	if err != nil {
+		t.Fatalf("Failed to get user groups: %v", err)
+	}
+	if len(groups) != 1 || groups[0] != "testgroup" {
+		t.Errorf("Expected user to be in 1 group 'testgroup', got %v", groups)
+	}
+
+	// Test getting group users
+	users, err := dbManager.GetGroupUsers("testgroup")
+	if err != nil {
+		t.Fatalf("Failed to get group users: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "testuser" {
+		t.Errorf("Expected group to have 1 user 'testuser', got %d users", len(users))
+	}
+}
+
+func testUserGroupRemoval(t *testing.T, dbManager *DatabaseManager) {
+	// Test removing user from group
+	if err := dbManager.RemoveUserFromGroup("testuser", "testgroup"); err != nil {
+		t.Fatalf("Failed to remove user from group: %v", err)
+	}
+
+	// Verify user was removed from group
+	isInGroup, err := dbManager.IsUserInGroup("testuser", "testgroup")
+	if err != nil {
+		t.Fatalf("Failed to check if user is in group: %v", err)
+	}
+	if isInGroup {
+		t.Error("User should have been removed from group")
+	}
+}
+
+func testGroupDeletion(t *testing.T, dbManager *DatabaseManager) {
+	// Test deleting group
+	if err := dbManager.DeleteGroup("testgroup"); err != nil {
+		t.Fatalf("Failed to delete group: %v", err)
+	}
+
+	// Verify group was deleted
+	_, err := dbManager.GetGroupByName("testgroup")
+	if err == nil {
+		t.Error("Group should have been deleted")
+	}
+
+	// Test preventing deletion of admin group
+	if err := dbManager.DeleteGroup(AdminGroupName); err == nil {
+		t.Error("Deleting admin group should fail")
 	}
 }
 
@@ -176,94 +276,22 @@ func TestGroupManagement(t *testing.T) {
 		t.Fatalf("Failed to create user: %v", err)
 	}
 
-	// Test creating a new group
-	if err := dbManager.CreateGroup("testgroup"); err != nil {
-		t.Fatalf("Failed to create group: %v", err)
-	}
-
-	// Test creating a duplicate group (should fail)
-	if err := dbManager.CreateGroup("testgroup"); err == nil {
-		t.Error("Creating duplicate group should fail")
-	}
-
-	// Test adding user to group
-	if err := dbManager.AddUserToGroup("testuser", "testgroup"); err != nil {
-		t.Fatalf("Failed to add user to group: %v", err)
-	}
-
-	// Test if user is in group
-	isInGroup, err := dbManager.IsUserInGroup("testuser", "testgroup")
-	if err != nil {
-		t.Fatalf("Failed to check if user is in group: %v", err)
-	}
-	if !isInGroup {
-		t.Error("User should be in group")
-	}
-
-	// Test getting user groups
-	groups, err := dbManager.GetUserGroups("testuser")
-	if err != nil {
-		t.Fatalf("Failed to get user groups: %v", err)
-	}
-	if len(groups) != 1 || groups[0] != "testgroup" {
-		t.Errorf("Expected user to be in 1 group 'testgroup', got %v", groups)
-	}
-
-	// Test getting group users
-	users, err := dbManager.GetGroupUsers("testgroup")
-	if err != nil {
-		t.Fatalf("Failed to get group users: %v", err)
-	}
-	if len(users) != 1 || users[0].Username != "testuser" {
-		t.Errorf("Expected group to have 1 user 'testuser', got %d users", len(users))
-	}
-
-	// Test removing user from group
-	if err := dbManager.RemoveUserFromGroup("testuser", "testgroup"); err != nil {
-		t.Fatalf("Failed to remove user from group: %v", err)
-	}
-
-	// Verify user was removed from group
-	isInGroup, err = dbManager.IsUserInGroup("testuser", "testgroup")
-	if err != nil {
-		t.Fatalf("Failed to check if user is in group: %v", err)
-	}
-	if isInGroup {
-		t.Error("User should have been removed from group")
-	}
-
-	// Test deleting group
-	if err := dbManager.DeleteGroup("testgroup"); err != nil {
-		t.Fatalf("Failed to delete group: %v", err)
-	}
-
-	// Verify group was deleted
-	_, err = dbManager.GetGroupByName("testgroup")
-	if err == nil {
-		t.Error("Group should have been deleted")
-	}
-
-	// Test preventing deletion of admin group
-	if err := dbManager.DeleteGroup(AdminGroupName); err == nil {
-		t.Error("Deleting admin group should fail")
-	}
+	testGroupCreation(t, dbManager)
+	testUserGroupMembership(t, dbManager)
+	testGroupQueries(t, dbManager)
+	testUserGroupRemoval(t, dbManager)
+	testGroupDeletion(t, dbManager)
 }
 
-// TestAdminProtection tests protections around admin users and groups
-func TestAdminProtection(t *testing.T) {
-	dbManager, cleanup := setupTestDatabaseManager(t)
-	defer cleanup()
-
-	// Initialize database with admin user
-	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
-
+// Helper functions for TestAdminProtection
+func testLastAdminProtection(t *testing.T, dbManager *DatabaseManager) {
 	// Test removing the admin user from admin group (should fail)
 	if err := dbManager.RemoveUserFromGroup("admin", AdminGroupName); err == nil {
 		t.Error("Removing the last admin user from admin group should fail")
 	}
+}
 
+func testMultipleAdminRemoval(t *testing.T, dbManager *DatabaseManager) {
 	// Create a second admin user
 	if err := dbManager.CreateUser("admin2", "adminpass", true); err != nil {
 		t.Fatalf("Failed to create second admin user: %v", err)
@@ -289,16 +317,22 @@ func TestAdminProtection(t *testing.T) {
 	}
 }
 
-// TestAllowlistChecking tests the allowlist checking functionality
-func TestAllowlistChecking(t *testing.T) {
+// TestAdminProtection tests protections around admin users and groups
+func TestAdminProtection(t *testing.T) {
 	dbManager, cleanup := setupTestDatabaseManager(t)
 	defer cleanup()
 
-	// Initialize database
+	// Initialize database with admin user
 	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
 		t.Fatalf("Failed to initialize database: %v", err)
 	}
 
+	testLastAdminProtection(t, dbManager)
+	testMultipleAdminRemoval(t, dbManager)
+}
+
+// Helper functions for TestAllowlistChecking
+func setupAllowlistTestData(t *testing.T, dbManager *DatabaseManager) {
 	// Create test users
 	if err := dbManager.CreateUser("user1", "pass", false); err != nil {
 		t.Fatalf("Failed to create user: %v", err)
@@ -316,7 +350,9 @@ func TestAllowlistChecking(t *testing.T) {
 	if err := dbManager.AddUserToGroup("user1", "testgroup"); err != nil {
 		t.Fatalf("Failed to add user to group: %v", err)
 	}
+}
 
+func testEmptyAndSpecialAllowlists(t *testing.T, dbManager *DatabaseManager) {
 	// Test empty allowlist
 	hasAccess, err := dbManager.CheckAllowlist("user1", []string{})
 	if err != nil {
@@ -334,9 +370,11 @@ func TestAllowlistChecking(t *testing.T) {
 	if !hasAccess {
 		t.Error("User should have access with 'anyone' in allowlist")
 	}
+}
 
+func testDirectUserAndGroupAccess(t *testing.T, dbManager *DatabaseManager) {
 	// Test direct user specification
-	hasAccess, err = dbManager.CheckAllowlist("user1", []string{"u/user1"})
+	hasAccess, err := dbManager.CheckAllowlist("user1", []string{"u/user1"})
 	if err != nil {
 		t.Fatalf("Failed to check allowlist: %v", err)
 	}
@@ -352,9 +390,11 @@ func TestAllowlistChecking(t *testing.T) {
 	if !hasAccess {
 		t.Error("User should have access when their group is in allowlist")
 	}
+}
 
+func testAllowlistDenialAndErrors(t *testing.T, dbManager *DatabaseManager) {
 	// Test user not in allowlist
-	hasAccess, err = dbManager.CheckAllowlist("user2",
+	hasAccess, err := dbManager.CheckAllowlist("user2",
 		[]string{"u/user1", "g/testgroup"})
 	if err != nil {
 		t.Fatalf("Failed to check allowlist: %v", err)
@@ -371,6 +411,22 @@ func TestAllowlistChecking(t *testing.T) {
 	if hasAccess {
 		t.Error("User should not have access with invalid entity format")
 	}
+}
+
+// TestAllowlistChecking tests the allowlist checking functionality
+func TestAllowlistChecking(t *testing.T) {
+	dbManager, cleanup := setupTestDatabaseManager(t)
+	defer cleanup()
+
+	// Initialize database
+	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	setupAllowlistTestData(t, dbManager)
+	testEmptyAndSpecialAllowlists(t, dbManager)
+	testDirectUserAndGroupAccess(t, dbManager)
+	testAllowlistDenialAndErrors(t, dbManager)
 }
 
 // TestParseEntityName tests the entity name parsing function
@@ -582,6 +638,106 @@ func TestDatabaseEdgeCases(t *testing.T) {
 }
 
 // TestConcurrentDatabaseAccess tests concurrent access to the database
+// Helper functions for TestConcurrentDatabaseAccess
+func performConcurrentUserOperations(t *testing.T, dbManager *DatabaseManager, id int, numOps int) {
+	username := fmt.Sprintf("user%d", id)
+	err := dbManager.CreateUser(username, "testpass", false)
+	if err != nil {
+		t.Errorf("Failed to create user %s: %v", username, err)
+		return
+	}
+
+	// Perform multiple read operations
+	for range numOps {
+		_, err := dbManager.GetUserByUsername(username)
+		if err != nil {
+			t.Errorf("Failed to get user %s: %v", username, err)
+		}
+
+		_, err = dbManager.IsUserAdmin(username)
+		if err != nil {
+			t.Errorf("Failed to check if user %s is admin: %v", username, err)
+		}
+	}
+
+	// Update user password
+	err = dbManager.UpdateUserPassword(username, "newpass")
+	if err != nil {
+		t.Errorf("Failed to update password for user %s: %v", username, err)
+	}
+}
+
+func performConcurrentGroupOperations(t *testing.T, dbManager *DatabaseManager, id int) {
+	username := fmt.Sprintf("user%d", id)
+	groupName := fmt.Sprintf("group%d", id)
+
+	err := dbManager.CreateGroup(groupName)
+	if err != nil {
+		t.Errorf("Failed to create group %s: %v", groupName, err)
+		return
+	}
+
+	// Add user to group
+	err = dbManager.AddUserToGroup(username, groupName)
+	if err != nil {
+		t.Errorf("Failed to add user %s to group %s: %v", username, groupName, err)
+	}
+
+	// Check if user is in group
+	isInGroup, err := dbManager.IsUserInGroup(username, groupName)
+	if err != nil {
+		t.Errorf("Failed to check if user %s is in group %s: %v",
+			username, groupName, err)
+	}
+	if !isInGroup {
+		t.Errorf("User %s should be in group %s", username, groupName)
+	}
+
+	// Remove user from group
+	err = dbManager.RemoveUserFromGroup(username, groupName)
+	if err != nil {
+		t.Errorf("Failed to remove user %s from group %s: %v",
+			username, groupName, err)
+	}
+}
+
+func performConcurrentCleanup(t *testing.T, dbManager *DatabaseManager, id int) {
+	username := fmt.Sprintf("user%d", id)
+	groupName := fmt.Sprintf("group%d", id)
+
+	// Delete group
+	err := dbManager.DeleteGroup(groupName)
+	if err != nil {
+		t.Errorf("Failed to delete group %s: %v", groupName, err)
+	}
+
+	// Delete user
+	err = dbManager.DeleteUser(username)
+	if err != nil {
+		t.Errorf("Failed to delete user %s: %v", username, err)
+	}
+}
+
+func verifyConcurrentTestResults(t *testing.T, dbManager *DatabaseManager) {
+	// Verify only the admin user remains
+	users, err := dbManager.GetAllUsers()
+	if err != nil {
+		t.Fatalf("Failed to get all users: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "admin" {
+		t.Errorf("Expected only admin user to remain, got %d users", len(users))
+	}
+
+	// Verify only the admin group remains
+	groups, err := dbManager.GetAllGroups()
+	if err != nil {
+		t.Fatalf("Failed to get all groups: %v", err)
+	}
+	if len(groups) != 1 || groups[0].Name != AdminGroupName {
+		t.Errorf("Expected only admin group to remain, got %d groups", len(groups))
+	}
+}
+
 func TestConcurrentDatabaseAccess(t *testing.T) {
 	dbManager, cleanup := setupTestDatabaseManager(t)
 	defer cleanup()
@@ -602,98 +758,14 @@ func TestConcurrentDatabaseAccess(t *testing.T) {
 	for i := range numGoroutines {
 		go func(id int) {
 			defer wg.Done()
-
-			// Create user specific to this goroutine
-			username := fmt.Sprintf("user%d", id)
-			err := dbManager.CreateUser(username, "testpass", false)
-			if err != nil {
-				t.Errorf("Failed to create user %s: %v", username, err)
-				return
-			}
-
-			// Perform multiple read operations
-			for range numOps {
-				_, err := dbManager.GetUserByUsername(username)
-				if err != nil {
-					t.Errorf("Failed to get user %s: %v", username, err)
-				}
-
-				_, err = dbManager.IsUserAdmin(username)
-				if err != nil {
-					t.Errorf("Failed to check if user %s is admin: %v", username, err)
-				}
-			}
-
-			// Update user password
-			err = dbManager.UpdateUserPassword(username, "newpass")
-			if err != nil {
-				t.Errorf("Failed to update password for user %s: %v", username, err)
-			}
-
-			// Create group specific to this goroutine
-			groupName := fmt.Sprintf("group%d", id)
-			err = dbManager.CreateGroup(groupName)
-			if err != nil {
-				t.Errorf("Failed to create group %s: %v", groupName, err)
-				return
-			}
-
-			// Add user to group
-			err = dbManager.AddUserToGroup(username, groupName)
-			if err != nil {
-				t.Errorf("Failed to add user %s to group %s: %v", username, groupName, err)
-			}
-
-			// Check if user is in group
-			isInGroup, err := dbManager.IsUserInGroup(username, groupName)
-			if err != nil {
-				t.Errorf("Failed to check if user %s is in group %s: %v",
-					username, groupName, err)
-			}
-			if !isInGroup {
-				t.Errorf("User %s should be in group %s", username, groupName)
-			}
-
-			// Remove user from group
-			err = dbManager.RemoveUserFromGroup(username, groupName)
-			if err != nil {
-				t.Errorf("Failed to remove user %s from group %s: %v",
-					username, groupName, err)
-			}
-
-			// Delete group
-			err = dbManager.DeleteGroup(groupName)
-			if err != nil {
-				t.Errorf("Failed to delete group %s: %v", groupName, err)
-			}
-
-			// Delete user
-			err = dbManager.DeleteUser(username)
-			if err != nil {
-				t.Errorf("Failed to delete user %s: %v", username, err)
-			}
+			performConcurrentUserOperations(t, dbManager, id, numOps)
+			performConcurrentGroupOperations(t, dbManager, id)
+			performConcurrentCleanup(t, dbManager, id)
 		}(i)
 	}
 
 	wg.Wait()
-
-	// Verify only the admin user remains
-	users, err := dbManager.GetAllUsers()
-	if err != nil {
-		t.Fatalf("Failed to get all users: %v", err)
-	}
-	if len(users) != 1 || users[0].Username != "admin" {
-		t.Errorf("Expected only admin user to remain, got %d users", len(users))
-	}
-
-	// Verify only the admin group remains
-	groups, err := dbManager.GetAllGroups()
-	if err != nil {
-		t.Fatalf("Failed to get all groups: %v", err)
-	}
-	if len(groups) != 1 || groups[0].Name != AdminGroupName {
-		t.Errorf("Expected only admin group to remain, got %d groups", len(groups))
-	}
+	verifyConcurrentTestResults(t, dbManager)
 }
 
 // TestDatabaseConnectionHandling tests database connection handling
@@ -730,16 +802,8 @@ func TestDatabaseConnectionHandling(t *testing.T) {
 	}
 }
 
-// TestDatabaseTransactionBehavior tests database transaction behavior
-func TestDatabaseTransactionBehavior(t *testing.T) {
-	dbManager, cleanup := setupTestDatabaseManager(t)
-	defer cleanup()
-
-	// Initialize database
-	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
-		t.Fatalf("Failed to initialize database: %v", err)
-	}
-
+// Helper functions for TestDatabaseTransactionBehavior
+func testBasicUserCreationAndAuth(t *testing.T, dbManager *DatabaseManager) {
 	// Test creating a user with correct password
 	err := dbManager.CreateUser("user1", "goodpassword", false)
 	if err != nil {
@@ -763,9 +827,11 @@ func TestDatabaseTransactionBehavior(t *testing.T) {
 	if !authenticated {
 		t.Error("User should be authenticated with correct password")
 	}
+}
 
+func testAdminUserCreation(t *testing.T, dbManager *DatabaseManager) {
 	// Now create an admin user to verify they get added to admin group
-	err = dbManager.CreateUser("adminuser", "adminpass", true)
+	err := dbManager.CreateUser("adminuser", "adminpass", true)
 	if err != nil {
 		t.Fatalf("Failed to create admin user: %v", err)
 	}
@@ -778,9 +844,11 @@ func TestDatabaseTransactionBehavior(t *testing.T) {
 	if !isAdmin {
 		t.Error("User should be admin")
 	}
+}
 
+func testMultiGroupMembership(t *testing.T, dbManager *DatabaseManager) {
 	// Test creating a user and adding to multiple groups
-	err = dbManager.CreateUser("multigroup", "pass", false)
+	err := dbManager.CreateUser("multigroup", "pass", false)
 	if err != nil {
 		t.Fatalf("Failed to create user: %v", err)
 	}
@@ -804,7 +872,9 @@ func TestDatabaseTransactionBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to add user to group2: %v", err)
 	}
+}
 
+func verifyMultiGroupMembership(t *testing.T, dbManager *DatabaseManager) {
 	// Verify user is in both groups
 	groups, err := dbManager.GetUserGroups("multigroup")
 	if err != nil {
@@ -826,4 +896,20 @@ func TestDatabaseTransactionBehavior(t *testing.T) {
 	if !hasGroup1 || !hasGroup2 {
 		t.Errorf("User should be in groups 'group1' and 'group2', got %v", groups)
 	}
+}
+
+// TestDatabaseTransactionBehavior tests database transaction behavior
+func TestDatabaseTransactionBehavior(t *testing.T) {
+	dbManager, cleanup := setupTestDatabaseManager(t)
+	defer cleanup()
+
+	// Initialize database
+	if err := dbManager.Initialize("admin", "adminpass"); err != nil {
+		t.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	testBasicUserCreationAndAuth(t, dbManager)
+	testAdminUserCreation(t, dbManager)
+	testMultiGroupMembership(t, dbManager)
+	verifyMultiGroupMembership(t, dbManager)
 }

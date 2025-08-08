@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,7 +19,7 @@ import (
 
 // ToVTNewLine replace the newline character to VT100 newline control.
 func ToVTNewLine(text string) string {
-	return strings.Replace(text, "\n", "\r\n", -1)
+	return strings.ReplaceAll(text, "\n", "\r\n")
 }
 
 // GetPlatformString returns machine platform string.
@@ -57,8 +56,8 @@ type PollableProcess struct {
 // Poll polls the process for it's execution status.
 func (p *PollableProcess) Poll() (uint32, error) {
 	var wstatus syscall.WaitStatus
-	pid, err := syscall.Wait4(p.Process.Pid, &wstatus, syscall.WNOHANG, nil)
-	if err == nil && p.Process.Pid == pid {
+	pid, err := syscall.Wait4(p.Pid, &wstatus, syscall.WNOHANG, nil)
+	if err == nil && p.Pid == pid {
 		return uint32(wstatus), nil
 	}
 	return 0, errors.New("Wait4 failed")
@@ -75,34 +74,6 @@ func GetenvInt(key string, defaultValue int) int {
 	return value
 }
 
-// runWithSudo executes a command with sudo privileges
-func runWithSudo(args ...string) error {
-	cmd := exec.Command("sudo", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	return cmd.Run()
-}
-
-// cpWithSudo copies a file to a destination that requires sudo
-func cpWithSudo(src, dst string) error {
-	// Copy the file with sudo
-	err := runWithSudo("cp", src, dst)
-	if err != nil {
-		return fmt.Errorf("failed to copy file: %v", err)
-	}
-	return nil
-}
-
-// chmodWithSudo changes file permissions using sudo
-func chmodWithSudo(mode, path string) error {
-	err := runWithSudo("chmod", mode, path)
-	if err != nil {
-		return fmt.Errorf("failed to set permissions: %v", err)
-	}
-	return nil
-}
-
 // getCurrentUser gets the current user name with multiple fallbacks
 func getCurrentUser() string {
 	if envUser := os.Getenv("USER"); envUser != "" {
@@ -113,7 +84,7 @@ func getCurrentUser() string {
 		return logName
 	}
 
-	return "unknown"
+	return UnknownStr
 }
 
 // isGhostRunning checks if ghost is running by calling the RPC GetStatus method

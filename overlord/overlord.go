@@ -28,12 +28,13 @@ import (
 
 const (
 	defaultForwardHost = "127.0.0.1"
-	ldInterval         = 5
-	usrShareDir        = "../share/overlord"
-	webRootDirName     = "webroot"
-	appsDirName        = "apps"
-	fileOpMaxRetries   = 100
-	fileOpRetryDelay   = 200 * time.Millisecond
+
+	ldInterval       = 5
+	usrShareDir      = "../share/overlord"
+	webRootDirName   = "webroot"
+	appsDirName      = "apps"
+	fileOpMaxRetries = 100
+	fileOpRetryDelay = 200 * time.Millisecond
 )
 
 // SpawnTerminalCmd is an overlord intend to launch a terminal.
@@ -255,7 +256,7 @@ func (ovl *Overlord) Register(conn *ConnServer) (*websocket.Conn, error) {
 		// Do nothing, we wait until 'request_to_download' call from client to
 		// send the message to the browser
 	default:
-		return nil, errors.New("Unknown client mode")
+		return nil, errors.New("unknown client mode")
 	}
 
 	var id string
@@ -299,20 +300,14 @@ func (ovl *Overlord) Unregister(conn *ConnServer) {
 		ovl.logcatsMu.Unlock()
 	case ModeFile:
 		ovl.downloadsMu.Lock()
-		if _, ok := ovl.downloads[conn.Sid]; ok {
-			delete(ovl.downloads, conn.Sid)
-		}
+		delete(ovl.downloads, conn.Sid)
 		ovl.downloadsMu.Unlock()
 		ovl.uploadsMu.Lock()
-		if _, ok := ovl.uploads[conn.Sid]; ok {
-			delete(ovl.uploads, conn.Sid)
-		}
+		delete(ovl.uploads, conn.Sid)
 		ovl.uploadsMu.Unlock()
 	default:
 		ovl.wsctxsMu.Lock()
-		if _, ok := ovl.wsctxs[conn.Sid]; ok {
-			delete(ovl.wsctxs, conn.Sid)
-		}
+		delete(ovl.wsctxs, conn.Sid)
 		ovl.wsctxsMu.Unlock()
 	}
 
@@ -399,7 +394,7 @@ func (ovl *Overlord) getWebRoot() string {
 	}
 	execDir := filepath.Dir(execPath)
 
-	webroot, err := filepath.Abs(filepath.Join(execDir, webRootDirName))
+	webroot := filepath.Join(execDir, webRootDirName)
 
 	if _, err := os.Stat(webroot); err != nil {
 		// Try system install directory
@@ -570,6 +565,27 @@ func (ovl *Overlord) logcatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// spawnAgentCommand is a helper function to eliminate duplicate code between terminal and shell handlers
+func (ovl *Overlord) spawnAgentCommand(conn *websocket.Conn, mid string, cmd interface{}) {
+	ovl.agentsMu.Lock()
+	if agent, ok := ovl.agents[mid]; ok {
+		ovl.agentsMu.Unlock()
+
+		agent.Command <- cmd
+		if res := <-agent.Response; res.Status == Failed {
+			var error Error
+			if err := json.Unmarshal(res.Payload, &error); err != nil {
+				WebSocketSendError(conn, "Failed to unmarshal error response: "+err.Error())
+			} else {
+				WebSocketSendError(conn, error.Error)
+			}
+		}
+	} else {
+		ovl.agentsMu.Unlock()
+		WebSocketSendError(conn, "No client with mid "+mid)
+	}
+}
+
 // TTY stream request handler.
 // We first create a webSocketContext to store the connection, then send a
 // command to Overlord to client to spawn a terminal connection.
@@ -591,25 +607,9 @@ func (ovl *Overlord) agentTtyHandler(w http.ResponseWriter, r *http.Request) {
 		ttyDevice = _ttyDevice[0]
 	}
 
-	ovl.agentsMu.Lock()
-	if agent, ok := ovl.agents[mid]; ok {
-		ovl.agentsMu.Unlock()
-
-		wc := newWebsocketContext(conn)
-		ovl.addWebsocketContext(wc)
-		agent.Command <- SpawnTerminalCmd{wc.Sid, ttyDevice}
-		if res := <-agent.Response; res.Status == Failed {
-			var error Error
-			if err := json.Unmarshal(res.Payload, &error); err != nil {
-				WebSocketSendError(conn, "Failed to unmarshal error response: "+err.Error())
-			} else {
-				WebSocketSendError(conn, error.Error)
-			}
-		}
-	} else {
-		ovl.agentsMu.Unlock()
-		WebSocketSendError(conn, "No client with mid "+mid)
-	}
+	wc := newWebsocketContext(conn)
+	ovl.addWebsocketContext(wc)
+	ovl.spawnAgentCommand(conn, mid, SpawnTerminalCmd{wc.Sid, ttyDevice})
 }
 
 // Shell command request handler.
@@ -629,25 +629,9 @@ func (ovl *Overlord) modeShellHandler(w http.ResponseWriter, r *http.Request) {
 	mid := vars["mid"]
 	command := r.URL.Query().Get("command")
 
-	ovl.agentsMu.Lock()
-	if agent, ok := ovl.agents[mid]; ok {
-		ovl.agentsMu.Unlock()
-
-		wc := newWebsocketContext(conn)
-		ovl.addWebsocketContext(wc)
-		agent.Command <- SpawnShellCmd{wc.Sid, command}
-		if res := <-agent.Response; res.Status == Failed {
-			var error Error
-			if err := json.Unmarshal(res.Payload, &error); err != nil {
-				WebSocketSendError(conn, "Failed to unmarshal error response: "+err.Error())
-			} else {
-				WebSocketSendError(conn, error.Error)
-			}
-		}
-	} else {
-		ovl.agentsMu.Unlock()
-		WebSocketSendError(conn, "No client with mid "+mid)
-	}
+	wc := newWebsocketContext(conn)
+	ovl.addWebsocketContext(wc)
+	ovl.spawnAgentCommand(conn, mid, SpawnShellCmd{wc.Sid, command})
 }
 
 // Get agent properties as JSON.
@@ -774,7 +758,7 @@ func (ovl *Overlord) agentModeForwardHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var host string = defaultForwardHost
+	host := defaultForwardHost
 	var port int
 
 	vars := mux.Vars(r)
@@ -832,14 +816,15 @@ func (ovl *Overlord) agentFsHandler(w http.ResponseWriter, r *http.Request) {
 
 	op := r.URL.Query().Get("op")
 	if op == "" {
-		op = "lstree" // Default to listing
+		op = ListTreeOp // Default to listing
 	}
 
-	if op == "lstree" {
+	switch op {
+	case ListTreeOp:
 		agent.Command <- ListTreeCmd{Path: path}
-	} else if op == "fstat" {
+	case "fstat":
 		agent.Command <- FstatCmd{Path: path}
-	} else {
+	default:
 		ResponseError(w, "Unknown operation "+op, http.StatusBadRequest)
 		return
 	}
@@ -1137,7 +1122,9 @@ func (c *WebSocketClient) writePump() {
 		select {
 		case message, ok := <-c.sendChan:
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					log.Printf("Failed to write WebSocket close message: %v", err)
+				}
 				return
 			}
 
@@ -1164,9 +1151,13 @@ func (c *WebSocketClient) readPump(ovl *Overlord) {
 	}()
 
 	c.conn.SetReadLimit(512)
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	if err := c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		log.Printf("Failed to set read deadline: %v", err)
+	}
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := c.conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			log.Printf("Failed to set read deadline: %v", err)
+		}
 		return nil
 	})
 
@@ -1267,12 +1258,11 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 
 	log.Printf("UDP Broadcasting started, broadcasting at %s", addr)
 
-	ticker := time.NewTicker(time.Duration(ldInterval * time.Second))
+	ticker := time.NewTicker(ldInterval * time.Second)
 
-	for {
-		select {
-		case <-ticker.C:
-			conn.Write([]byte(fmt.Sprintf("OVERLORD %s:%d", ifaceIP, ovl.port)))
+	for range ticker.C {
+		if _, err := fmt.Fprintf(conn, "OVERLORD %s:%d", ifaceIP, ovl.port); err != nil {
+			log.Printf("Failed to write UDP broadcast: %v", err)
 		}
 	}
 }
@@ -1291,14 +1281,11 @@ func (ovl *Overlord) Serv() {
 		go ovl.StartUDPBroadcast(OverlordLDPort)
 	}
 
-	ticker := time.NewTicker(time.Duration(60 * time.Second))
+	ticker := time.NewTicker(60 * time.Second)
 
-	for {
-		select {
-		case <-ticker.C:
-			log.Printf("#Goroutines, #Ghostclient: %d, %d\n",
-				runtime.NumGoroutine(), len(ovl.agents))
-		}
+	for range ticker.C {
+		log.Printf("#Goroutines, #Ghostclient: %d, %d\n",
+			runtime.NumGoroutine(), len(ovl.agents))
 	}
 }
 

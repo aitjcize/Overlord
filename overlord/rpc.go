@@ -190,7 +190,7 @@ func (rpc *RPCCore) handleResponse(res *Response) error {
 			}
 		}
 	} else {
-		return errors.New("Received unsolicited response, ignored")
+		return errors.New("received unsolicited response, ignored")
 	}
 	return nil
 }

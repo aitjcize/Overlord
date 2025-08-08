@@ -55,13 +55,16 @@ func main() {
 		finalMid = *mid
 	}
 
-	tlsMode := overlord.TLSDetect
-	if *tlsModeFlag == "detect" {
+	var tlsMode int
+	switch *tlsModeFlag {
+	case "detect":
 		tlsMode = overlord.TLSDetect
-	} else if *tlsModeFlag == "y" {
+	case "y":
 		tlsMode = overlord.TLSForceEnable
-	} else if *tlsModeFlag == "n" {
+	case "n":
 		tlsMode = overlord.TLSForceDisable
+	default:
+		tlsMode = overlord.TLSDetect
 	}
 
 	if *install {
