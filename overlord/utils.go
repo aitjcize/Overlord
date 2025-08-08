@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -146,6 +147,33 @@ func installBinaryToUserLocal() (string, error) {
 
 	fmt.Printf("Ghost binary installed to %s\n", targetPath)
 	return targetPath, nil
+}
+
+// getUserShell returns the user's current shell, with fallback to /bin/bash
+func getUserShell() string {
+	// Try to get shell from environment variable first
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+
+	// Ultimate fallback
+	return "/bin/bash"
+}
+
+// getShellFromUserDB tries to get the user's shell from the user database
+func getShellFromUserDB(username string) string {
+	// Try using getent command (works on most Unix systems)
+	cmd := exec.Command("getent", "passwd", username)
+	output, err := cmd.Output()
+	if err == nil {
+		// Parse passwd entry: username:x:uid:gid:gecos:home:shell
+		fields := strings.Split(strings.TrimSpace(string(output)), ":")
+		if len(fields) >= 7 && fields[6] != "" {
+			return fields[6]
+		}
+	}
+
+	return ""
 }
 
 // getServiceCommand constructs the command line arguments for the service

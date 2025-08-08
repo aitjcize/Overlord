@@ -179,7 +179,7 @@ RequiresMountsFor=%s
 [Service]
 Type=simple
 User=%s
-Environment=SHELL=/bin/bash
+Environment=SHELL=%s
 Environment=HOME=%s
 Environment=TERM=xterm-256color
 ExecStart=%s %s
@@ -188,7 +188,7 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`, homeDir, currentUser, homeDir, targetPath, cmdArgs)
+`, homeDir, currentUser, getUserShell(), homeDir, targetPath, cmdArgs)
 
 	serviceFilePath, err := getSystemdServicePath()
 	if err != nil {

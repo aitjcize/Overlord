@@ -133,7 +133,7 @@ func Install() error {
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>SHELL</key>
-		<string>/bin/bash</string>
+		<string>%s</string>
 		<key>HOME</key>
 		<string>%s</string>
 		<key>TERM</key>
@@ -145,7 +145,7 @@ func Install() error {
 	<true/>
 </dict>
 </plist>
-`, argsXML, homeDir)
+`, argsXML, getUserShell(), homeDir)
 
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 	plistFilePath := filepath.Join(launchAgentsDir, "com.overlord.ghost.plist")
