@@ -155,37 +155,12 @@ func cpWithSudo(src, dst string) error {
 	return nil
 }
 
-// chmodWithSudo changes file permissions using sudo
-func chmodWithSudo(mode, path string) error {
-	err := runWithSudo("chmod", mode, path)
-	if err != nil {
-		return fmt.Errorf("failed to set permissions: %v", err)
-	}
-	return nil
-}
-
 // Install installs and configures the ghost service for automatic startup on Linux
 func Install() error {
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
-	}
-
 	// Install binary to filesystem
-	targetPath := "/opt/bin/ghost"
-
-	err = runWithSudo("mkdir", "-p", "/opt/bin")
+	targetPath, err := installBinaryToUserLocal()
 	if err != nil {
-		return fmt.Errorf("failed to create /opt/bin directory: %v", err)
-	}
-
-	err = cpWithSudo(execPath, targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to copy ghost binary: %v", err)
-	}
-	err = chmodWithSudo("755", targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to set executable permissions: %v", err)
+		return fmt.Errorf("failed to install binary: %v", err)
 	}
 
 	homeDir := getCurrentUserHomeDir()
@@ -282,8 +257,8 @@ func getSystemdServicePath() (string, error) {
 	// 3. /lib/systemd/system - Package manager installed services (Debian/Ubuntu)
 
 	serviceDirs := []string{
-		"/usr/lib/systemd/system",
 		"/etc/systemd/system",
+		"/usr/lib/systemd/system",
 		"/lib/systemd/system",
 	}
 

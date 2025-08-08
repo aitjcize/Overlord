@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -100,6 +101,51 @@ func isGhostRunning() bool {
 	var status string
 	err = client.Call("GhostRPCStub.GetStatus", "", &status)
 	return err == nil
+}
+
+// installBinaryToUserLocal installs the ghost binary to ~/.local/bin
+func installBinaryToUserLocal() (string, error) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("failed to get executable path: %v", err)
+	}
+
+	homeDir := getCurrentUserHomeDir()
+	targetPath := filepath.Join(homeDir, ".local", "bin", "ghost")
+	binDir := filepath.Join(homeDir, ".local", "bin")
+
+	// Create the ~/.local/bin directory if it doesn't exist
+	err = os.MkdirAll(binDir, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to create ~/.local/bin directory: %v", err)
+	}
+
+	// Copy the binary
+	srcFile, err := os.Open(execPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open source file: %v", err)
+	}
+	defer srcFile.Close()
+
+	dstFile, err := os.Create(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create target file: %v", err)
+	}
+	defer dstFile.Close()
+
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to copy ghost binary: %v", err)
+	}
+
+	// Set executable permissions
+	err = os.Chmod(targetPath, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to set executable permissions: %v", err)
+	}
+
+	fmt.Printf("Ghost binary installed to %s\n", targetPath)
+	return targetPath, nil
 }
 
 // getServiceCommand constructs the command line arguments for the service

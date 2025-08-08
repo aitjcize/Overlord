@@ -12,7 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
+
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,42 +100,13 @@ func getCurrentUserHomeDir() string {
 
 // Install installs and configures the ghost service for automatic startup on macOS
 func Install() error {
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
-	}
-
 	// Install binary to filesystem
+	targetPath, err := installBinaryToUserLocal()
+	if err != nil {
+		return fmt.Errorf("failed to install binary: %v", err)
+	}
+
 	homeDir := getCurrentUserHomeDir()
-	targetPath := filepath.Join(homeDir, ".local", "bin", "ghost")
-	binDir := filepath.Join(homeDir, ".local", "bin")
-
-	err = os.MkdirAll(binDir, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to create ~/.local/bin directory: %v", err)
-	}
-
-	srcFile, err := os.Open(execPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source file: %v", err)
-	}
-	defer srcFile.Close()
-
-	dstFile, err := os.Create(targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to create target file: %v", err)
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	if err != nil {
-		return fmt.Errorf("failed to copy ghost binary: %v", err)
-	}
-
-	err = os.Chmod(targetPath, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to set executable permissions: %v", err)
-	}
 
 	// Install service
 	cmdParts := getServiceCommand()
@@ -172,10 +143,6 @@ func Install() error {
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
-	<key>StandardOutPath</key>
-	<string>/var/log/ghost.log</string>
-	<key>StandardErrorPath</key>
-	<string>/var/log/ghost.log</string>
 </dict>
 </plist>
 `, argsXML, homeDir)
