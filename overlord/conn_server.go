@@ -100,7 +100,9 @@ func (c *ConnServer) Terminate() {
 	}
 	c.StopConn()
 	if c.wsConn != nil {
-		c.wsConn.WriteMessage(websocket.CloseMessage, []byte(""))
+		if err := c.wsConn.WriteMessage(websocket.CloseMessage, []byte("")); err != nil {
+			log.Printf("Failed to write close message: %v", err)
+		}
 		c.wsConn.Close()
 	}
 }
@@ -131,7 +133,9 @@ func (c *ConnServer) forwardWSInput() {
 
 		switch mt {
 		case websocket.BinaryMessage, websocket.TextMessage:
-			c.Conn.Write(payload)
+			if _, err := c.Conn.Write(payload); err != nil {
+				log.Printf("Failed to write to connection: %v", err)
+			}
 		default:
 			log.Printf("Invalid message type %d\n", mt)
 			return
@@ -144,7 +148,9 @@ func (c *ConnServer) forwardWSOutput(buf []byte) {
 	if c.wsConn == nil {
 		c.StopListen()
 	}
-	c.wsConn.WriteMessage(websocket.BinaryMessage, buf)
+	if err := c.wsConn.WriteMessage(websocket.BinaryMessage, buf); err != nil {
+		log.Printf("Failed to write binary message: %v", err)
+	}
 }
 
 // ModeForward the logcat output to WebSocket.
@@ -196,7 +202,9 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 		c.Mkdir(v.Path, v.Perm)
 	case ConnectLogcatCmd:
 		// Write log history to newly joined client
-		c.writeLogToWS(v.Conn, c.logcat.History)
+		if err := c.writeLogToWS(v.Conn, c.logcat.History); err != nil {
+			log.Printf("Failed to write log to WebSocket: %v", err)
+		}
 		c.logcat.WsConns = append(c.logcat.WsConns, v.Conn)
 	case SpawnFileCmd:
 		c.SpawnFileServer(v.Sid, v.TerminalSid, v.Action, v.Filename, v.Dest,
@@ -207,36 +215,90 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 }
 
 // Listen is the main routine for listen to socket messages.
+// Helper functions for ConnServer.Listen
+func (c *ConnServer) handleDirectModeOutput(buf []byte) bool {
+	// Some modes completely ignore the RPC call, process them.
+	switch c.Mode {
+	case ModeTerminal, ModeShell, ModeForward:
+		c.forwardWSOutput(buf)
+		return true
+	case ModeLogcat:
+		c.forwardLogcatOutput(string(buf))
+		return true
+	case ModeFile:
+		if c.Download.Ready {
+			c.forwardFileDownloadData(buf)
+			return true
+		}
+	}
+	return false
+}
+
+func (c *ConnServer) processIncomingData(buf []byte) error {
+	// Only Parse the first message if we are not registered, since
+	// if we are in logcat mode, we want to preserve the rest of the
+	// data and forward it to the websocket.
+	reqs := c.ParseRequests(buf, !c.registered)
+	return c.processRequests(reqs)
+}
+
+func (c *ConnServer) handleModeTransition() {
+	// If c.mode changed, means we just got a registration message and
+	// are in a different mode.
+	switch c.Mode {
+	case ModeTerminal, ModeShell, ModeForward:
+		// Start a goroutine to forward the WebSocket Input
+		go c.forwardWSInput()
+	case ModeLogcat:
+		// A logcat client does not wait for ACK before sending
+		// stream, so we need to forward the remaining content of the buffer
+		if len(c.ReadBuffer) > 0 {
+			c.forwardLogcatOutput(string(c.ReadBuffer))
+			c.ReadBuffer = nil
+		}
+	}
+}
+
+func (c *ConnServer) handleReadError(err error) bool {
+	if err == io.EOF {
+		if c.Download.Ready {
+			c.Download.Data <- nil
+			return true
+		}
+		log.Printf("connection dropped: %s\n", c.Sid)
+	} else {
+		log.Printf("unknown network error for %s: %s\n", c.Sid, err)
+	}
+	return true
+}
+
+func (c *ConnServer) handleTimeoutCheck() bool {
+	if err := c.ScanForTimeoutRequests(); err != nil {
+		log.Println(err)
+	}
+
+	if c.Mode == ModeControl && c.lastPing != 0 &&
+		time.Now().Unix()-c.lastPing > pingRecvTimeout {
+		log.Printf("Client %s timeout\n", c.Mid)
+		return true
+	}
+	return false
+}
+
 func (c *ConnServer) Listen() {
-	var reqs []*Request
 	readChan, readErrChan := c.SpawnReaderRoutine()
-	ticker := time.NewTicker(time.Duration(timeoutCheckInterval))
+	ticker := time.NewTicker(timeoutCheckInterval)
 
 	defer c.Terminate()
 
 	for {
 		select {
 		case buf := <-readChan:
-			// Some modes completely ignore the RPC call, process them.
-			switch c.Mode {
-			case ModeTerminal, ModeShell, ModeForward:
-				c.forwardWSOutput(buf)
+			if c.handleDirectModeOutput(buf) {
 				continue
-			case ModeLogcat:
-				c.forwardLogcatOutput(string(buf))
-				continue
-			case ModeFile:
-				if c.Download.Ready {
-					c.forwardFileDownloadData(buf)
-					continue
-				}
 			}
 
-			// Only Parse the first message if we are not registered, since
-			// if we are in logcat mode, we want to preserve the rest of the
-			// data and forward it to the websocket.
-			reqs = c.ParseRequests(buf, !c.registered)
-			if err := c.processRequests(reqs); err != nil {
+			if err := c.processIncomingData(buf); err != nil {
 				if _, ok := err.(RegistrationFailedError); ok {
 					log.Printf("%s, abort\n", err)
 					return
@@ -244,41 +306,15 @@ func (c *ConnServer) Listen() {
 				log.Println(err)
 			}
 
-			// If c.mode changed, means we just got a registration message and
-			// are in a different mode.
-			switch c.Mode {
-			case ModeTerminal, ModeShell, ModeForward:
-				// Start a goroutine to forward the WebSocket Input
-				go c.forwardWSInput()
-			case ModeLogcat:
-				// A logcat client does not wait for ACK before sending
-				// stream, so we need to forward the remaining content of the buffer
-				if len(c.ReadBuffer) > 0 {
-					c.forwardLogcatOutput(string(c.ReadBuffer))
-					c.ReadBuffer = nil
-				}
-			}
+			c.handleModeTransition()
 		case err := <-readErrChan:
-			if err == io.EOF {
-				if c.Download.Ready {
-					c.Download.Data <- nil
-					return
-				}
-				log.Printf("connection dropped: %s\n", c.Sid)
-			} else {
-				log.Printf("unknown network error for %s: %s\n", c.Sid, err)
+			if c.handleReadError(err) {
+				return
 			}
-			return
 		case msg := <-c.Command:
 			c.handleOverlordRequest(msg)
 		case <-ticker.C:
-			if err := c.ScanForTimeoutRequests(); err != nil {
-				log.Println(err)
-			}
-
-			if c.Mode == ModeControl && c.lastPing != 0 &&
-				time.Now().Unix()-c.lastPing > pingRecvTimeout {
-				log.Printf("Client %s timeout\n", c.Mid)
+			if c.handleTimeoutCheck() {
 				return
 			}
 		case <-c.stopListen:
@@ -323,7 +359,9 @@ func (c *ConnServer) handleRegisterRequest(req *Request) error {
 
 	c.wsConn, err = c.ovl.Register(c)
 	if err != nil {
-		c.SendResponse(NewErrorResponse(req.Rid, err.Error()))
+		if sendErr := c.SendResponse(NewErrorResponse(req.Rid, err.Error())); sendErr != nil {
+			log.Printf("Failed to send error response: %v", sendErr)
+		}
 		return RegistrationFailedError(errors.New("Register: " + err.Error()))
 	}
 
@@ -333,7 +371,9 @@ func (c *ConnServer) handleRegisterRequest(req *Request) error {
 		if err != nil {
 			log.Println("handleRegisterRequest: failed to format message")
 		} else {
-			c.wsConn.WriteMessage(websocket.TextMessage, msg)
+			if err := c.wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				log.Printf("Failed to write text message: %v", err)
+			}
 		}
 	}
 
@@ -418,7 +458,9 @@ func (c *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 		params["tty_device"] = nil
 	}
 	req := NewRequest("terminal", params)
-	c.SendRequest(req, c.getHandler("SpawnTerminal"))
+	if err := c.SendRequest(req, c.getHandler("SpawnTerminal")); err != nil {
+		log.Printf("Failed to send terminal request: %v", err)
+	}
 }
 
 // SpawnShell spawns a shell command connection (a ghost with mode ModeShell).
@@ -427,7 +469,9 @@ func (c *ConnServer) SpawnTerminal(sid, ttyDevice string) {
 func (c *ConnServer) SpawnShell(sid string, command string) {
 	req := NewRequest("shell", map[string]interface{}{
 		"sid": sid, "command": command})
-	c.SendRequest(req, c.getHandler("SpawnShell"))
+	if err := c.SendRequest(req, c.getHandler("SpawnShell")); err != nil {
+		log.Printf("Failed to send shell request: %v", err)
+	}
 }
 
 // ListTree handles a request to list directory contents recursively
@@ -436,7 +480,9 @@ func (c *ConnServer) ListTree(path string) {
 	req := NewRequest("list_tree", map[string]interface{}{
 		"path": path,
 	})
-	c.SendRequest(req, c.getHandler("ListTree"))
+	if err := c.SendRequest(req, c.getHandler("ListTree")); err != nil {
+		log.Printf("Failed to send list tree request: %v", err)
+	}
 }
 
 // Fstat handles a request to get the stat of a file.
@@ -444,7 +490,9 @@ func (c *ConnServer) Fstat(path string) {
 	req := NewRequest("fstat", map[string]interface{}{
 		"path": path,
 	})
-	c.SendRequest(req, c.getHandler("Fstat"))
+	if err := c.SendRequest(req, c.getHandler("Fstat")); err != nil {
+		log.Printf("Failed to send fstat request: %v", err)
+	}
 }
 
 // CreateSymlink handles a request to create a symlink.
@@ -453,7 +501,9 @@ func (c *ConnServer) CreateSymlink(target, dest string) {
 		"target": target,
 		"dest":   dest,
 	})
-	c.SendRequest(req, c.getHandler("CreateSymlink"))
+	if err := c.SendRequest(req, c.getHandler("CreateSymlink")); err != nil {
+		log.Printf("Failed to send create symlink request: %v", err)
+	}
 }
 
 // Mkdir handles a request to create a directory.
@@ -462,7 +512,9 @@ func (c *ConnServer) Mkdir(path string, perm int) {
 		"path": path,
 		"perm": perm,
 	})
-	c.SendRequest(req, c.getHandler("Mkdir"))
+	if err := c.SendRequest(req, c.getHandler("Mkdir")); err != nil {
+		log.Printf("Failed to send mkdir request: %v", err)
+	}
 }
 
 // SpawnFileServer Spawn a remote file connection (a ghost with mode ModeFile).
@@ -471,16 +523,21 @@ func (c *ConnServer) Mkdir(path string, perm int) {
 // directory to upload to.
 func (c *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
 	dest string, perm int) {
-	if action == "download" {
+	switch action {
+	case FileOpDownload:
 		req := NewRequest("file_download", map[string]interface{}{
 			"sid": sid, "filename": filename})
-		c.SendRequest(req, c.getHandler("SpawnFileServer: download"))
-	} else if action == "upload" {
+		if err := c.SendRequest(req, c.getHandler("SpawnFileServer: download")); err != nil {
+			log.Printf("Failed to send file download request: %v", err)
+		}
+	case FileOpUpload:
 		req := NewRequest("file_upload", map[string]interface{}{
 			"sid": sid, "terminal_sid": terminalSid, "filename": filename,
 			"dest": dest, "perm": perm})
-		c.SendRequest(req, c.getHandler("SpawnFileServer: upload"))
-	} else {
+		if err := c.SendRequest(req, c.getHandler("SpawnFileServer: upload")); err != nil {
+			log.Printf("Failed to send file upload request: %v", err)
+		}
+	default:
 		log.Printf("SpawnFileServer: invalid file action `%s', ignored.\n", action)
 	}
 }
@@ -490,7 +547,9 @@ func (c *ConnServer) SpawnFileServer(sid, terminalSid, action, filename,
 func (c *ConnServer) SendClearToDownload() {
 	req := NewRequest("clear_to_download", nil)
 	req.SetTimeout(-1)
-	c.SendRequest(req, nil)
+	if err := c.SendRequest(req, nil); err != nil {
+		log.Printf("Failed to send clear to download request: %v", err)
+	}
 }
 
 // SpawnModeForwarder spawns a forwarder connection (a ghost with mode
@@ -502,5 +561,7 @@ func (c *ConnServer) SpawnModeForwarder(sid string, host string, port int) {
 		"host": host,
 		"port": port,
 	})
-	c.SendRequest(req, c.getHandler("SpawnModeForwarder"))
+	if err := c.SendRequest(req, c.getHandler("SpawnModeForwarder")); err != nil {
+		log.Printf("Failed to send mode forwarder request: %v", err)
+	}
 }

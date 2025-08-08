@@ -261,7 +261,9 @@ func (dm *DatabaseManager) DeleteUser(username string) error {
 	}
 
 	// Remove user from all other groups
-	dm.db.Model(&User{}).Where("username = ?", username).Association("Groups").Clear()
+	if err := dm.db.Model(&User{}).Where("username = ?", username).Association("Groups").Clear(); err != nil {
+		log.Printf("Failed to clear user groups: %v", err)
+	}
 
 	result := dm.db.Where("username = ?", username).Delete(&User{})
 	return result.Error
@@ -437,7 +439,7 @@ func (dm *DatabaseManager) CheckAllowlist(username string, allowlist []string) (
 	// Check each entity in the allowlist
 	for _, entity := range allowlist {
 		// Special case: "anyone" grants access to everyone
-		if entity == "anyone" {
+		if entity == EntityAnyone {
 			return true, nil
 		}
 
@@ -499,8 +501,12 @@ func (dm *DatabaseManager) GetGroupUsers(groupName string) ([]User, error) {
 
 // Initialize initializes the database.
 func (dm *DatabaseManager) Initialize(username, password string) error {
-	dm.Connect()
-	dm.RegenerateJWTSecret()
+	if err := dm.Connect(); err != nil {
+		return fmt.Errorf("failed to connect to database: %v", err)
+	}
+	if err := dm.RegenerateJWTSecret(); err != nil {
+		return fmt.Errorf("failed to regenerate JWT secret: %v", err)
+	}
 
 	err := dm.ensureAdminGroup()
 	if err != nil {

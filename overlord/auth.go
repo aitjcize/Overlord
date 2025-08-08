@@ -260,7 +260,7 @@ func (auth *JWTAuth) IsBlocked(r *http.Request) bool {
 		return false
 	}
 
-	if time.Now().Sub(t) < blockDuration {
+	if time.Since(t) < blockDuration {
 		log.Printf("JWTAuth: IP %s attempted to login, blocked\n", ip)
 		return true
 	}
@@ -323,17 +323,4 @@ func getRequestIP(r *http.Request) string {
 // JWTAuthConfig contains configuration for JWT authentication
 type JWTAuthConfig struct {
 	ExpiresIn int // The expiration time of the token in seconds
-}
-
-// getTokenFromRequest extracts the JWT token from the request
-func getTokenFromRequest(r *http.Request, cookieName string) (string, error) {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" {
-		bearerToken := strings.Split(authHeader, " ")
-		if len(bearerToken) == 2 && strings.ToLower(bearerToken[0]) == "bearer" {
-			return bearerToken[1], nil
-		}
-	}
-
-	return "", errors.New("no token found in request")
 }

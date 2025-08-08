@@ -62,13 +62,6 @@ const (
 	TLSForceEnable
 )
 
-// Terminal resize control
-const (
-	controlNone  = 255 // Control State None
-	controlStart = 128 // Control Start Code
-	controlEnd   = 129 // Control End Code
-)
-
 // Stream control
 const (
 	stdinClosed = "##STDIN_CLOSED##"
@@ -405,6 +398,81 @@ func (ghost *Ghost) tlsEnabled(addr string) (bool, error) {
 }
 
 // Upgrade starts the upgrade sequence of the ghost instance.
+// Helper functions for Upgrade
+func (ghost *Ghost) validateUpgradeConnection() (bool, error) {
+	httpsEnabled, err := ghost.tlsEnabled(ghost.connectedAddr)
+	if err != nil {
+		return false, errors.New("Upgrade: failed to connect to Overlord HTTP server, " +
+			"abort")
+	}
+
+	if ghost.tls.Enabled && !httpsEnabled {
+		return false, errors.New("Upgrade: TLS enforced but found Overlord HTTP server " +
+			"without TLS enabled! Possible mis-configuration or DNS/IP spoofing " +
+			"detected, abort")
+	}
+
+	return httpsEnabled, nil
+}
+
+func (ghost *Ghost) createUpgradeClient(httpsEnabled bool) http.Client {
+	if httpsEnabled {
+		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
+		return http.Client{Transport: tr, Timeout: httpRequestTimeout}
+	}
+	return http.Client{Timeout: httpRequestTimeout}
+}
+
+func (ghost *Ghost) downloadSha1Sum(client http.Client, url string) (string, error) {
+	resp, err := client.Get(url + ".sha1")
+	if err != nil || resp.StatusCode != 200 {
+		return "", errors.New("Upgrade: failed to download sha1sum file, abort")
+	}
+	defer resp.Body.Close()
+
+	sha1sumBytes := make([]byte, 40)
+	if _, err := resp.Body.Read(sha1sumBytes); err != nil {
+		log.Printf("Failed to read response body: %v", err)
+		return "", err
+	}
+	return strings.Trim(string(sha1sumBytes), "\n "), nil
+}
+
+func (ghost *Ghost) downloadUpgrade(client http.Client, url string) (bytes.Buffer, error) {
+	var buffer bytes.Buffer
+	resp, err := client.Get(url)
+	if err != nil || resp.StatusCode != 200 {
+		return buffer, errors.New("Upgrade: failed to download upgrade, abort")
+	}
+	defer resp.Body.Close()
+
+	_, err = buffer.ReadFrom(resp.Body)
+	if err != nil {
+		return buffer, errors.New("Upgrade: failed to download upgrade, abort")
+	}
+	return buffer, nil
+}
+
+func (ghost *Ghost) installUpgrade(exePath string, buffer bytes.Buffer) error {
+	os.Remove(exePath)
+	exeFile, err := os.Create(exePath)
+	if err != nil {
+		return errors.New("Upgrade: can not open ghost executable for writing")
+	}
+	defer exeFile.Close()
+
+	_, err = buffer.WriteTo(exeFile)
+	if err != nil {
+		return fmt.Errorf("Upgrade: %s", err)
+	}
+
+	err = os.Chmod(exePath, 0755)
+	if err != nil {
+		return fmt.Errorf("Upgrade: %s", err)
+	}
+	return nil
+}
+
 func (ghost *Ghost) Upgrade() error {
 	log.Println("Upgrade: initiating upgrade sequence...")
 
@@ -413,19 +481,9 @@ func (ghost *Ghost) Upgrade() error {
 		return errors.New("Upgrade: can not find executable path")
 	}
 
-	var buffer bytes.Buffer
-	var client http.Client
-
-	httpsEnabled, err := ghost.tlsEnabled(ghost.connectedAddr)
+	httpsEnabled, err := ghost.validateUpgradeConnection()
 	if err != nil {
-		return errors.New("Upgrade: failed to connect to Overlord HTTP server, " +
-			"abort")
-	}
-
-	if ghost.tls.Enabled && !httpsEnabled {
-		return errors.New("Upgrade: TLS enforced but found Overlord HTTP server " +
-			"without TLS enabled! Possible mis-configuration or DNS/IP spoofing " +
-			"detected, abort")
+		return err
 	}
 
 	proto := "http"
@@ -435,41 +493,23 @@ func (ghost *Ghost) Upgrade() error {
 	url := fmt.Sprintf("%s://%s/upgrade/ghost.%s", proto, ghost.connectedAddr,
 		GetPlatformString())
 
-	if httpsEnabled {
-		tr := &http.Transport{TLSClientConfig: ghost.tls.Config}
-		client = http.Client{Transport: tr, Timeout: httpRequestTimeout}
-	} else {
-		client = http.Client{Timeout: httpRequestTimeout}
-	}
+	client := ghost.createUpgradeClient(httpsEnabled)
 
-	// Download the sha1sum for ghost for verification
-	resp, err := client.Get(url + ".sha1")
-	if err != nil || resp.StatusCode != 200 {
-		return errors.New("Upgrade: failed to download sha1sum file, abort")
+	sha1sum, err := ghost.downloadSha1Sum(client, url)
+	if err != nil {
+		return err
 	}
-	sha1sumBytes := make([]byte, 40)
-	resp.Body.Read(sha1sumBytes)
-	sha1sum := strings.Trim(string(sha1sumBytes), "\n ")
-	defer resp.Body.Close()
 
 	// Compare the current version of ghost, if sha1 is the same, skip upgrading
 	currentSha1sum, _ := GetFileSha1(exePath)
-
 	if currentSha1sum == sha1sum {
 		log.Println("Upgrade: ghost is already up-to-date, skipping upgrade")
 		return nil
 	}
 
-	// Download upgrade version of ghost
-	resp2, err := client.Get(url)
-	if err != nil || resp2.StatusCode != 200 {
-		return errors.New("Upgrade: failed to download upgrade, abort")
-	}
-	defer resp2.Body.Close()
-
-	_, err = buffer.ReadFrom(resp2.Body)
+	buffer, err := ghost.downloadUpgrade(client, url)
 	if err != nil {
-		return errors.New("Upgrade: failed to download upgrade, abort")
+		return err
 	}
 
 	// Compare SHA1 sum
@@ -477,20 +517,8 @@ func (ghost *Ghost) Upgrade() error {
 		return errors.New("Upgrade: sha1sum mismatch, abort")
 	}
 
-	os.Remove(exePath)
-	exeFile, err := os.Create(exePath)
-	if err != nil {
-		return errors.New("Upgrade: can not open ghost executable for writing")
-	}
-	_, err = buffer.WriteTo(exeFile)
-	if err != nil {
-		return fmt.Errorf("Upgrade: %s", err)
-	}
-	exeFile.Close()
-
-	err = os.Chmod(exePath, 0755)
-	if err != nil {
-		return fmt.Errorf("Upgrade: %s", err)
+	if err := ghost.installUpgrade(exePath, buffer); err != nil {
+		return err
 	}
 
 	log.Println("Upgrade: restarting ghost...")
@@ -644,7 +672,7 @@ func (ghost *Ghost) handleFileDownloadRequest(req *Request) error {
 	if !strings.HasPrefix(filename, "/") {
 		home := os.Getenv("HOME")
 		if home == "" {
-			home = "/tmp"
+			home = TmpDir
 		}
 		filename = filepath.Join(home, filename)
 	}
@@ -687,7 +715,7 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 
 	targetDir := os.Getenv("HOME")
 	if targetDir == "" {
-		targetDir = "/tmp"
+		targetDir = TmpDir
 	}
 
 	destPath := params.Dest
@@ -712,7 +740,10 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 		destPath = filepath.Join(targetDir, params.Filename)
 	}
 
-	os.MkdirAll(filepath.Dir(destPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		log.Printf("Failed to create directory: %v", err)
+		return err
+	}
 
 	f, err := os.Create(destPath)
 	if err != nil {
@@ -721,7 +752,10 @@ func (ghost *Ghost) handleFileUploadRequest(req *Request) error {
 	}
 	f.Close()
 
-	os.Chmod(destPath, os.FileMode(params.Perm))
+	if err := os.Chmod(destPath, os.FileMode(params.Perm)); err != nil {
+		log.Printf("Failed to set file permissions: %v", err)
+		// Don't return error here as the file was created successfully
+	}
 
 	// If not check_only, spawn ModeFile mode ghost agent to handle upload
 	if !params.CheckOnly {
@@ -783,7 +817,10 @@ func (ghost *Ghost) StartDownloadServer() error {
 	}
 	defer file.Close()
 
-	io.Copy(ghost.Conn, file)
+	if _, err := io.Copy(ghost.Conn, file); err != nil {
+		log.Printf("Failed to copy file to connection: %v", err)
+		return err
+	}
 	return nil
 }
 
@@ -798,7 +835,10 @@ func (ghost *Ghost) StartUploadServer() error {
 	filePath := ghost.fileOp.Filename
 	dirPath := filepath.Dir(filePath)
 	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		os.MkdirAll(dirPath, 0755)
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			log.Printf("Failed to create directory %s: %v", dirPath, err)
+			return err
+		}
 	}
 
 	file, err := os.Create(filePath)
@@ -812,11 +852,17 @@ func (ghost *Ghost) StartUploadServer() error {
 		if buffer == nil {
 			break
 		}
-		file.Write(buffer)
+		if _, err := file.Write(buffer); err != nil {
+			log.Printf("Failed to write to file: %v", err)
+			return err
+		}
 	}
 
 	if ghost.fileOp.Perm > 0 {
-		file.Chmod(os.FileMode(ghost.fileOp.Perm))
+		if err := file.Chmod(os.FileMode(ghost.fileOp.Perm)); err != nil {
+			log.Printf("Failed to set file permissions: %v", err)
+			// Don't return error here as the file was written successfully
+		}
 	}
 
 	return nil
@@ -888,27 +934,27 @@ func (ghost *Ghost) handleMkdirRequest(req *Request) error {
 func (ghost *Ghost) handleRequest(req *Request) error {
 	var err error
 	switch req.Name {
-	case "upgrade":
+	case CmdUpgrade:
 		err = ghost.Upgrade()
-	case "terminal":
+	case CmdTerminal:
 		err = ghost.handleTerminalRequest(req)
-	case "shell":
+	case CmdShell:
 		err = ghost.handleShellRequest(req)
-	case "list_tree":
+	case CmdListTree:
 		err = ghost.handleListTreeRequest(req)
-	case "fstat":
+	case CmdFstat:
 		err = ghost.handleFstatRequest(req)
-	case "file_download":
+	case CmdFileDownload:
 		err = ghost.handleFileDownloadRequest(req)
-	case "clear_to_download":
+	case CmdClearToDownload:
 		err = ghost.StartDownloadServer()
-	case "file_upload":
+	case CmdFileUpload:
 		err = ghost.handleFileUploadRequest(req)
-	case "forward":
+	case CmdForward:
 		err = ghost.handleModeForwardRequest(req)
-	case "create_symlink":
+	case CmdCreateSymlink:
 		err = ghost.handleCreateSymlinkRequest(req)
-	case "mkdir":
+	case CmdMkdir:
 		err = ghost.handleMkdirRequest(req)
 	default:
 		err = errors.New(`Received unregistered command "` + req.Name + `", ignoring`)
@@ -944,7 +990,10 @@ func (ghost *Ghost) handleTTYControl(tty *os.File, data []byte) ([]byte, error) 
 	matches := escapeSeqRe.FindSubmatch(data)
 	if len(matches) == 0 {
 		// Consume the first two bytes so we won't process it again.
-		tty.Write(data[:2])
+		if _, err := tty.Write(data[:2]); err != nil {
+			log.Printf("Failed to write to tty: %v", err)
+			return data[2:], err
+		}
 		return data[2:], nil
 	}
 
@@ -984,129 +1033,100 @@ func (ghost *Ghost) handleTTYControl(tty *os.File, data []byte) ([]byte, error) 
 			return data[len(matches[0]):], nil
 		}
 	}
-	tty.Write(matches[0])
+	if _, err := tty.Write(matches[0]); err != nil {
+		log.Printf("Failed to write to tty: %v", err)
+		return data[len(matches[0]):], err
+	}
 	return data[len(matches[0]):], nil
 }
 
-func (ghost *Ghost) getTTYName() (string, error) {
-	ttyName, err := os.Readlink(fmt.Sprintf("/proc/%d/fd/0", os.Getpid()))
-	if err != nil {
-		return "", err
+// SpawnTTYServer Spawns a TTY server and forward I/O to the TCP socket.
+// Helper functions for SpawnTTYServer
+func (ghost *Ghost) setupPTYEnvironment() (string, string) {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = defaultShell
 	}
-	return ttyName, nil
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/root"
+	}
+
+	// Add ghost executable to PATH
+	exePath, err := os.Executable()
+	if err == nil {
+		os.Setenv("PATH", fmt.Sprintf("%s:%s", filepath.Dir(exePath),
+			os.Getenv("PATH")))
+	}
+
+	if err := os.Chdir(home); err != nil {
+		log.Printf("Failed to change directory to %s: %v", home, err)
+		// Continue execution as this is not critical
+	}
+
+	return shell, home
 }
 
-// SpawnTTYServer Spawns a TTY server and forward I/O to the TCP socket.
-func (ghost *Ghost) SpawnTTYServer(res *Response) error {
-	log.Println("SpawnTTYServer: started")
-
-	var tty *os.File
-	var err error
-	stopConn := make(chan struct{})
-
-	defer func() {
-		ghost.quit = true
-		if tty != nil {
-			tty.Close()
-		}
-		ghost.Conn.Close()
-		log.Println("SpawnTTYServer: terminated")
-	}()
-
-	if ghost.ttyDevice == "" {
-		// No TTY device specified, open a PTY (pseudo terminal) instead.
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = defaultShell
-		}
-
-		home := os.Getenv("HOME")
-		if home == "" {
-			home = "/root"
-		}
-
-		// Add ghost executable to PATH
-		exePath, err := os.Executable()
-		if err == nil {
-			os.Setenv("PATH", fmt.Sprintf("%s:%s", filepath.Dir(exePath),
-				os.Getenv("PATH")))
-		}
-
-		os.Chdir(home)
-		cmd := exec.Command(shell)
-		tty, err = pty.Start(cmd)
-		if err != nil {
-			return errors.New(`SpawnTTYServer: Cannot start "` + shell + `", abort`)
-		}
-
-		defer func() {
-			cmd.Process.Kill()
-		}()
-
-		// Register the mapping of sid and ttyName
-		ttyName, err := termios.Ptsname(tty.Fd())
-		if err != nil {
-			return err
-		}
-
-		client, err := ghostRPCStubServer()
-
-		// Ghost could be launched without RPC server, ignore registration
-		if err == nil {
-			err = client.Call("rpc.RegisterTTY", []string{ghost.sid, ttyName},
-				&EmptyReply{})
-			if err != nil {
-				return err
-			}
-
-			err = client.Call("rpc.RegisterSession", []string{
-				ghost.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
-			if err != nil {
-				return err
-			}
-		}
-
-		go func() {
-			io.Copy(ghost.Conn, tty)
-			cmd.Wait()
-			close(stopConn)
-		}()
-	} else {
-		// Open a TTY device
-		tty, err = os.OpenFile(ghost.ttyDevice, os.O_RDWR, 0)
-		if err != nil {
-			return err
-		}
-
-		var term unix.Termios
-		err := termios.Tcgetattr(tty.Fd(), &term)
-		if err != nil {
-			return nil
-		}
-
-		termios.Cfmakeraw(&term)
-		term.Iflag &^= (unix.IXON | unix.IXOFF) // Disable software flow control
-		term.Cflag |= unix.CLOCAL               // Ignore modem control lines
-		term.Cflag &^= unix.CRTSCTS             // Disable hardware flow control
-
-		if err = termios.Tcsetattr(tty.Fd(), termios.TCSANOW, &term); err != nil {
-			return err
-		}
-
-		go func() {
-			io.Copy(ghost.Conn, tty)
-			close(stopConn)
-		}()
+func (ghost *Ghost) startPTYProcess(shell string) (*os.File, *exec.Cmd, error) {
+	cmd := exec.Command(shell)
+	tty, err := pty.Start(cmd)
+	if err != nil {
+		return nil, nil, errors.New(`SpawnTTYServer: Cannot start "` + shell + `", abort`)
 	}
 
-	feedInput := func(buffer []byte) error {
+	// Register the mapping of sid and ttyName
+	ttyName, err := termios.Ptsname(tty.Fd())
+	if err != nil {
+		return tty, cmd, err
+	}
+
+	client, err := ghostRPCStubServer()
+
+	// Ghost could be launched without RPC server, ignore registration
+	if err == nil {
+		err = client.Call("rpc.RegisterTTY", []string{ghost.sid, ttyName},
+			&EmptyReply{})
+		if err != nil {
+			return tty, cmd, err
+		}
+
+		err = client.Call("rpc.RegisterSession", []string{
+			ghost.sid, strconv.Itoa(cmd.Process.Pid)}, &EmptyReply{})
+		if err != nil {
+			return tty, cmd, err
+		}
+	}
+
+	return tty, cmd, nil
+}
+
+func (ghost *Ghost) configureTTYDevice(tty *os.File) error {
+	var term unix.Termios
+	err := termios.Tcgetattr(tty.Fd(), &term)
+	if err != nil {
+		return nil
+	}
+
+	termios.Cfmakeraw(&term)
+	term.Iflag &^= (unix.IXON | unix.IXOFF) // Disable software flow control
+	term.Cflag |= unix.CLOCAL               // Ignore modem control lines
+	term.Cflag &^= unix.CRTSCTS             // Disable hardware flow control
+
+	return termios.Tcsetattr(tty.Fd(), termios.TCSANOW, &term)
+}
+
+func (ghost *Ghost) createTTYInputFeeder(tty *os.File) func([]byte) error {
+	return func(buffer []byte) error {
 		for {
 			escapeStart := bytes.Index(buffer, []byte{0x1b, '['})
 			if escapeStart == -1 {
 				break
 			}
 
-			tty.Write(buffer[:escapeStart])
+			if _, err := tty.Write(buffer[:escapeStart]); err != nil {
+				log.Printf("Failed to write to tty: %v", err)
+			}
 			rest, err := ghost.handleTTYControl(tty, buffer[escapeStart:])
 			if err != nil {
 				log.Printf("SpawnTTYServer: Error handling TTY control: %v", err)
@@ -1115,15 +1135,64 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 			buffer = rest
 		}
 
-		_, err = tty.Write(buffer)
+		_, err := tty.Write(buffer)
 		if err != nil {
 			log.Printf("SpawnTTYServer: Error writing to TTY: %v", err)
 			return err
 		}
 		return nil
 	}
+}
 
-	feedInput(ghost.ReadBuffer)
+// Additional helper functions for SpawnTTYServer
+func (ghost *Ghost) setupPTYConnection(stopConn chan struct{}) (*os.File, *exec.Cmd, error) {
+	// No TTY device specified, open a PTY (pseudo terminal) instead.
+	shell, _ := ghost.setupPTYEnvironment()
+	tty, cmd, err := ghost.startPTYProcess(shell)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	go func() {
+		if _, err := io.Copy(ghost.Conn, tty); err != nil {
+			log.Printf("Error copying from tty to connection: %v", err)
+		}
+		if err := cmd.Wait(); err != nil {
+			log.Printf("Error waiting for command: %v", err)
+		}
+		close(stopConn)
+	}()
+
+	return tty, cmd, nil
+}
+
+func (ghost *Ghost) setupTTYDeviceConnection(stopConn chan struct{}) (*os.File, error) {
+	// Open a TTY device
+	tty, err := os.OpenFile(ghost.ttyDevice, os.O_RDWR, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = ghost.configureTTYDevice(tty); err != nil {
+		return nil, err
+	}
+
+	go func() {
+		if _, err := io.Copy(ghost.Conn, tty); err != nil {
+			log.Printf("Error copying from tty to connection: %v", err)
+		}
+		close(stopConn)
+	}()
+
+	return tty, nil
+}
+
+func (ghost *Ghost) runTTYMainLoop(tty *os.File, stopConn chan struct{}) error {
+	feedInput := ghost.createTTYInputFeeder(tty)
+
+	if err := feedInput(ghost.ReadBuffer); err != nil {
+		log.Printf("Error feeding input to TTY: %v", err)
+	}
 
 	for {
 		select {
@@ -1143,6 +1212,138 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 	}
 }
 
+func (ghost *Ghost) SpawnTTYServer(res *Response) error {
+	log.Println("SpawnTTYServer: started")
+
+	var tty *os.File
+	var cmd *exec.Cmd
+	var err error
+	stopConn := make(chan struct{})
+
+	defer func() {
+		ghost.quit = true
+		if tty != nil {
+			tty.Close()
+		}
+		// Kill the PTY process if it exists
+		if cmd != nil && cmd.Process != nil {
+			if err := cmd.Process.Kill(); err != nil {
+				log.Printf("Failed to kill process: %v", err)
+			}
+		}
+		ghost.Conn.Close()
+		log.Println("SpawnTTYServer: terminated")
+	}()
+
+	if ghost.ttyDevice == "" {
+		tty, cmd, err = ghost.setupPTYConnection(stopConn)
+	} else {
+		tty, err = ghost.setupTTYDeviceConnection(stopConn)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return ghost.runTTYMainLoop(tty, stopConn)
+}
+
+// Helper functions for SpawnShellServer
+func (ghost *Ghost) setupShellEnvironment() {
+	// Execute shell command from HOME directory
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/tmp"
+	}
+	if err := os.Chdir(home); err != nil {
+		log.Printf("Failed to change directory to %s: %v", home, err)
+	}
+
+	// Add ghost executable to PATH
+	exePath, err := os.Executable()
+	if err == nil {
+		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
+			filepath.Dir(exePath)))
+	}
+}
+
+func (ghost *Ghost) setupShellCommand(stopConn chan struct{}) (*exec.Cmd, io.WriteCloser, error) {
+	cmd := exec.Command(defaultShell, "-c", ghost.shellCommand)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Handle initial buffer
+	if len(ghost.ReadBuffer) > 0 {
+		if _, err := stdin.Write(ghost.ReadBuffer); err != nil {
+			log.Printf("Failed to write to stdin: %v", err)
+		}
+		ghost.ReadBuffer = nil
+	}
+
+	// Start output copying goroutines
+	go func() {
+		if _, err := io.Copy(ghost.Conn, stdout); err != nil {
+			log.Printf("Error copying stdout to connection: %v", err)
+		}
+	}()
+	go func() {
+		if _, err := io.Copy(ghost.Conn, stderr); err != nil {
+			log.Printf("Error copying stderr to connection: %v", err)
+		}
+		close(stopConn)
+	}()
+
+	return cmd, stdin, nil
+}
+
+func (ghost *Ghost) cleanupShellProcess(cmd *exec.Cmd) {
+	time.Sleep(100 * time.Millisecond) // Wait for process to terminate
+
+	process := NewPollableProcess(cmd.Process)
+	_, err := process.Poll()
+	// Check if the process is terminated. If not, send SIGTERM to
+	// the process, then wait for 1 second.  Send another SIGKILL to make sure
+	// the process is terminated.
+	if err != nil {
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			log.Printf("Failed to send SIGTERM: %v", err)
+		}
+		time.Sleep(time.Second)
+		if err := cmd.Process.Kill(); err != nil {
+			log.Printf("Failed to kill process: %v", err)
+		}
+		if err := cmd.Wait(); err != nil {
+			log.Printf("Error waiting for command: %v", err)
+		}
+	}
+}
+
+func (ghost *Ghost) handleShellInput(stdin io.WriteCloser, buf []byte) {
+	if len(buf) >= len(stdinClosed)*2 {
+		idx := bytes.Index(buf, []byte(stdinClosed+stdinClosed))
+		if idx != -1 {
+			if _, err := stdin.Write(buf[:idx]); err != nil {
+				log.Printf("Failed to write to stdin: %v", err)
+			}
+			stdin.Close()
+			return
+		}
+	}
+	if _, err := stdin.Write(buf); err != nil {
+		log.Printf("Failed to write to stdin: %v", err)
+	}
+}
+
 // SpawnShellServer spawns a Shell server and forward input/output from/to the
 // TCP socket.
 func (ghost *Ghost) SpawnShellServer(res *Response) error {
@@ -1153,85 +1354,33 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 	defer func() {
 		ghost.quit = true
 		if err != nil {
-			ghost.Conn.Write([]byte(err.Error() + "\n"))
+			if _, werr := ghost.Conn.Write([]byte(err.Error() + "\n")); werr != nil {
+				log.Printf("Failed to write error to connection: %v", werr)
+			}
 		}
 		ghost.Conn.Close()
 		log.Println("SpawnShellServer: terminated")
 	}()
 
-	// Execute shell command from HOME directory
-	home := os.Getenv("HOME")
-	if home == "" {
-		home = "/tmp"
-	}
-	os.Chdir(home)
-
-	// Add ghost executable to PATH
-	exePath, err := os.Executable()
-	if err == nil {
-		os.Setenv("PATH", fmt.Sprintf("%s:%s", os.Getenv("PATH"),
-			filepath.Dir(exePath)))
-	}
-
-	cmd := exec.Command(defaultShell, "-c", ghost.shellCommand)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
+	ghost.setupShellEnvironment()
 
 	stopConn := make(chan struct{})
 
-	if len(ghost.ReadBuffer) > 0 {
-		stdin.Write(ghost.ReadBuffer)
-		ghost.ReadBuffer = nil
+	cmd, stdin, err := ghost.setupShellCommand(stopConn)
+	if err != nil {
+		return err
 	}
-
-	go io.Copy(ghost.Conn, stdout)
-	go func() {
-		io.Copy(ghost.Conn, stderr)
-		close(stopConn)
-	}()
 
 	if err = cmd.Start(); err != nil {
 		return err
 	}
 
-	defer func() {
-		time.Sleep(100 * time.Millisecond) // Wait for process to terminate
-
-		process := NewPollableProcess(cmd.Process)
-		_, err = process.Poll()
-		// Check if the process is terminated. If not, send SIGTERM to
-		// the process, then wait for 1 second.  Send another SIGKILL to make sure
-		// the process is terminated.
-		if err != nil {
-			cmd.Process.Signal(syscall.SIGTERM)
-			time.Sleep(time.Second)
-			cmd.Process.Kill()
-			cmd.Wait()
-		}
-	}()
+	defer ghost.cleanupShellProcess(cmd)
 
 	for {
 		select {
 		case buf := <-ghost.readChan:
-			if len(buf) >= len(stdinClosed)*2 {
-				idx := bytes.Index(buf, []byte(stdinClosed+stdinClosed))
-				if idx != -1 {
-					stdin.Write(buf[:idx])
-					stdin.Close()
-					continue
-				}
-			}
-			stdin.Write(buf)
+			ghost.handleShellInput(stdin, buf)
 		case err := <-ghost.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnShellServer: connection terminated")
@@ -1249,7 +1398,8 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 // The operation could either be 'download' or 'upload'
 // This function starts handshake with overlord then execute download sequence.
 func (ghost *Ghost) InitiatefileOperation(res *Response) error {
-	if ghost.fileOp.Action == "download" {
+	switch ghost.fileOp.Action {
+	case "download":
 		fi, err := os.Stat(ghost.fileOp.Filename)
 		if err != nil {
 			return err
@@ -1262,7 +1412,7 @@ func (ghost *Ghost) InitiatefileOperation(res *Response) error {
 		})
 
 		return ghost.SendRequest(req, nil)
-	} else if ghost.fileOp.Action == "upload" {
+	case "upload":
 		ghost.uploadContext.Ready = true
 		req := NewRequest("clear_to_upload", nil)
 		req.SetTimeout(-1)
@@ -1270,10 +1420,15 @@ func (ghost *Ghost) InitiatefileOperation(res *Response) error {
 		if err != nil {
 			return err
 		}
-		go ghost.StartUploadServer()
+		go func() {
+			if err := ghost.StartUploadServer(); err != nil {
+				log.Printf("Error starting upload server: %v", err)
+			}
+		}()
 		return nil
+	default:
+		return errors.New("InitiatefileOperation: unknown file operation, ignored")
 	}
-	return errors.New("InitiatefileOperation: unknown file operation, ignored")
 }
 
 // SpawnPortForwardServer spawns a port forwarding server and forward I/O to
@@ -1286,7 +1441,9 @@ func (ghost *Ghost) SpawnPortForwardServer(res *Response) error {
 	defer func() {
 		ghost.quit = true
 		if err != nil {
-			ghost.Conn.Write([]byte(err.Error() + "\n"))
+			if _, werr := ghost.Conn.Write([]byte(err.Error() + "\n")); werr != nil {
+				log.Printf("Failed to write error to connection: %v", werr)
+			}
 		}
 		ghost.Conn.Close()
 		log.Println("SpawnPortForwardServer: terminated")
@@ -1302,19 +1459,25 @@ func (ghost *Ghost) SpawnPortForwardServer(res *Response) error {
 	stopConn := make(chan struct{})
 
 	if len(ghost.ReadBuffer) > 0 {
-		conn.Write(ghost.ReadBuffer)
+		if _, err := conn.Write(ghost.ReadBuffer); err != nil {
+			log.Printf("Failed to write to connection: %v", err)
+		}
 		ghost.ReadBuffer = nil
 	}
 
 	go func() {
-		io.Copy(ghost.Conn, conn)
+		if _, err := io.Copy(ghost.Conn, conn); err != nil {
+			log.Printf("Error copying from connection: %v", err)
+		}
 		close(stopConn)
 	}()
 
 	for {
 		select {
 		case buf := <-ghost.readChan:
-			conn.Write(buf)
+			if _, err := conn.Write(buf); err != nil {
+				log.Printf("Failed to write to connection: %v", err)
+			}
 		case err := <-ghost.readErrChan:
 			if err == io.EOF {
 				log.Println("SpawnPortForwardServer: connection terminated")
@@ -1328,60 +1491,107 @@ func (ghost *Ghost) SpawnPortForwardServer(res *Response) error {
 }
 
 // Register existent to Overlord.
+// Helper functions for Register
+func (ghost *Ghost) determineTLSSettings(addr string) error {
+	// Check if server has TLS enabled.
+	// Only control channel needs to determine if TLS is enabled. Other mode
+	// should use the tlsSettings passed in when it was spawned.
+	if ghost.mode == ModeControl {
+		var enabled bool
+		var err error
+
+		switch ghost.tlsMode {
+		case TLSDetect:
+			enabled, err = ghost.tlsEnabled(addr)
+			if err != nil {
+				return err
+			}
+		case TLSForceEnable:
+			enabled = true
+		case TLSForceDisable:
+			enabled = false
+		}
+
+		ghost.tls.SetEnabled(enabled)
+	}
+	return nil
+}
+
+func (ghost *Ghost) createWebSocketConnection(addr string) (net.Conn, error) {
+	proto := "ws"
+	if ghost.tls.Enabled {
+		proto = "wss"
+	}
+	uri := fmt.Sprintf("%s://%s/connect", proto, addr)
+
+	dialer := websocket.DefaultDialer
+	if ghost.tls.Config != nil {
+		dialer = &websocket.Dialer{
+			Proxy:            http.ProxyFromEnvironment,
+			HandshakeTimeout: 45 * time.Second,
+			TLSClientConfig:  ghost.tls.Config,
+		}
+	}
+
+	wsConn, _, err := dialer.Dial(uri, http.Header{})
+	if err != nil {
+		return nil, err
+	}
+
+	return wsConn.UnderlyingConn(), nil
+}
+
+func (ghost *Ghost) createRegistrationHandler(addr string) ResponseHandler {
+	return func(res *Response) error {
+		if res == nil {
+			ghost.reset = true
+			return errors.New("Register request timeout")
+		} else if res.Status != Success {
+			log.Println("Register:", res.Status)
+		} else {
+			log.Printf("Registered with Overlord at %s", addr)
+			ghost.connectedAddr = addr
+			if err := ghost.Upgrade(); err != nil {
+				log.Println(err)
+			}
+			ghost.pauseLanDisc = true
+		}
+		ghost.RegisterStatus = res.Status
+		return nil
+	}
+}
+
+func (ghost *Ghost) getResponseHandler(addr string) ResponseHandler {
+	switch ghost.mode {
+	case ModeControl:
+		return ghost.createRegistrationHandler(addr)
+	case ModeTerminal:
+		return ghost.SpawnTTYServer
+	case ModeShell:
+		return ghost.SpawnShellServer
+	case ModeFile:
+		return ghost.InitiatefileOperation
+	case ModeForward:
+		return ghost.SpawnPortForwardServer
+	default:
+		return nil
+	}
+}
+
 func (ghost *Ghost) Register() error {
 	for _, addr := range ghost.addrs {
-		var (
-			conn net.Conn
-			err  error
-		)
-
 		log.Printf("Trying %s ...\n", addr)
 		ghost.Reset()
 
-		// Check if server has TLS enabled.
-		// Only control channel needs to determine if TLS is enabled. Other mode
-		// should use the tlsSettings passed in when it was spawned.
-		if ghost.mode == ModeControl {
-			var enabled bool
-
-			switch ghost.tlsMode {
-			case TLSDetect:
-				enabled, err = ghost.tlsEnabled(addr)
-				if err != nil {
-					continue
-				}
-			case TLSForceEnable:
-				enabled = true
-			case TLSForceDisable:
-				enabled = false
-			}
-
-			ghost.tls.SetEnabled(enabled)
+		if err := ghost.determineTLSSettings(addr); err != nil {
+			continue
 		}
 
-		proto := "ws"
-		if ghost.tls.Enabled {
-			proto = "wss"
-		}
-		uri := fmt.Sprintf("%s://%s/connect", proto, addr)
-
-		dialer := websocket.DefaultDialer
-
-		if ghost.tls.Config != nil {
-			dialer = &websocket.Dialer{
-				Proxy:            http.ProxyFromEnvironment,
-				HandshakeTimeout: 45 * time.Second,
-				TLSClientConfig:  ghost.tls.Config,
-			}
-		}
-
-		wsConn, _, err := dialer.Dial(uri, http.Header{})
+		conn, err := ghost.createWebSocketConnection(addr)
 		if err != nil {
 			log.Printf("error: %s\n", err)
 			continue
 		}
-
-		conn = wsConn.UnderlyingConn()
 
 		log.Println("Connection established, registering...")
 
@@ -1393,42 +1603,11 @@ func (ghost *Ghost) Register() error {
 			"properties": ghost.properties,
 		})
 
-		registered := func(res *Response) error {
-			if res == nil {
-				ghost.reset = true
-				return errors.New("Register request timeout")
-			} else if res.Status != Success {
-				log.Println("Register:", res.Status)
-			} else {
-				log.Printf("Registered with Overlord at %s", addr)
-				ghost.connectedAddr = addr
-				if err := ghost.Upgrade(); err != nil {
-					log.Println(err)
-				}
-				ghost.pauseLanDisc = true
-			}
-			ghost.RegisterStatus = res.Status
-			return nil
-		}
-
-		var handler ResponseHandler
-		switch ghost.mode {
-		case ModeControl:
-			handler = registered
-		case ModeTerminal:
-			handler = ghost.SpawnTTYServer
-		case ModeShell:
-			handler = ghost.SpawnShellServer
-		case ModeFile:
-			handler = ghost.InitiatefileOperation
-		case ModeForward:
-			handler = ghost.SpawnPortForwardServer
-		}
-		err = ghost.SendRequest(req, handler)
-		return nil
+		handler := ghost.getResponseHandler(addr)
+		return ghost.SendRequest(req, handler)
 	}
 
-	return errors.New("Cannot connect to any server")
+	return errors.New("cannot connect to any server")
 }
 
 // InitiateDownload initiates a client-initiated download request.
@@ -1459,10 +1638,62 @@ func (ghost *Ghost) Reset() {
 }
 
 // Listen is the main routine for listen to socket messages.
+// Helper functions for Listen
+func (ghost *Ghost) handleIncomingBuffer(buffer []byte) error {
+	if ghost.uploadContext.Ready {
+		if len(ghost.ReadBuffer) > 0 {
+			// Write the leftover from previous ReadBuffer
+			ghost.uploadContext.Data <- ghost.ReadBuffer
+			ghost.ReadBuffer = nil
+		}
+		ghost.uploadContext.Data <- buffer
+		return nil
+	}
+	reqs := ghost.ParseRequests(buffer, ghost.RegisterStatus != Success)
+	if ghost.quit {
+		return io.EOF // Signal to exit
+	}
+	if err := ghost.processRequests(reqs); err != nil {
+		log.Println(err)
+	}
+	return nil
+}
+
+func (ghost *Ghost) handleReadError(err error) error {
+	if err == io.EOF {
+		if ghost.uploadContext.Ready {
+			ghost.uploadContext.Data <- nil
+			ghost.quit = true
+			return nil
+		}
+		return errors.New("connection dropped")
+	}
+	return err
+}
+
+func (ghost *Ghost) handlePingTick() {
+	if ghost.mode == ModeControl {
+		if err := ghost.Ping(); err != nil {
+			log.Printf("Ping failed: %v", err)
+		}
+	}
+}
+
+func (ghost *Ghost) handleTimeoutTick() error {
+	err := ghost.ScanForTimeoutRequests()
+	if ghost.reset {
+		if err == nil {
+			err = errors.New("reset request")
+		}
+		return err
+	}
+	return nil
+}
+
 func (ghost *Ghost) Listen() error {
 	readChan, readErrChan := ghost.SpawnReaderRoutine()
-	pingTicker := time.NewTicker(time.Duration(pingInterval))
-	reqTicker := time.NewTicker(time.Duration(timeoutCheckInterval))
+	pingTicker := time.NewTicker(pingInterval)
+	reqTicker := time.NewTicker(timeoutCheckInterval)
 
 	ghost.readChan = readChan
 	ghost.readErrChan = readErrChan
@@ -1475,44 +1706,20 @@ func (ghost *Ghost) Listen() error {
 	for {
 		select {
 		case buffer := <-readChan:
-			if ghost.uploadContext.Ready {
-				if len(ghost.ReadBuffer) > 0 {
-					// Write the leftover from previous ReadBuffer
-					ghost.uploadContext.Data <- ghost.ReadBuffer
-					ghost.ReadBuffer = nil
+			if err := ghost.handleIncomingBuffer(buffer); err != nil {
+				if err == io.EOF {
+					return nil // Clean exit
 				}
-				ghost.uploadContext.Data <- buffer
-				continue
-			}
-			reqs := ghost.ParseRequests(buffer, ghost.RegisterStatus != Success)
-			if ghost.quit {
-				return nil
-			}
-			if err := ghost.processRequests(reqs); err != nil {
-				log.Println(err)
+				return err
 			}
 		case err := <-readErrChan:
-			if err == io.EOF {
-				if ghost.uploadContext.Ready {
-					ghost.uploadContext.Data <- nil
-					ghost.quit = true
-					return nil
-				}
-				return errors.New("Connection dropped")
-			}
-			return err
+			return ghost.handleReadError(err)
 		case info := <-ghost.downloadQueue:
 			ghost.InitiateDownload(info)
 		case <-pingTicker.C:
-			if ghost.mode == ModeControl {
-				ghost.Ping()
-			}
+			ghost.handlePingTick()
 		case <-reqTicker.C:
-			err := ghost.ScanForTimeoutRequests()
-			if ghost.reset {
-				if err == nil {
-					err = errors.New("reset request")
-				}
+			if err := ghost.handleTimeoutTick(); err != nil {
 				return err
 			}
 		}
@@ -1584,19 +1791,18 @@ func (ghost *Ghost) StartLanDiscovery() {
 	}()
 
 	for {
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+			log.Printf("Failed to set read deadline: %v", err)
+		}
 		n, remote, err := conn.ReadFrom(buf)
 
 		if ghost.pauseLanDisc {
 			log.Println("LAN discovery: paused")
 			ticker := time.NewTicker(readTimeout)
 		waitLoop:
-			for {
-				select {
-				case <-ticker.C:
-					if !ghost.pauseLanDisc {
-						break waitLoop
-					}
+			for range ticker.C {
+				if !ghost.pauseLanDisc {
+					break waitLoop
 				}
 			}
 			log.Println("LAN discovery: resumed")
@@ -1637,8 +1843,14 @@ func (ghost *Ghost) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
 		return
 	}
-	io.WriteString(conn, "HTTP/1.1 200\n")
-	io.WriteString(conn, "Content-Type: application/json-rpc\n\n")
+	if _, err := io.WriteString(conn, "HTTP/1.1 200\n"); err != nil {
+		log.Printf("Failed to write HTTP response: %v", err)
+		return
+	}
+	if _, err := io.WriteString(conn, "Content-Type: application/json-rpc\n\n"); err != nil {
+		log.Printf("Failed to write HTTP headers: %v", err)
+		return
+	}
 	ghost.server.ServeCodec(jsonrpc.NewServerCodec(conn))
 }
 
@@ -1648,7 +1860,9 @@ func (ghost *Ghost) StartRPCServer() {
 	log.Println("RPC Server: started")
 
 	ghost.server = rpc.NewServer()
-	ghost.server.RegisterName("rpc", &ghostRPCStub{ghost})
+	if err := ghost.server.RegisterName("rpc", &ghostRPCStub{ghost}); err != nil {
+		log.Printf("Failed to register RPC service: %v", err)
+	}
 
 	http.Handle("/", ghost)
 	err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", ghostRPCStubPort), nil)
@@ -1711,7 +1925,9 @@ func ghostRPCStubServer() (*rpc.Client, error) {
 		return nil, err
 	}
 
-	io.WriteString(conn, "GET / HTTP/1.1\nHost: 127.0.0.1\n\n")
+	if _, err := io.WriteString(conn, "GET / HTTP/1.1\nHost: 127.0.0.1\n\n"); err != nil {
+		return nil, err
+	}
 	_, err = http.ReadResponse(bufio.NewReader(conn), nil)
 	if err == nil {
 		return jsonrpc.NewClient(conn), nil
@@ -1807,7 +2023,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 	}
 
 	if len(args) >= 1 {
-		if strings.Index(args[0], ":") == -1 {
+		if !strings.Contains(args[0], ":") {
 			addrs = append(addrs,
 				fmt.Sprintf("%s:%d", args[0], DefaultHTTPSPort),
 				fmt.Sprintf("%s:%d", args[0], DefaultHTTPPort))
@@ -1836,12 +2052,9 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 		SetTLSMode(tlsMode)
 	go g.Start(!noLanDisc, !noRPCServer)
 
-	ticker := time.NewTicker(time.Duration(60 * time.Second))
+	ticker := time.NewTicker(60 * time.Second)
 
-	for {
-		select {
-		case <-ticker.C:
-			log.Printf("Num of Goroutines: %d\n", runtime.NumGoroutine())
-		}
+	for range ticker.C {
+		log.Printf("Num of Goroutines: %d\n", runtime.NumGoroutine())
 	}
 }

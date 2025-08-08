@@ -26,6 +26,19 @@ const (
 	ModeForward
 )
 
+// ModeStr translate client mode to string.
+func ModeStr(mode int) string {
+	return map[int]string{
+		ModeNone:     "None",
+		ModeControl:  "Agent",
+		ModeTerminal: "Terminal",
+		ModeShell:    "Shell",
+		ModeLogcat:   "Logcat",
+		ModeFile:     "File",
+		ModeForward:  "ModeForward",
+	}[mode]
+}
+
 // Logcat format
 const (
 	logcatTypeText = iota
@@ -43,15 +56,32 @@ const (
 	StdinClosed = "##STDIN_CLOSED##"
 )
 
-// ModeStr translate client mode to string.
-func ModeStr(mode int) string {
-	return map[int]string{
-		ModeNone:     "None",
-		ModeControl:  "Agent",
-		ModeTerminal: "Terminal",
-		ModeShell:    "Shell",
-		ModeLogcat:   "Logcat",
-		ModeFile:     "File",
-		ModeForward:  "ModeForward",
-	}[mode]
-}
+// Request command names
+const (
+	CmdUpgrade         = "upgrade"
+	CmdTerminal        = "terminal"
+	CmdShell           = "shell"
+	CmdListTree        = "list_tree"
+	CmdFstat           = "fstat"
+	CmdFileDownload    = "file_download"
+	CmdClearToDownload = "clear_to_download"
+	CmdFileUpload      = "file_upload"
+	CmdForward         = "forward"
+	CmdCreateSymlink   = "create_symlink"
+	CmdMkdir           = "mkdir"
+)
+
+// File operation constants
+const (
+	FileOpDownload = "download"
+	FileOpUpload   = "upload"
+	ListTreeOp     = "lstree"
+	FstatOpConst   = "fstat"
+)
+
+// Common paths and values
+const (
+	TmpDir       = "/tmp"
+	UnknownStr   = "unknown"
+	EntityAnyone = "anyone"
+)

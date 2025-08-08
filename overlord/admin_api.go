@@ -167,8 +167,7 @@ func (ovl *Overlord) createGroupHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create the group
-	var err error
-	err = ovl.dbManager.CreateGroup(createRequest.Name)
+	err := ovl.dbManager.CreateGroup(createRequest.Name)
 	if err != nil {
 		ResponseError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -309,8 +308,10 @@ func (ovl *Overlord) updateOwnPasswordHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status": "success",
 		"data":   "Password updated successfully",
-	})
+	}); err != nil {
+		log.Printf("Failed to encode JSON response: %v", err)
+	}
 }

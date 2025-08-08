@@ -69,8 +69,7 @@ func GetProcessWorkingDirectory(pid int) (string, error) {
 
 // Ttyname returns the TTY name of a given file descriptor.
 func Ttyname(fd uintptr) (string, error) {
-	var ttyname *C.char
-	ttyname = C.ttyname(C.int(fd))
+	ttyname := C.ttyname(C.int(fd))
 	if ttyname == nil {
 		return "", errors.New("ttyname returned NULL")
 	}
@@ -112,6 +111,7 @@ func Install() error {
 		return fmt.Errorf("failed to get executable path: %v", err)
 	}
 
+	// Install binary to filesystem
 	homeDir := getCurrentUserHomeDir()
 	targetPath := filepath.Join(homeDir, ".local", "bin", "ghost")
 	binDir := filepath.Join(homeDir, ".local", "bin")
@@ -143,6 +143,7 @@ func Install() error {
 		return fmt.Errorf("failed to set executable permissions: %v", err)
 	}
 
+	// Install service
 	cmdParts := getServiceCommand()
 	var programArgs []string
 	programArgs = append(programArgs, targetPath)
@@ -205,6 +206,7 @@ func Install() error {
 
 	fmt.Printf("Launchd service installed at %s\n", plistFilePath)
 
+	// Load service
 	cmd := exec.Command("launchctl", "load", plistFilePath)
 	err = cmd.Run()
 	if err != nil {
@@ -212,6 +214,7 @@ func Install() error {
 	}
 	fmt.Printf("Ghost service loaded and enabled for automatic startup\n")
 
+	// Start service
 	if !isGhostRunning() {
 		fmt.Printf("Starting ghost service...\n")
 		cmd = exec.Command("launchctl", "start", "com.overlord.ghost")

@@ -57,7 +57,7 @@ func promptForInput(prompt string) string {
 
 func promptForPassword(prompt string) string {
 	fmt.Print(prompt)
-	password, err := term.ReadPassword(int(syscall.Stdin))
+	password, err := term.ReadPassword(syscall.Stdin)
 	fmt.Println() // Add a newline after the password input
 
 	if err != nil {
@@ -88,8 +88,6 @@ func initializeDatabase(dbPath string) error {
 			}
 			break
 		}
-	} else if adminPassword == "" {
-		return fmt.Errorf("password cannot be empty")
 	}
 
 	dbManager := overlord.NewDatabaseManager(dbPath)

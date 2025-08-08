@@ -112,11 +112,12 @@ func userExists(dbManager *DatabaseManager, username string) (bool, error) {
 func loginAs(router *mux.Router, username string, pwd ...string) (string, error) {
 	password := ""
 	if len(pwd) == 0 {
-		if username == adminUsername {
+		switch username {
+		case adminUsername:
 			password = adminPassword
-		} else if username == testUsername {
+		case testUsername:
 			password = testPassword
-		} else {
+		default:
 			return "", fmt.Errorf("invalid username: %s", username)
 		}
 	} else {
@@ -661,7 +662,9 @@ func TestRemoveUserFromGroupHandler(t *testing.T) {
 		t.Fatalf("Failed to login: %v", err)
 	}
 
-	ovl.dbManager.AddUserToGroup("testuser", "testgroup")
+	if err := ovl.dbManager.AddUserToGroup("testuser", "testgroup"); err != nil {
+		t.Fatalf("Failed to add user to group: %v", err)
+	}
 
 	req = createAuthRequest(userJWTToken, "DELETE", "/api/groups/testgroup/users/testuser", nil)
 	rr = httptest.NewRecorder()

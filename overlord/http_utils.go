@@ -24,20 +24,24 @@ func ResponseError(w http.ResponseWriter, err string, code int) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(standardResponse{
+	if err := json.NewEncoder(w).Encode(standardResponse{
 		Status: "error",
 		Data:   err,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode error response: %v", err)
+	}
 }
 
 // ResponseSuccess writes a success response to the client
 func ResponseSuccess(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(standardResponse{
+	if err := json.NewEncoder(w).Encode(standardResponse{
 		Status: "success",
 		Data:   data,
-	})
+	}); err != nil {
+		log.Printf("Failed to encode success response: %v", err)
+	}
 }
 
 // ResponseJSON writes a JSON response to the client with standard format
@@ -50,16 +54,20 @@ func ResponseJSON(w http.ResponseWriter, data string, code int) {
 		status = "error"
 	}
 
-	json.NewEncoder(w).Encode(standardResponseRaw{
+	if err := json.NewEncoder(w).Encode(standardResponseRaw{
 		Status: status,
 		Data:   json.RawMessage(data),
-	})
+	}); err != nil {
+		log.Printf("Failed to encode JSON response: %v", err)
+	}
 }
 
 // WebSocketSendError sends an error message to the client
 func WebSocketSendError(ws *websocket.Conn, err string) {
 	log.Println(err)
 	msg := websocket.FormatCloseMessage(websocket.CloseProtocolError, err)
-	ws.WriteMessage(websocket.CloseMessage, msg)
+	if err := ws.WriteMessage(websocket.CloseMessage, msg); err != nil {
+		log.Printf("Failed to write WebSocket close message: %v", err)
+	}
 	ws.Close()
 }
