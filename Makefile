@@ -88,8 +88,54 @@ $(BIN)/ghost.darwin.%:
 	GOOS=darwin GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost
 
 ghost-darwin: $(GHOST_DARWIN_BINS) $(GHOST_DARWIN_BINS:=.sha1)
+ifeq ($(STATIC), true)
+	$(call cmd_msg,VERIFY,macOS binaries)
+	@echo "Verifying macOS ghost binaries..."
+	@for binary in $(GHOST_DARWIN_BINS); do \
+		if [ -f "$$binary" ]; then \
+			echo "Checking $$binary:"; \
+			file "$$binary" | grep -q "Mach-O" && \
+			echo "✓ $$binary is a Mach-O executable (macOS binary)" || \
+			(echo "WARNING: Could not verify $$binary format" && file "$$binary"); \
+		fi; \
+	done
+endif
 
-build-go: overlordd ghost ghost-linux
+# Verify static linking when STATIC=true
+verify-static:
+ifeq ($(STATIC), true)
+	$(call cmd_msg,VERIFY,binary linking)
+	@echo "Verifying ghost binary linking..."
+	@for binary in $(GHOST_LINUX_BINS); do \
+		if [ -f "$$binary" ]; then \
+			echo "Checking $$binary (Linux):"; \
+			if ldd "$$binary" 2>/dev/null | grep -q "=>"; then \
+				echo "ERROR: $$binary is dynamically linked!"; \
+				ldd "$$binary"; \
+				exit 1; \
+			else \
+				echo "✓ $$binary is statically linked"; \
+			fi; \
+		fi; \
+	done
+	@if [ -f "$(BIN)/ghost" ]; then \
+		echo "Checking $(BIN)/ghost (local platform):"; \
+		if [ "$$(uname)" = "Darwin" ]; then \
+			echo "✓ $(BIN)/ghost built for macOS (dynamic linking expected)"; \
+		else \
+			if ldd "$(BIN)/ghost" 2>/dev/null | grep -q "=>"; then \
+				echo "ERROR: $(BIN)/ghost is dynamically linked!"; \
+				ldd "$(BIN)/ghost"; \
+				exit 1; \
+			else \
+				echo "✓ $(BIN)/ghost is statically linked"; \
+			fi; \
+		fi; \
+	fi
+	@echo "Ghost binary linking verified successfully!"
+endif
+
+build-go: overlordd ghost ghost-linux verify-static
 
 build-py:
 	@ln -sf ../py/ghost.py bin
