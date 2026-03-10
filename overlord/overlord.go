@@ -1250,7 +1250,7 @@ func (ovl *Overlord) StartUDPBroadcast(port int) {
 		}
 	}
 
-	addr := fmt.Sprintf("%s:%d", bcastIP, port)
+	addr := net.JoinHostPort(bcastIP, strconv.Itoa(port))
 	conn, err := net.Dial("udp", addr)
 	if err != nil {
 		log.Fatalln("Unable to start UDP broadcast:", err)
