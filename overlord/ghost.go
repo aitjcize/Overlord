@@ -72,8 +72,8 @@ const (
 	statusDisconnected = "disconnected"
 )
 
-// Escape sequence regex
-var escapeSeqRe = regexp.MustCompile(`\x1b\[([0-9;?]*)([A-Za-z])`)
+// Resize sequence regex - only matches the specific terminal resize command
+var resizeSeqRe = regexp.MustCompile(`\x1b\[8;(\d+);(\d+)t`)
 
 type ghostRPCStub struct {
 	ghost *Ghost
@@ -985,59 +985,31 @@ func (ghost *Ghost) Ping() error {
 	return ghost.SendRequest(req, pingHandler)
 }
 
-func (ghost *Ghost) handleTTYControl(tty *os.File, data []byte) ([]byte, error) {
-	// Parse ANSI escape sequences
-	matches := escapeSeqRe.FindSubmatch(data)
-	if len(matches) == 0 {
-		// Consume the first two bytes so we won't process it again.
-		if _, err := tty.Write(data[:2]); err != nil {
-			log.Printf("Failed to write to tty: %v", err)
-			return data[2:], err
-		}
-		return data[2:], nil
+func (ghost *Ghost) handleResizeSequence(tty *os.File, rows, cols int) error {
+	log.Printf("Terminal resize request received: rows=%d, cols=%d", rows, cols)
+
+	ws := &struct {
+		Row    uint16
+		Col    uint16
+		Xpixel uint16
+		Ypixel uint16
+	}{
+		Row:    uint16(rows),
+		Col:    uint16(cols),
+		Xpixel: 0,
+		Ypixel: 0,
 	}
 
-	args := string(matches[1])
-	command := string(matches[2])
-
-	if command == "t" {
-		params := strings.Split(args, ";")
-		if len(params) >= 3 && params[0] == "8" {
-			// Window size in characters
-			rows, _ := strconv.Atoi(params[1])
-			cols, _ := strconv.Atoi(params[2])
-
-			log.Printf("Terminal resize request received: rows=%d, cols=%d", rows, cols)
-
-			ws := &struct {
-				Row    uint16
-				Col    uint16
-				Xpixel uint16
-				Ypixel uint16
-			}{
-				Row:    uint16(rows),
-				Col:    uint16(cols),
-				Xpixel: 0,
-				Ypixel: 0,
-			}
-
-			ret, _, err := syscall.Syscall(
-				syscall.SYS_IOCTL,
-				tty.Fd(),
-				syscall.TIOCSWINSZ,
-				uintptr(unsafe.Pointer(ws)),
-			)
-			if ret == ^uintptr(0) {
-				return nil, fmt.Errorf("handleTTYControl: TIOCSWINSZ failed: %v", err)
-			}
-			return data[len(matches[0]):], nil
-		}
+	ret, _, err := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		tty.Fd(),
+		syscall.TIOCSWINSZ,
+		uintptr(unsafe.Pointer(ws)),
+	)
+	if ret == ^uintptr(0) {
+		return fmt.Errorf("handleResizeSequence: TIOCSWINSZ failed: %v", err)
 	}
-	if _, err := tty.Write(matches[0]); err != nil {
-		log.Printf("Failed to write to tty: %v", err)
-		return data[len(matches[0]):], err
-	}
-	return data[len(matches[0]):], nil
+	return nil
 }
 
 // SpawnTTYServer Spawns a TTY server and forward I/O to the TCP socket.
@@ -1119,26 +1091,37 @@ func (ghost *Ghost) configureTTYDevice(tty *os.File) error {
 func (ghost *Ghost) createTTYInputFeeder(tty *os.File) func([]byte) error {
 	return func(buffer []byte) error {
 		for {
-			escapeStart := bytes.Index(buffer, []byte{0x1b, '['})
-			if escapeStart == -1 {
+			loc := resizeSeqRe.FindIndex(buffer)
+			if loc == nil {
 				break
 			}
 
-			if _, err := tty.Write(buffer[:escapeStart]); err != nil {
-				log.Printf("Failed to write to tty: %v", err)
+			// Write everything before the resize sequence to the TTY
+			if loc[0] > 0 {
+				if _, err := tty.Write(buffer[:loc[0]]); err != nil {
+					log.Printf("Failed to write to tty: %v", err)
+					return err
+				}
 			}
-			rest, err := ghost.handleTTYControl(tty, buffer[escapeStart:])
-			if err != nil {
-				log.Printf("SpawnTTYServer: Error handling TTY control: %v", err)
+
+			// Extract resize parameters and apply
+			matches := resizeSeqRe.FindSubmatch(buffer[loc[0]:])
+			rows, _ := strconv.Atoi(string(matches[1]))
+			cols, _ := strconv.Atoi(string(matches[2]))
+			if err := ghost.handleResizeSequence(tty, rows, cols); err != nil {
+				log.Printf("SpawnTTYServer: Error handling resize: %v", err)
 				return err
 			}
-			buffer = rest
+
+			buffer = buffer[loc[1]:]
 		}
 
-		_, err := tty.Write(buffer)
-		if err != nil {
-			log.Printf("SpawnTTYServer: Error writing to TTY: %v", err)
-			return err
+		// Write any remaining data to the TTY
+		if len(buffer) > 0 {
+			if _, err := tty.Write(buffer); err != nil {
+				log.Printf("SpawnTTYServer: Error writing to TTY: %v", err)
+				return err
+			}
 		}
 		return nil
 	}

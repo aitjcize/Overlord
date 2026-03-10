@@ -37,7 +37,6 @@ from ws4py.client import WebSocketBaseClient
 from xmlrpc.client import ServerProxy
 from xmlrpc.server import SimpleXMLRPCServer
 
-
 _DEBUG = False
 
 _GHOST_RPC_PORT = int(os.getenv('GHOST_RPC_PORT', '4500'))
@@ -69,7 +68,7 @@ DISCONNECTED = 'disconnected'
 
 _DEFAULT_FORWARD_HOST = '127.0.0.1'
 
-_ESCAPE_SEQ_RE = re.compile(r'\x1b\[([0-9;?]*)([A-Za-z])')
+_RESIZE_SEQ_RE = re.compile(rb'\x1b\[8;(\d+);(\d+)t')
 
 
 class PingTimeoutError(Exception):
@@ -81,10 +80,12 @@ class RequestError(Exception):
 
 
 class BufferedSocket:
+
   """A buffered socket that supports unrecv.
 
   Allow putting back data back to the socket for the next recv() call.
   """
+
   def __init__(self, sock):
     self.sock = sock
     self._buf = b''
@@ -120,6 +121,7 @@ class BufferedSocket:
 
 
 class TLSSettings:
+
   def __init__(self, tls_cert_file, verify):
     """Constructor.
 
@@ -177,11 +179,13 @@ class TLSSettings:
 
 
 class GhostWebsocketClient(WebSocketBaseClient):
+
   def __init__(self, tls_settings, *args, **kwargs):
     super().__init__(ssl_context=tls_settings.Context(), *args, **kwargs)
 
 
 class Ghost:
+
   """Ghost implements the client protocol of Overlord.
 
   Ghost provide terminal/shell/logcat functionality and manages the client
@@ -201,9 +205,20 @@ class Ghost:
 
   RANDOM_MID = '##random_mid##'
 
-  def __init__(self, overlord_addrs, tls_settings=None, mode=AGENT, mid=None,
-               sid=None, allowlist=None, prop_file=None, terminal_sid=None,
-               tty_device=None, command=None, file_op=None, host=None, port=None,
+  def __init__(self,
+               overlord_addrs,
+               tls_settings=None,
+               mode=AGENT,
+               mid=None,
+               sid=None,
+               allowlist=None,
+               prop_file=None,
+               terminal_sid=None,
+               tty_device=None,
+               command=None,
+               file_op=None,
+               host=None,
+               port=None,
                tls_mode=None):
     """Constructor.
 
@@ -228,8 +243,9 @@ class Ghost:
       tls_mode: can be [True, False, None]. if not None, skip detection of
         TLS and assume whether server use TLS or not.
     """
-    assert mode in [Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL, Ghost.FILE,
-                    Ghost.FORWARD]
+    assert mode in [
+        Ghost.AGENT, Ghost.TERMINAL, Ghost.SHELL, Ghost.FILE, Ghost.FORWARD
+    ]
     if mode == Ghost.SHELL:
       assert command is not None
     if mode == Ghost.FILE:
@@ -245,7 +261,7 @@ class Ghost:
     if self._mid == Ghost.RANDOM_MID:
       self._machine_id = str(uuid.uuid4())
     else:
-        self._machine_id = self.GetMachineID()
+      self._machine_id = self.GetMachineID()
     self._session_id = sid if sid is not None else str(uuid.uuid4())
     self._terminal_session_id = terminal_sid
     self._ttyname_to_sid = {}
@@ -320,16 +336,17 @@ class Ghost:
       return
 
     scriptpath = os.path.abspath(sys.argv[0])
-    url = 'http%s://%s:%d/upgrade/ghost.py' % (
-        's' if https_enabled else '',
-        self._connected_addr[0], self._connected_addr[1])
+    url = 'http%s://%s:%d/upgrade/ghost.py' % ('s' if https_enabled else '',
+                                               self._connected_addr[0],
+                                               self._connected_addr[1])
 
     # Download sha1sum for ghost.py for verification
     try:
       request = urllib.request.Request(url + '.sha1')
       request.add_header('User-Agent', _USER_AGENT)
       with contextlib.closing(
-          urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT,
+          urllib.request.urlopen(request,
+                                 timeout=_CONNECT_TIMEOUT,
                                  context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
@@ -350,7 +367,8 @@ class Ghost:
       request = urllib.request.Request(url)
       request.add_header('User-Agent', _USER_AGENT)
       with contextlib.closing(
-          urllib.request.urlopen(request, timeout=_CONNECT_TIMEOUT,
+          urllib.request.urlopen(request,
+                                 timeout=_CONNECT_TIMEOUT,
                                  context=self._tls_settings.Context())) as f:
         if f.getcode() != 200:
           raise RuntimeError('HTTP status %d' % f.getcode())
@@ -392,8 +410,9 @@ class Ghost:
 
     if self._allowlist:
       if 'allowlist' in self._properties and self._properties['allowlist']:
-        logging.warning('Overwriting existing allowlist from properties file with '
-                        'command line allowlist value')
+        logging.warning(
+            'Overwriting existing allowlist from properties file with '
+            'command line allowlist value')
 
       allowed_entities = []
       for entity in self._allowlist.split(','):
@@ -405,7 +424,8 @@ class Ghost:
             trimmed_entity = 'u/' + trimmed_entity
           allowed_entities.append(trimmed_entity)
       self._properties['allowlist'] = allowed_entities
-    elif 'allowlist' not in self._properties or len(self._properties['allowlist']) == 0:
+    elif 'allowlist' not in self._properties or len(
+        self._properties['allowlist']) == 0:
       # Default allowlist to current user
       self._properties['allowlist'] = ['u/' + self.GetCurrentUser()]
 
@@ -424,8 +444,15 @@ class Ghost:
         except Exception:
           pass
 
-  def SpawnGhost(self, mode, sid=None, terminal_sid=None, tty_device=None,
-                 command=None, file_op=None, host=None, port=None):
+  def SpawnGhost(self,
+                 mode,
+                 sid=None,
+                 terminal_sid=None,
+                 tty_device=None,
+                 command=None,
+                 file_op=None,
+                 host=None,
+                 port=None):
     """Spawn a child ghost with specific mode.
 
     Returns:
@@ -437,11 +464,18 @@ class Ghost:
     pid = os.fork()
     if pid == 0:
       self.CloseSockets()
-      g = Ghost([self._connected_addr], tls_settings=self._tls_settings,
-                mode=mode, mid=Ghost.RANDOM_MID, sid=sid,
-                allowlist=self._allowlist, terminal_sid=terminal_sid,
-                tty_device=tty_device, command=command, file_op=file_op,
-                host=host, port=port)
+      g = Ghost([self._connected_addr],
+                tls_settings=self._tls_settings,
+                mode=mode,
+                mid=Ghost.RANDOM_MID,
+                sid=sid,
+                allowlist=self._allowlist,
+                terminal_sid=terminal_sid,
+                tty_device=tty_device,
+                command=command,
+                file_op=file_op,
+                host=host,
+                port=port)
       g.Start()
       sys.exit(0)
     else:
@@ -509,8 +543,8 @@ class Ghost:
 
     # Darwin
     if self._platform == 'Darwin':
-      output = subprocess.check_output(['ioreg', '-rd1', '-c',
-                                        'IOPlatformExpertDevice'])
+      output = subprocess.check_output(
+          ['ioreg', '-rd1', '-c', 'IOPlatformExpertDevice'])
       ret = re.search('"IOPlatformSerialNumber" = "(.*)"',
                       output.decode('utf-8'))
       if ret:
@@ -557,8 +591,8 @@ class Ghost:
 
       proc = ctypes.cdll.LoadLibrary(ctypes.util.find_library('libproc'))
       buf = ctypes.create_string_buffer('\0' * proc_vnodepathinfo_size)
-      proc.proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0,
-                        ctypes.byref(buf), proc_vnodepathinfo_size)
+      proc.proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, ctypes.byref(buf),
+                        proc_vnodepathinfo_size)
       buf = buf.raw[vid_path_offset:]
       n = buf.index('\0')
       return buf[:n]
@@ -579,7 +613,10 @@ class Ghost:
     """Serialize the message and send it through the socket."""
     self._sock.Send(json.dumps(msg).encode('utf-8') + _SEPARATOR)
 
-  def SendRequest(self, name, args, handler=None,
+  def SendRequest(self,
+                  name,
+                  args,
+                  handler=None,
                   timeout=_REQUEST_TIMEOUT_SECS):
     if handler and not callable(handler):
       raise RequestError('Invalid request handler for msg "%s"' % name)
@@ -598,40 +635,18 @@ class Ghost:
     msg = {'rid': omsg['rid'], 'status': FAILED, 'payload': {'error': error}}
     self.SendMessage(msg)
 
-  def HandleTTYControl(self, fd, buffer):
-    """Handle terminal control sequences.
+  def HandleResizeSequence(self, fd, rows, cols):
+    """Handle terminal resize sequence.
 
     Args:
       fd: File descriptor of the terminal
-      control_str: Control string to process
-
-    Returns:
-      index of the next character after the control sequence
+      rows: Number of rows
+      cols: Number of columns
     """
-    match = _ESCAPE_SEQ_RE.search(buffer.decode('utf-8'))
-    if not match:
-      # Consume the first two bytes so we won't process it again.
-      os.write(fd, buffer[:2])
-      return 2
-
-    args = match.group(1)
-    command = match.group(2)
-
-    if command == 't':
-      try:
-        params = args.split(';')
-        if len(params) >= 3 and params[0] == '8':
-          rows = int(params[1])
-          cols = int(params[2])
-          logging.info('Terminal resize request received: rows=%d, cols=%d', rows, cols)
-          winsize = struct.pack('HHHH', rows, cols, 0, 0)
-          fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
-          return len(match.group(0))
-      except Exception as e:
-        logging.warning('Error handling terminal control: %s', e)
-
-    os.write(fd, match.group(0).encode('utf-8'))
-    return len(match.group(0))
+    logging.info('Terminal resize request received: rows=%d, cols=%d', rows,
+                 cols)
+    winsize = struct.pack('HHHH', rows, cols, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
   def SpawnTTYServer(self, unused_var):
     """Spawn a TTY server and forward I/O to the TCP socket."""
@@ -666,22 +681,31 @@ class Ghost:
         tty.setraw(fd)
 
         attrs = termios.tcgetattr(fd)
-        attrs[0] &= ~(termios.IXON | termios.IXOFF)  # Disable software flow control
-        attrs[2] |= termios.CLOCAL                   # Ignore modem control lines
-        attrs[2] &= ~termios.CRTSCTS                 # Disable hardware flow control
+        attrs[0] &= ~(termios.IXON | termios.IXOFF
+                     )  # Disable software flow control
+        attrs[2] |= termios.CLOCAL  # Ignore modem control lines
+        attrs[2] &= ~termios.CRTSCTS  # Disable hardware flow control
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
 
       def _ProcessBuffer(buf):
         while True:
-          pos = buf.find(b'\x1b[')
-          if pos == -1:
+          match = _RESIZE_SEQ_RE.search(buf)
+          if not match:
             break
 
-          os.write(fd, buf[:pos])
-          consumed = self.HandleTTYControl(fd, buf[pos:])
-          buf = buf[pos + consumed:]
+          # Write everything before the resize sequence to the TTY
+          if match.start() > 0:
+            os.write(fd, buf[:match.start()])
 
-        os.write(fd, buf)
+          # Handle the resize
+          rows = int(match.group(1))
+          cols = int(match.group(2))
+          self.HandleResizeSequence(fd, rows, cols)
+
+          buf = buf[match.end():]
+
+        if buf:
+          os.write(fd, buf)
 
       # Initial buffer processing
       _ProcessBuffer(self._sock.RecvBuf())
@@ -721,9 +745,12 @@ class Ghost:
     # Execute shell command from HOME directory
     os.chdir(os.getenv('HOME', '/tmp'))
 
-    p = subprocess.Popen(self._shell_command, stdin=subprocess.PIPE,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         shell=True, env=env)
+    p = subprocess.Popen(self._shell_command,
+                         stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,
+                         shell=True,
+                         env=env)
 
     def make_non_block(fd):
       fl = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -790,10 +817,12 @@ class Ghost:
         logging.error('InitiateFileOperation: download: %s', e)
         sys.exit(1)
 
-      self.SendRequest('request_to_download',
-                       {'terminal_sid': self._terminal_session_id,
-                        'filename': os.path.basename(self._file_op[1]),
-                        'size': size})
+      self.SendRequest(
+          'request_to_download', {
+              'terminal_sid': self._terminal_session_id,
+              'filename': os.path.basename(self._file_op[1]),
+              'size': size
+          })
     elif self._file_op[0] == 'upload':
       self.SendRequest('clear_to_upload', {}, timeout=-1)
       self.StartUploadServer()
@@ -889,6 +918,7 @@ class Ghost:
     os._exit(0)  # pylint: disable=protected-access
 
   def Ping(self):
+
     def timeout_handler(x):
       if x is None:
         raise PingTimeoutError
@@ -984,8 +1014,7 @@ class Ghost:
       self.SendErrorResponse(msg, str(e))
       return
 
-    self.SpawnGhost(self.FILE, payload['sid'],
-                    file_op=('download', filepath))
+    self.SpawnGhost(self.FILE, payload['sid'], file_op=('download', filepath))
     self.SendResponse(msg, SUCCESS)
 
   def HandleFileUploadRequest(self, msg):
@@ -1031,7 +1060,8 @@ class Ghost:
 
     # If not check_only, spawn FILE mode ghost agent to handle upload
     if not payload.get('check_only', False):
-      self.SpawnGhost(self.FILE, payload['sid'],
+      self.SpawnGhost(self.FILE,
+                      payload['sid'],
                       file_op=('upload', dest_path, payload.get('perm', None)))
     self.SendResponse(msg, SUCCESS)
 
@@ -1076,7 +1106,8 @@ class Ghost:
     if command == 'upgrade':
       self.Upgrade()
     elif command == 'terminal':
-      self.SpawnGhost(self.TERMINAL, payload['sid'],
+      self.SpawnGhost(self.TERMINAL,
+                      payload['sid'],
                       tty_device=payload['tty_device'])
       self.SendResponse(msg, SUCCESS)
     elif command == 'shell':
@@ -1097,7 +1128,8 @@ class Ghost:
     elif command == 'mkdir':
       self.HandleMkdirRequest(msg)
     elif command == 'forward':
-      self.SpawnGhost(self.FORWARD, payload['sid'],
+      self.SpawnGhost(self.FORWARD,
+                      payload['sid'],
                       host=payload.get('host', _DEFAULT_FORWARD_HOST),
                       port=payload['port'])
       self.SendResponse(msg, SUCCESS)
@@ -1159,8 +1191,7 @@ class Ghost:
   def InitiateDownload(self):
     ttyname, filename = self._download_queue.get()
     sid = self._ttyname_to_sid[ttyname]
-    self.SpawnGhost(self.FILE, terminal_sid=sid,
-                    file_op=('download', filename))
+    self.SpawnGhost(self.FILE, terminal_sid=sid, file_op=('download', filename))
 
   def Listen(self):
     try:
@@ -1177,8 +1208,8 @@ class Ghost:
 
           self.ParseMessage(data, self._register_status != SUCCESS)
 
-        if (self._mode == self.AGENT and
-            self.Timestamp() - self._last_ping > _PING_INTERVAL):
+        if (self._mode == self.AGENT
+            and self.Timestamp() - self._last_ping > _PING_INTERVAL):
           self.Ping()
         self.ScanForTimeoutRequests()
 
@@ -1203,6 +1234,7 @@ class Ghost:
     non_local = {}
     for addr in self._overlord_addrs:
       non_local['addr'] = addr
+
       def registered(response):
         if response is None:
           self._reset.set()
@@ -1228,8 +1260,8 @@ class Ghost:
         # should use the TLSSettings passed in when it was spawned.
         if self._mode == Ghost.AGENT:
           self._tls_settings.SetEnabled(
-              self.TLSEnabled(*addr) if self._tls_mode is None
-              else self._tls_mode)
+              self.TLSEnabled(
+                  *addr) if self._tls_mode is None else self._tls_mode)
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(_CONNECT_TIMEOUT)
@@ -1270,10 +1302,13 @@ class Ghost:
         # Machine ID may change if MAC address is used (USB-ethernet dongle
         # plugged/unplugged)
         self._machine_id = self.GetMachineID()
-        self.SendRequest('register',
-                         {'mode': self._mode, 'mid': self._machine_id,
-                          'sid': self._session_id,
-                          'properties': self._properties}, handler)
+        self.SendRequest(
+            'register', {
+                'mode': self._mode,
+                'mid': self._machine_id,
+                'sid': self._session_id,
+                'properties': self._properties
+            }, handler)
       except socket.error:
         pass
       except Exception as e:
@@ -1351,7 +1386,8 @@ class Ghost:
   def StartRPCServer(self):
     logging.info('RPC Server: started')
     rpc_server = SimpleXMLRPCServer((_DEFAULT_BIND_ADDRESS, _GHOST_RPC_PORT),
-                                     logRequests=False, allow_none=True)
+                                    logRequests=False,
+                                    allow_none=True)
     rpc_server.register_function(self.Reconnect, 'Reconnect')
     rpc_server.register_function(self.GetStatus, 'GetStatus')
     rpc_server.register_function(self.RegisterTTY, 'RegisterTTY')
@@ -1363,9 +1399,10 @@ class Ghost:
 
   def ScanServer(self):
     for meth in [self.GetGateWayIP, self.GetFactoryServerIP]:
-      addrs = reduce(lambda x, y: x + y,
-                     [[(h, _DEFAULT_HTTPS_PORT), (h, _DEFAULT_HTTP_PORT)]
-                      for h in meth()], [])
+      addrs = reduce(
+          lambda x, y: x + y,
+          [[(h, _DEFAULT_HTTPS_PORT), (h, _DEFAULT_HTTP_PORT)] for h in meth()],
+          [])
       for addr in addrs:
         if addr not in self._overlord_addrs:
           self._overlord_addrs.append(addr)
@@ -1405,8 +1442,8 @@ class Ghost:
           logging.info('%s, retrying in %ds', str(e), _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
         except Exception as e:
-          logging.info('%s: %s, retrying in %ds',
-                       e.__class__.__name__, str(e), _RETRY_INTERVAL)
+          logging.info('%s: %s, retrying in %ds', e.__class__.__name__, str(e),
+                       _RETRY_INTERVAL)
           time.sleep(_RETRY_INTERVAL)
 
         self.Reset()
@@ -1503,7 +1540,9 @@ WantedBy=multi-user.target
 """
 
   # Find systemd service directory
-  service_dirs = ["/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"]
+  service_dirs = [
+      "/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"
+  ]
   service_dir = None
   for d in service_dirs:
     if os.path.exists(d):
@@ -1520,7 +1559,8 @@ WantedBy=multi-user.target
   try:
     with open("/tmp/ghost.service", "w") as f:
       f.write(service_content)
-    subprocess.run(["sudo", "mv", "/tmp/ghost.service", service_file_path], check=True)
+    subprocess.run(["sudo", "mv", "/tmp/ghost.service", service_file_path],
+                   check=True)
     print(f"Systemd service file installed at {service_file_path}")
   except Exception as e:
     print(f"Failed to install systemd service file: {e}")
@@ -1533,11 +1573,13 @@ WantedBy=multi-user.target
     print("Ghost service enabled for automatic startup")
 
     # Start service if not already running
-    result = subprocess.run(["systemctl", "is-active", "ghost.service"], 
-                          capture_output=True, text=True)
+    result = subprocess.run(["systemctl", "is-active", "ghost.service"],
+                            capture_output=True,
+                            text=True)
     if result.returncode != 0:
       print("Starting ghost service...")
-      subprocess.run(["sudo", "systemctl", "start", "ghost.service"], check=True)
+      subprocess.run(["sudo", "systemctl", "start", "ghost.service"],
+                     check=True)
       print("Ghost service started successfully")
     else:
       print("Ghost service is already running")
@@ -1688,44 +1730,84 @@ def install_service(args):
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument('--fork', dest='fork', action='store_true', default=False,
+  parser.add_argument('--fork',
+                      dest='fork',
+                      action='store_true',
+                      default=False,
                       help='fork procecess to run in background')
-  parser.add_argument('--mid', metavar='MID', dest='mid', action='store',
-                      default=None, help='use MID as machine ID')
-  parser.add_argument('--rand-mid', dest='mid', action='store_const',
-                      const=Ghost.RANDOM_MID, help='use random machine ID')
-  parser.add_argument('--no-lan-disc', dest='lan_disc', action='store_false',
-                      default=True, help='disable LAN discovery')
-  parser.add_argument('--no-rpc-server', dest='rpc_server',
-                      action='store_false', default=True,
+  parser.add_argument('--mid',
+                      metavar='MID',
+                      dest='mid',
+                      action='store',
+                      default=None,
+                      help='use MID as machine ID')
+  parser.add_argument('--rand-mid',
+                      dest='mid',
+                      action='store_const',
+                      const=Ghost.RANDOM_MID,
+                      help='use random machine ID')
+  parser.add_argument('--no-lan-disc',
+                      dest='lan_disc',
+                      action='store_false',
+                      default=True,
+                      help='disable LAN discovery')
+  parser.add_argument('--no-rpc-server',
+                      dest='rpc_server',
+                      action='store_false',
+                      default=True,
                       help='disable RPC server')
-  parser.add_argument('--tls', dest='tls_mode', default='detect',
+  parser.add_argument('--tls',
+                      dest='tls_mode',
+                      default='detect',
                       choices=('y', 'n', 'detect'),
                       help="specify 'y' or 'n' to force enable/disable TLS")
-  parser.add_argument('--tls-cert-file', metavar='TLS_CERT_FILE',
-                      dest='tls_cert_file', type=str, default=None,
+  parser.add_argument('--tls-cert-file',
+                      metavar='TLS_CERT_FILE',
+                      dest='tls_cert_file',
+                      type=str,
+                      default=None,
                       help='file containing the server TLS certificate in PEM '
-                           'format')
-  parser.add_argument('--tls-no-verify', dest='tls_no_verify',
-                      action='store_true', default=False,
+                      'format')
+  parser.add_argument('--tls-no-verify',
+                      dest='tls_no_verify',
+                      action='store_true',
+                      default=False,
                       help='do not verify certificate if TLS is enabled')
-  parser.add_argument('--prop-file', metavar='PROP_FILE', dest='prop_file',
-                      type=str, default=None,
+  parser.add_argument('--prop-file',
+                      metavar='PROP_FILE',
+                      dest='prop_file',
+                      type=str,
+                      default=None,
                       help='file containing the JSON representation of client '
-                           'properties')
-  parser.add_argument('--download', metavar='FILE', dest='download', type=str,
-                      default=None, help='file to download')
-  parser.add_argument('--reset', dest='reset', default=False,
+                      'properties')
+  parser.add_argument('--download',
+                      metavar='FILE',
+                      dest='download',
+                      type=str,
+                      default=None,
+                      help='file to download')
+  parser.add_argument('--reset',
+                      dest='reset',
+                      default=False,
                       action='store_true',
                       help='reset ghost and reload all configs')
-  parser.add_argument('--status', dest='status', default=False,
+  parser.add_argument('--status',
+                      dest='status',
+                      default=False,
                       action='store_true',
                       help='show status of the client')
-  parser.add_argument('--allowlist', dest='allowlist',
-                      help='comma-separated list of users/groups that can access this ghost')
-  parser.add_argument('--install', dest='install', action='store_true',
-                      default=False, help='install ghost as a system service')
-  parser.add_argument('overlord_addr', metavar='OVERLORD_ADDR', type=str,
+  parser.add_argument(
+      '--allowlist',
+      dest='allowlist',
+      help='comma-separated list of users/groups that can access this ghost')
+  parser.add_argument('--install',
+                      dest='install',
+                      action='store_true',
+                      default=False,
+                      help='install ghost as a system service')
+  parser.add_argument('overlord_addr',
+                      metavar='OVERLORD_ADDR',
+                      type=str,
                       nargs='*',
                       help='overlord server address in format: host:port')
   args = parser.parse_args()
@@ -1767,8 +1849,14 @@ def main():
   tls_settings = TLSSettings(args.tls_cert_file, not args.tls_no_verify)
   tls_mode = args.tls_mode
   tls_mode = {'y': True, 'n': False, 'detect': None}[tls_mode]
-  g = Ghost(addrs, tls_settings, Ghost.AGENT, args.mid, None,
-            allowlist=args.allowlist, prop_file=prop_file, tls_mode=tls_mode)
+  g = Ghost(addrs,
+            tls_settings,
+            Ghost.AGENT,
+            args.mid,
+            None,
+            allowlist=args.allowlist,
+            prop_file=prop_file,
+            tls_mode=tls_mode)
   g.Start(args.lan_disc, args.rpc_server)
 
 
