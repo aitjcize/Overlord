@@ -62,10 +62,6 @@ const (
 	TLSForceEnable
 )
 
-// Stream control
-const (
-	stdinClosed = "##STDIN_CLOSED##"
-)
 
 // Registration status
 const (
@@ -1312,16 +1308,6 @@ func (ghost *Ghost) cleanupShellProcess(cmd *exec.Cmd) {
 }
 
 func (ghost *Ghost) handleShellInput(stdin io.WriteCloser, buf []byte) {
-	if len(buf) >= len(stdinClosed)*2 {
-		idx := bytes.Index(buf, []byte(stdinClosed+stdinClosed))
-		if idx != -1 {
-			if _, err := stdin.Write(buf[:idx]); err != nil {
-				log.Printf("Failed to write to stdin: %v", err)
-			}
-			stdin.Close()
-			return
-		}
-	}
 	if _, err := stdin.Write(buf); err != nil {
 		log.Printf("Failed to write to stdin: %v", err)
 	}
@@ -1360,14 +1346,22 @@ func (ghost *Ghost) SpawnShellServer(res *Response) error {
 
 	defer ghost.cleanupShellProcess(cmd)
 
+	stdinOpen := true
 	for {
 		select {
 		case buf := <-ghost.readChan:
-			ghost.handleShellInput(stdin, buf)
+			if stdinOpen {
+				ghost.handleShellInput(stdin, buf)
+			}
 		case err := <-ghost.readErrChan:
 			if err == io.EOF {
-				log.Println("SpawnShellServer: connection terminated")
-				return nil
+				if stdinOpen {
+					log.Println("SpawnShellServer: input EOF, closing stdin")
+					stdin.Close()
+					stdinOpen = false
+				}
+				// Continue waiting for subprocess to finish
+				continue
 			}
 			log.Printf("SpawnShellServer: %s\n", err)
 			return err

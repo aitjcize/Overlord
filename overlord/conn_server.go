@@ -7,6 +7,7 @@ package overlord
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -15,6 +16,18 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// halfCloseWriteConn is the interface for connections that support half-close.
+type halfCloseWriteConn interface {
+	CloseWrite() error
+}
+
+func halfCloseWrite(conn net.Conn) error {
+	if hc, ok := conn.(halfCloseWriteConn); ok {
+		return hc.CloseWrite()
+	}
+	return fmt.Errorf("connection type %T does not support CloseWrite", conn)
+}
 
 // RegistrationFailedError indicates an registration fail error.
 type RegistrationFailedError error
@@ -116,10 +129,8 @@ func (c *ConnServer) writeLogToWS(conn *websocket.Conn, buf string) error {
 	return conn.WriteMessage(websocket.BinaryMessage, []byte(buf))
 }
 
-// ModeForwards the input from Websocket to TCP socket.
+// forwardWSInput forwards the input from WebSocket to TCP socket.
 func (c *ConnServer) forwardWSInput() {
-	defer c.StopListen()
-
 	for {
 		mt, payload, err := c.wsConn.ReadMessage()
 		if err != nil {
@@ -128,16 +139,33 @@ func (c *ConnServer) forwardWSInput() {
 			} else {
 				log.Println("Unknown error while reading from WebSocket:", err)
 			}
+			c.StopListen()
 			return
 		}
 
 		switch mt {
-		case websocket.BinaryMessage, websocket.TextMessage:
+		case websocket.TextMessage:
+			var ctrl TerminalControl
+			if json.Unmarshal(payload, &ctrl) == nil && ctrl.Type == ControlTypeStdinClose {
+				log.Println("Received stdin_close control message")
+				if err := halfCloseWrite(c.Conn); err != nil {
+					log.Printf("Failed to half-close connection: %v", err)
+				}
+				// Stop reading input but do NOT call StopListen —
+				// the Listen loop must continue forwarding output.
+				return
+			}
+			// Not a recognized control message, forward as data
+			if _, err := c.Conn.Write(payload); err != nil {
+				log.Printf("Failed to write to connection: %v", err)
+			}
+		case websocket.BinaryMessage:
 			if _, err := c.Conn.Write(payload); err != nil {
 				log.Printf("Failed to write to connection: %v", err)
 			}
 		default:
 			log.Printf("Invalid message type %d\n", mt)
+			c.StopListen()
 			return
 		}
 	}

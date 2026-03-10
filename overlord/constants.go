@@ -51,9 +51,9 @@ const (
 	Failed  = "failed"
 )
 
-// Stream control
+// Stream control message types
 const (
-	StdinClosed = "##STDIN_CLOSED##"
+	ControlTypeStdinClose = "stdin_close"
 )
 
 // Request command names

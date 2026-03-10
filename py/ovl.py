@@ -58,8 +58,6 @@ _RETRY_TIMES = 3
 # echo -n overlord | md5sum
 _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
 
-# Stream control
-_STDIN_CLOSED = '##STDIN_CLOSED##'
 
 _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
                                           'ovl-ssh-control-')
@@ -658,7 +656,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
         if sys.stdin in rd:
           data = sys.stdin.buffer.read()
           if not data:
-            self.send(_STDIN_CLOSED * 2)
+            self.send(json.dumps({"type": "stdin_close"}))
             break
           self.send(data, binary=True)
     except (KeyboardInterrupt, RuntimeError):

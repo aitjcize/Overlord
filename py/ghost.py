@@ -59,8 +59,6 @@ _CONNECT_TIMEOUT = 3
 
 _USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 
-# Stream control
-_STDIN_CLOSED = '##STDIN_CLOSED##'
 
 SUCCESS = 'success'
 FAILED = 'failed'
@@ -762,9 +760,16 @@ class Ghost:
     try:
       p.stdin.write(self._sock.RecvBuf())
 
+      stdin_open = True
+      sock_readable = True
+
       while True:
-        rd, unused_wd, unused_xd = select.select(
-            [p.stdout, p.stderr, self._sock], [], [])
+        read_fds = [p.stdout, p.stderr]
+        if sock_readable:
+          read_fds.append(self._sock)
+
+        rd, unused_wd, unused_xd = select.select(read_fds, [], [])
+
         if p.stdout in rd:
           self._sock.Send(p.stdout.read(_BUFSIZE))
 
@@ -774,14 +779,16 @@ class Ghost:
         if self._sock in rd:
           ret = self._sock.Recv(_BUFSIZE)
           if not ret:
-            raise RuntimeError('connection terminated')
+            # TCP half-close: read side got EOF, close subprocess stdin
+            if stdin_open:
+              logging.info('SpawnShellServer: input EOF, closing stdin')
+              p.stdin.close()
+              stdin_open = False
+            sock_readable = False
+          else:
+            if stdin_open:
+              p.stdin.write(ret)
 
-          try:
-            idx = ret.index(_STDIN_CLOSED * 2)
-            p.stdin.write(ret[:idx])
-            p.stdin.close()
-          except ValueError:
-            p.stdin.write(ret)
         p.poll()
         if p.returncode is not None:
           break
