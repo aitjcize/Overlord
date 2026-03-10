@@ -62,7 +62,6 @@ const (
 	TLSForceEnable
 )
 
-
 // Registration status
 const (
 	statusDisconnected = "disconnected"

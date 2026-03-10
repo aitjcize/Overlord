@@ -16,12 +16,23 @@ jobs:
       - name: install
         run: |
           apk update
-          apk add git python3 make gcc linux-headers libc-dev py-pip
+          apk add git python3 make gcc linux-headers libc-dev py-pip curl
           python3 -m venv .venv
           source .venv/bin/activate
           pip install -r py/requirements.txt
+          pip install yapf pylint
       - name: Fix permission
         run: git config --global --add safe.directory $PWD
+      - name: go-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+          make go-lint
+      - name: py-lint
+        run: |
+          source .venv/bin/activate
+          make py-format
+          git diff --exit-code -- '*.py' || (echo "Python files need formatting. Run 'make py-format' locally." && exit 1)
+          make py-lint
       - name: test
         run: go test -v ./...
       - name: unittest
