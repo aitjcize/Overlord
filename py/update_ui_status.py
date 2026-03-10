@@ -21,12 +21,11 @@ import time
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument(
-      '-c',
-      '--config',
-      default='/run/factory/goofy_ghost.json',
-      help=('Specify path to the config file, '
-            'default file: /run/factory/goofy_ghost.json'))
+  parser.add_argument('-c',
+                      '--config',
+                      default='/run/factory/goofy_ghost.json',
+                      help=('Specify path to the config file, '
+                            'default file: /run/factory/goofy_ghost.json'))
 
   args = parser.parse_args()
 

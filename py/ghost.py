@@ -57,8 +57,9 @@ _DEFAULT_BIND_ADDRESS = '127.0.0.1'
 _BLOCK_SIZE = 4096
 _CONNECT_TIMEOUT = 3
 
-_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
-
+_USER_AGENT = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+               'AppleWebKit/537.36 (KHTML, like Gecko) '
+               'Chrome/109.0.0.0 Safari/537.36')
 
 SUCCESS = 'success'
 FAILED = 'failed'
@@ -228,7 +229,8 @@ class Ghost:
         id is randomly generated.
       sid: session ID. If the connection is requested by overlord, sid should
         be set to the corresponding session id assigned by overlord.
-      allowlist: comma-separated list of users/groups that can access this ghost.
+      allowlist: comma-separated list of users/groups that can access
+        this ghost.
       prop_file: properties file filename.
       terminal_sid: the terminal session ID associate with this client. This is
         use for file download.
@@ -352,7 +354,7 @@ class Ghost:
     except (ssl.SSLError, ssl.CertificateError) as e:
       logging.error('Upgrade: %s: %s', e.__class__.__name__, e)
       return
-    except Exception as e:
+    except Exception:
       logging.error('Upgrade: failed to download sha1sum file, abort')
       return
 
@@ -401,7 +403,7 @@ class Ghost:
 
     try:
       if self._prop_file:
-        with open(self._prop_file, 'r') as f:
+        with open(self._prop_file, 'r', encoding='utf-8') as f:
           self._properties = json.loads(f.read())
     except Exception as e:
       logging.error('LoadProperties: %s', e)
@@ -491,7 +493,7 @@ class Ghost:
         return [ret.group(1)]
       return []
     if self._platform == 'Linux':
-      with open('/proc/net/route', 'r') as f:
+      with open('/proc/net/route', 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
       ips = []
@@ -557,7 +559,7 @@ class Ghost:
 
     # Try DMI product UUID
     try:
-      with open('/sys/class/dmi/id/product_uuid', 'r') as f:
+      with open('/sys/class/dmi/id/product_uuid', 'r', encoding='utf-8') as f:
         return f.read().strip()
     except Exception:
       pass
@@ -570,7 +572,8 @@ class Ghost:
         if iface == 'lo':
           continue
 
-        with open('/sys/class/net/%s/address' % iface, 'r') as f:
+        with open('/sys/class/net/%s/address' % iface, 'r',
+                  encoding='utf-8') as f:
           macs.append(f.read().strip())
 
       return ';'.join(macs)
@@ -935,7 +938,7 @@ class Ghost:
 
   def _Fstat(self, path):
     if not os.path.isabs(path):
-      raise RuntimeError(f"absolute path required: {path}")
+      raise RuntimeError(f'absolute path required: {path}')
 
     entry = {'exists': os.path.exists(path)}
     if entry['exists']:
@@ -965,7 +968,7 @@ class Ghost:
 
     try:
       if not os.path.exists(path):
-        raise RuntimeError(f"No such file or directory: {path}")
+        raise RuntimeError(f'No such file or directory: {path}')
 
       entries = []
       entries.append(self._Fstat(path))
@@ -976,10 +979,9 @@ class Ghost:
             entries.append(self._Fstat(file_path))
           except OSError as e:
             logging.exception(e)
-            pass
 
-        for dir in dirs:
-          dir_path = os.path.join(root, dir)
+        for dirname in dirs:
+          dir_path = os.path.join(root, dirname)
           try:
             entries.append(self._Fstat(dir_path))
           except OSError:
@@ -1500,31 +1502,31 @@ def install_service_linux(args):
     user_info = pwd.getpwnam(current_user)
     home_dir = user_info.pw_dir
   except Exception as e:
-    print(f"Failed to get user info: {e}")
+    print(f'Failed to get user info: {e}')
     return False
 
   # Get the current executable path
   exec_path = os.path.abspath(sys.argv[0])
-  target_path = "/opt/bin/ghost"
+  target_path = '/opt/bin/ghost'
 
   # Create /opt/bin directory if it doesn't exist
   try:
-    subprocess.run(["sudo", "mkdir", "-p", "/opt/bin"], check=True)
+    subprocess.run(['sudo', 'mkdir', '-p', '/opt/bin'], check=True)
   except subprocess.CalledProcessError as e:
-    print(f"Failed to create /opt/bin directory: {e}")
+    print(f'Failed to create /opt/bin directory: {e}')
     return False
 
   # Copy ghost binary to /opt/bin
   try:
-    subprocess.run(["sudo", "cp", exec_path, target_path], check=True)
-    subprocess.run(["sudo", "chmod", "755", target_path], check=True)
+    subprocess.run(['sudo', 'cp', exec_path, target_path], check=True)
+    subprocess.run(['sudo', 'chmod', '755', target_path], check=True)
   except subprocess.CalledProcessError as e:
-    print(f"Failed to install ghost binary: {e}")
+    print(f'Failed to install ghost binary: {e}')
     return False
 
   # Build service command arguments (filter out --install)
-  service_args = [arg for arg in sys.argv[1:] if arg != "--install"]
-  service_command = f"{target_path} {' '.join(service_args)}"
+  service_args = [arg for arg in sys.argv[1:] if arg != '--install']
+  service_command = target_path + ' ' + ' '.join(service_args)
 
   # Create systemd service file content
   service_content = f"""[Unit]
@@ -1548,7 +1550,7 @@ WantedBy=multi-user.target
 
   # Find systemd service directory
   service_dirs = [
-      "/etc/systemd/system", "/usr/lib/systemd/system", "/lib/systemd/system"
+      '/etc/systemd/system', '/usr/lib/systemd/system', '/lib/systemd/system'
   ]
   service_dir = None
   for d in service_dirs:
@@ -1557,48 +1559,49 @@ WantedBy=multi-user.target
       break
 
   if not service_dir:
-    print("No systemd service directory found")
+    print('No systemd service directory found')
     return False
 
-  service_file_path = os.path.join(service_dir, "ghost.service")
+  service_file_path = os.path.join(service_dir, 'ghost.service')
 
   # Write service file
   try:
-    with open("/tmp/ghost.service", "w") as f:
+    with open('/tmp/ghost.service', 'w', encoding='utf-8') as f:
       f.write(service_content)
-    subprocess.run(["sudo", "mv", "/tmp/ghost.service", service_file_path],
+    subprocess.run(['sudo', 'mv', '/tmp/ghost.service', service_file_path],
                    check=True)
-    print(f"Systemd service file installed at {service_file_path}")
+    print(f'Systemd service file installed at {service_file_path}')
   except Exception as e:
-    print(f"Failed to install systemd service file: {e}")
+    print(f'Failed to install systemd service file: {e}')
     return False
 
   # Reload systemd and enable service
   try:
-    subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
-    subprocess.run(["sudo", "systemctl", "enable", "ghost.service"], check=True)
-    print("Ghost service enabled for automatic startup")
+    subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+    subprocess.run(['sudo', 'systemctl', 'enable', 'ghost.service'], check=True)
+    print('Ghost service enabled for automatic startup')
 
     # Start service if not already running
-    result = subprocess.run(["systemctl", "is-active", "ghost.service"],
+    result = subprocess.run(['systemctl', 'is-active', 'ghost.service'],
                             capture_output=True,
-                            text=True)
+                            text=True,
+                            check=False)
     if result.returncode != 0:
-      print("Starting ghost service...")
-      subprocess.run(["sudo", "systemctl", "start", "ghost.service"],
+      print('Starting ghost service...')
+      subprocess.run(['sudo', 'systemctl', 'start', 'ghost.service'],
                      check=True)
-      print("Ghost service started successfully")
+      print('Ghost service started successfully')
     else:
-      print("Ghost service is already running")
+      print('Ghost service is already running')
 
   except subprocess.CalledProcessError as e:
-    print(f"Failed to enable/start ghost service: {e}")
+    print(f'Failed to enable/start ghost service: {e}')
     return False
 
-  print("Ghost service installation completed successfully!")
-  print("The ghost service will start automatically on system boot.")
-  print("To check service status, run: sudo systemctl status ghost.service")
-  print("To stop the service, run: sudo systemctl stop ghost.service")
+  print('Ghost service installation completed successfully!')
+  print('The ghost service will start automatically on system boot.')
+  print('To check service status, run: sudo systemctl status ghost.service')
+  print('To stop the service, run: sudo systemctl stop ghost.service')
 
   return True
 
@@ -1614,36 +1617,36 @@ def install_service_darwin(args):
     user_info = pwd.getpwnam(current_user)
     home_dir = user_info.pw_dir
   except Exception as e:
-    print(f"Failed to get user info: {e}")
+    print(f'Failed to get user info: {e}')
     return False
 
   # Get the current executable path
   exec_path = os.path.abspath(sys.argv[0])
-  bin_dir = os.path.join(home_dir, ".local", "bin")
-  target_path = os.path.join(bin_dir, "ghost")
+  bin_dir = os.path.join(home_dir, '.local', 'bin')
+  target_path = os.path.join(bin_dir, 'ghost')
 
   try:
     os.makedirs(bin_dir, mode=0o755, exist_ok=True)
   except Exception as e:
-    print(f"Failed to create ~/.local/bin directory: {e}")
+    print(f'Failed to create ~/.local/bin directory: {e}')
     return False
 
   try:
     shutil.copy2(exec_path, target_path)
     os.chmod(target_path, 0o755)
   except Exception as e:
-    print(f"Failed to install ghost binary: {e}")
+    print(f'Failed to install ghost binary: {e}')
     return False
 
   # Build service command arguments (filter out --install)
-  service_args = [arg for arg in sys.argv[1:] if arg != "--install"]
+  service_args = [arg for arg in sys.argv[1:] if arg != '--install']
   program_args = [target_path] + service_args
 
   # Create program arguments XML for plist
-  args_xml = ""
+  args_xml = ''
   for arg in program_args:
     if arg:  # Skip empty strings
-      args_xml += f"\t\t<string>{arg}</string>\n"
+      args_xml += f'\t\t<string>{arg}</string>\n'
 
   # Create launchd plist content
   plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -1677,47 +1680,47 @@ def install_service_darwin(args):
 """
 
   # Create LaunchAgents directory and plist file
-  launch_agents_dir = os.path.join(home_dir, "Library", "LaunchAgents")
-  plist_file_path = os.path.join(launch_agents_dir, "com.overlord.ghost.plist")
+  launch_agents_dir = os.path.join(home_dir, 'Library', 'LaunchAgents')
+  plist_file_path = os.path.join(launch_agents_dir, 'com.overlord.ghost.plist')
 
   try:
     os.makedirs(launch_agents_dir, mode=0o755, exist_ok=True)
 
-    with open(plist_file_path, "w") as f:
+    with open(plist_file_path, 'w', encoding='utf-8') as f:
       f.write(plist_content)
 
-    print(f"Launchd service installed at {plist_file_path}")
+    print(f'Launchd service installed at {plist_file_path}')
   except Exception as e:
-    print(f"Failed to install launchd plist file: {e}")
+    print(f'Failed to install launchd plist file: {e}')
     return False
 
   # Load the service with launchctl
   try:
-    subprocess.run(["launchctl", "load", plist_file_path], check=True)
-    print("Ghost service loaded and enabled for automatic startup")
+    subprocess.run(['launchctl', 'load', plist_file_path], check=True)
+    print('Ghost service loaded and enabled for automatic startup')
 
     # Check if ghost is already running and start if not
     try:
       # Try to connect to RPC server to check if running
       GhostRPCServer().GetStatus()
-      print("Ghost service is already running")
-    except:
-      print("Starting ghost service...")
+      print('Ghost service is already running')
+    except Exception:
+      print('Starting ghost service...')
       try:
-        subprocess.run(["launchctl", "start", "com.overlord.ghost"], check=True)
-        print("Ghost service started successfully")
+        subprocess.run(['launchctl', 'start', 'com.overlord.ghost'], check=True)
+        print('Ghost service started successfully')
       except subprocess.CalledProcessError as e:
-        print(f"Warning: failed to start ghost service: {e}")
-        print("The service should start automatically on next login")
+        print(f'Warning: failed to start ghost service: {e}')
+        print('The service should start automatically on next login')
 
   except subprocess.CalledProcessError as e:
-    print(f"Failed to load ghost service: {e}")
+    print(f'Failed to load ghost service: {e}')
     return False
 
-  print("Ghost service installation completed successfully!")
-  print("The ghost service will start automatically on user login.")
-  print("To check if service is loaded, run: launchctl list | grep ghost")
-  print(f"To unload the service, run: launchctl unload {plist_file_path}")
+  print('Ghost service installation completed successfully!')
+  print('The ghost service will start automatically on user login.')
+  print('To check if service is loaded, run: launchctl list | grep ghost')
+  print(f'To unload the service, run: launchctl unload {plist_file_path}')
 
   return True
 
@@ -1726,12 +1729,12 @@ def install_service(args):
   """Install ghost as a system service."""
   system = platform.system()
 
-  if system == "Linux":
+  if system == 'Linux':
     return install_service_linux(args)
-  elif system == "Darwin":
+  elif system == 'Darwin':
     return install_service_darwin(args)
   else:
-    print(f"Service installation not supported on {system}")
+    print(f'Service installation not supported on {system}')
     return False
 
 

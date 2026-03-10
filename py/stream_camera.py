@@ -15,7 +15,6 @@ import struct
 import subprocess
 import sys
 
-
 _SERVER_PORT = 8080
 _BUFSIZ = 8192
 _DEFAULT_DEVICE = '/dev/video0'
@@ -25,6 +24,7 @@ _DEFAULT_FRAMERATE = 30
 
 
 class ForwardToStdoutRequestHandler(http.server.BaseHTTPRequestHandler):
+
   def do_POST(self):
     size = self.server.size.split('x')
     width = int(size[0])
@@ -58,9 +58,11 @@ def StartCaptureProcess(args):
     return subprocess.Popen(
         'sleep 1; '
         'ffmpeg -an -s %s -f video4linux2 -i %s -f mpeg1video -b:v %s -r %d '
-        'http://localhost:%s/' % (args.size, args.device, args.bitrate,
-                                  args.framerate, _SERVER_PORT),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        'http://localhost:%s/' %
+        (args.size, args.device, args.bitrate, args.framerate, _SERVER_PORT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=True)
   if system == 'Darwin':
     return subprocess.Popen(
         'sleep 1; '
@@ -68,7 +70,9 @@ def StartCaptureProcess(args):
         '-f mpeg1video -r %d http://localhost:%s/' %
         (args.size, args.framerate, args.device, args.bitrate, args.framerate,
          _SERVER_PORT),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=True)
   raise ValueError('Only support Linux or Darwin, found %s' % system)
 
 
@@ -78,13 +82,21 @@ def StopCaptureProcess(handler):
 
 def main():
   parser = argparse.ArgumentParser()
-  parser.add_argument('--device', dest='device', default=_DEFAULT_DEVICE,
+  parser.add_argument('--device',
+                      dest='device',
+                      default=_DEFAULT_DEVICE,
                       help='Video device to capture video from')
-  parser.add_argument('--size', dest='size', default=_DEFAULT_SIZE,
+  parser.add_argument('--size',
+                      dest='size',
+                      default=_DEFAULT_SIZE,
                       help='Resolution of the video stream')
-  parser.add_argument('--bitrate', dest='bitrate', default=_DEFAULT_BITRATE,
+  parser.add_argument('--bitrate',
+                      dest='bitrate',
+                      default=_DEFAULT_BITRATE,
                       help='Bitrate of the video stream')
-  parser.add_argument('--framerate', type=int, dest='framerate',
+  parser.add_argument('--framerate',
+                      type=int,
+                      dest='framerate',
                       default=_DEFAULT_FRAMERATE,
                       help='Framerate of the video stream')
   args = parser.parse_args()
@@ -92,8 +104,8 @@ def main():
   handler = StartCaptureProcess(args)
   atexit.register(StopCaptureProcess, handler)
 
-  server = http.server.HTTPServer(
-      ('localhost', _SERVER_PORT), ForwardToStdoutRequestHandler)
+  server = http.server.HTTPServer(('localhost', _SERVER_PORT),
+                                  ForwardToStdoutRequestHandler)
   server.size = args.size
   server.serve_forever()
 

@@ -12,12 +12,10 @@ from __future__ import print_function
 
 import fcntl
 import logging
-import select
 import socket
 import struct
 import sys
 import SocketServer
-
 
 IFNAMSIZ = 16
 SIOCGIFADDR = 0x8915
@@ -62,6 +60,7 @@ def GetIPs(interfaces):
 
 
 class OverlordLANDiscoveryRelayServer(SocketServer.UDPServer):
+
   def __init__(self, interfaces, *args, **kwargs):
     SocketServer.UDPServer.__init__(self, *args, **kwargs)
 
@@ -78,6 +77,7 @@ class OverlordLANDiscoveryRelayServer(SocketServer.UDPServer):
 
 
 class OverlordLANDiscoveryRelayHandler(SocketServer.BaseRequestHandler):
+
   def handle(self):
     data = self.request[0]
 
@@ -104,8 +104,7 @@ def main():
     sys.exit(1)
 
   server = OverlordLANDiscoveryRelayServer(
-      interfaces,
-      ('0.0.0.0', _OVERLORD_LAN_DISCOVERY_PORT),
+      interfaces, ('0.0.0.0', _OVERLORD_LAN_DISCOVERY_PORT),
       OverlordLANDiscoveryRelayHandler)
   server.serve_forever()
 

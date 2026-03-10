@@ -4,7 +4,6 @@
 # found in the LICENSE file.
 
 import argparse
-import ast
 import base64
 import fcntl
 import functools
@@ -38,7 +37,6 @@ from xmlrpc.server import SimpleXMLRPCServer
 from ws4py.client import WebSocketBaseClient
 import yaml
 
-
 _CERT_DIR = os.path.expanduser('~/.config/ovl')
 
 _DEBUG = False
@@ -57,7 +55,6 @@ _RETRY_TIMES = 3
 
 # echo -n overlord | md5sum
 _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
-
 
 _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
                                           'ovl-ssh-control-')
@@ -89,7 +86,9 @@ The fingerprint for the TLS host certificate sent by the remote host is
 Remove '%s' if you still want to proceed.
 SSL Certificate verification failed."""
 
-_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+_USER_AGENT = (
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36')
 
 
 def GetVersionDigest():
@@ -116,14 +115,11 @@ def MakeRequestUrl(state, url):
   if url.startswith('http://') or url.startswith('https://'):
     return url
 
-  return 'http%s://%s:%d%s' % (
-      's' if state.ssl else '',
-      state.host,
-      state.port,
-      url if url.startswith('/') else '/' + url)
+  return 'http%s://%s:%d%s' % ('s' if state.ssl else '', state.host, state.port,
+                               url if url.startswith('/') else '/' + url)
 
 
-def UrlOpen(state, url, headers=[], data=None, method='GET'):
+def UrlOpen(state, url, headers=None, data=None, method='GET'):
   """Open a URL with proper headers.
 
   Args:
@@ -136,6 +132,8 @@ def UrlOpen(state, url, headers=[], data=None, method='GET'):
   Returns:
     urllib.response.addinfourl: Response from the server.
   """
+  if headers is None:
+    headers = []
   url = MakeRequestUrl(state, url)
   headers = list(headers)  # Make a copy to avoid modifying the original
   headers.append(('User-Agent', _USER_AGENT))
@@ -145,11 +143,10 @@ def UrlOpen(state, url, headers=[], data=None, method='GET'):
     headers.append(('Content-Type', 'application/json'))
     data = json.dumps(data).encode('utf-8')
 
-  req = urllib.request.Request(
-      url=url,
-      data=data,
-      headers=dict(headers),
-      method=method)
+  req = urllib.request.Request(url=url,
+                               data=data,
+                               headers=dict(headers),
+                               method=method)
   return urllib.request.urlopen(req, context=state.SSLContext())
 
 
@@ -174,7 +171,9 @@ def KillGraceful(pid, wait_secs=1):
 
 def AutoRetry(action_name, retries):
   """Decorator for retry function call."""
+
   def Wrap(func):
+
     @functools.wraps(func)
     def Loop(*args, **kwargs):
       for unused_i in range(retries):
@@ -188,7 +187,9 @@ def AutoRetry(action_name, retries):
           break
       else:
         print('error: failed to %s %s' % (action_name, args[0]))
+
     return Loop
+
   return Wrap
 
 
@@ -239,30 +240,36 @@ class ProgressBar:
     if size_in_bytes < 1024:
       unit = 'B'
       value = size_in_bytes
-    elif size_in_bytes < 1024 ** 2:
+    elif size_in_bytes < 1024**2:
       unit = 'KiB'
       value = size_in_bytes / 1024
-    elif size_in_bytes < 1024 ** 3:
+    elif size_in_bytes < 1024**3:
       unit = 'MiB'
-      value = size_in_bytes / (1024 ** 2)
-    elif size_in_bytes < 1024 ** 4:
+      value = size_in_bytes / (1024**2)
+    elif size_in_bytes < 1024**4:
       unit = 'GiB'
-      value = size_in_bytes / (1024 ** 3)
+      value = size_in_bytes / (1024**3)
+    else:
+      unit = 'TiB'
+      value = size_in_bytes / (1024**4)
     return ' %6.1f %3s' % (value, unit)
 
   def _SpeedToHuman(self, speed_in_bs):
     if speed_in_bs < 1024:
       unit = 'B'
       value = speed_in_bs
-    elif speed_in_bs < 1024 ** 2:
+    elif speed_in_bs < 1024**2:
       unit = 'K'
       value = speed_in_bs / 1024
-    elif speed_in_bs < 1024 ** 3:
+    elif speed_in_bs < 1024**3:
       unit = 'M'
-      value = speed_in_bs / (1024 ** 2)
-    elif speed_in_bs < 1024 ** 4:
+      value = speed_in_bs / (1024**2)
+    elif speed_in_bs < 1024**4:
       unit = 'G'
-      value = speed_in_bs / (1024 ** 3)
+      value = speed_in_bs / (1024**3)
+    else:
+      unit = 'T'
+      value = speed_in_bs / (1024**4)
     return ' %6.1f%s/s' % (value, unit)
 
   def _DurationToClock(self, duration):
@@ -284,13 +291,13 @@ class ProgressBar:
     elapse_str = self._DurationToClock(elapse_time)
 
     width = int(self._max * percentage / 100.0)
-    sys.stdout.write(
-        '%*s' % (- self._name_max,
-                 self._name if len(self._name) <= self._name_max else
-                 self._name[:self._name_max - 4] + ' ...') +
-        size_str + speed_str + elapse_str +
-        ((' [' + '#' * width + ' ' * (self._max - width) + ']' +
-          '%4d%%' % int(percentage)) if self._max > 2 else '') + '\r')
+    sys.stdout.write('%*s' %
+                     (-self._name_max, self._name if len(self._name) <= self.
+                      _name_max else self._name[:self._name_max - 4] + ' ...') +
+                     size_str + speed_str + elapse_str +
+                     ((' [' + '#' * width + ' ' * (self._max - width) + ']' +
+                       '%4d%%' % int(percentage)) if self._max > 2 else '') +
+                     '\r')
     sys.stdout.flush()
 
   def End(self):
@@ -300,7 +307,9 @@ class ProgressBar:
 
 
 class DaemonState:
+
   """DaemonState is used for storing Overlord state info."""
+
   def __init__(self):
     self.version_sha1sum = GetVersionDigest()
     self.host = None
@@ -341,7 +350,6 @@ class DaemonState:
 
     return ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
 
-
   @staticmethod
   def FromDict(kw):
     state = DaemonState()
@@ -352,7 +360,9 @@ class DaemonState:
 
 
 class OverlordClientDaemon:
+
   """Overlord Client Daemon."""
+
   def __init__(self):
     self._state = DaemonState()
     self._server = None
@@ -362,7 +372,8 @@ class OverlordClientDaemon:
 
   def StartRPCServer(self):
     self._server = SimpleXMLRPCServer(_OVERLORD_CLIENT_DAEMON_RPC_ADDR,
-                                      logRequests=False, allow_none=True)
+                                      logRequests=False,
+                                      allow_none=True)
     exports = [
         (self.State, 'State'),
         (self.Ping, 'Ping'),
@@ -438,6 +449,7 @@ class OverlordClientDaemon:
     Returns:
       A tupple (check_result, if_certificate_is_loaded)
     """
+
     def _DoConnect(context):
       sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
       try:
@@ -461,21 +473,19 @@ class OverlordClientDaemon:
     """
     url = '/api/auth/login'
     data = json.dumps({
-      'username': self._state.username,
-      'password': self._state.password
+        'username': self._state.username,
+        'password': self._state.password
     }).encode('utf-8')
 
-    headers = {
-      'Content-Type': 'application/json',
-      'User-Agent': _USER_AGENT
-    }
+    headers = {'Content-Type': 'application/json', 'User-Agent': _USER_AGENT}
 
     full_url = MakeRequestUrl(self._state, url)
     request = urllib.request.Request(full_url, data=data, headers=headers)
 
     try:
       context = self._state.SSLContext()
-      with urllib.request.urlopen(request, timeout=_DEFAULT_HTTP_TIMEOUT,
+      with urllib.request.urlopen(request,
+                                  timeout=_DEFAULT_HTTP_TIMEOUT,
                                   context=context) as response:
         result = json.loads(response.read().decode('utf-8')).get('data', {})
         return result.get('token')
@@ -483,9 +493,15 @@ class OverlordClientDaemon:
       error = json.loads(e.read().decode('utf-8')).get('data', 'unknown error')
       raise RuntimeError(error) from e
 
-  def Connect(self, host, port, ssh_pid=None,
-              username=None, password=None, orig_host=None,
-              ssl_verify=True, ssl_check_hostname=True):
+  def Connect(self,
+              host,
+              port,
+              ssh_pid=None,
+              username=None,
+              password=None,
+              orig_host=None,
+              ssl_verify=True,
+              ssl_check_hostname=True):
     self._state.username = username
     self._state.password = password
     self._state.host = host
@@ -503,10 +519,12 @@ class OverlordClientDaemon:
       result = self._CheckTLSCertificate()
       if not result:
         if self._state.ssl_self_signed:
-          return ('SSLCertificateChanged', ssl.get_server_certificate(
-              (self._state.host, self._state.port)))
-        return ('SSLVerifyFailed', ssl.get_server_certificate(
-            (self._state.host, self._state.port)))
+          return ('SSLCertificateChanged',
+                  ssl.get_server_certificate(
+                      (self._state.host, self._state.port)))
+        return ('SSLVerifyFailed',
+                ssl.get_server_certificate(
+                    (self._state.host, self._state.port)))
 
     try:
       self._state.ssl = ssl_enabled
@@ -551,11 +569,13 @@ class OverlordClientDaemon:
 
 
 class SSLEnabledWebSocketBaseClient(WebSocketBaseClient):
+
   def __init__(self, state, *args, **kwargs):
     super().__init__(ssl_context=state.SSLContext(), *args, **kwargs)
 
 
 class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
+
   def __init__(self, state, mid, escape, *args, **kwargs):
     super().__init__(state, *args, **kwargs)
     self._mid = mid
@@ -573,9 +593,10 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     rows, cols = GetTerminalSize()
     if self._last_size != (rows, cols):
       self._last_size = (rows, cols)
-      self.send(f"\x1b[8;{rows};{cols}t")
+      self.send(f'\x1b[8;{rows};{cols}t')
 
   def opened(self):
+
     def _FeedInput():
       self._old_termios = termios.tcgetattr(self._stdin_fd)
       tty.setraw(self._stdin_fd)
@@ -583,7 +604,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
       # Send initial terminal size
       rows, cols = GetTerminalSize()
       self._last_size = (rows, cols)
-      self.send(f"\x1b[8;{rows};{cols}t")
+      self.send(f'\x1b[8;{rows};{cols}t')
 
       READY, ENTER_PRESSED, ESCAPE_PRESSED = range(3)
 
@@ -614,7 +635,8 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
     t.start()
 
     # Set up SIGWINCH handler
-    self._old_sigwinch_handler = signal.signal(signal.SIGWINCH, self._handle_sigwinch)
+    self._old_sigwinch_handler = signal.signal(signal.SIGWINCH,
+                                               self._handle_sigwinch)
 
   def closed(self, code, reason=None):
     del code, reason  # Unused.
@@ -632,6 +654,7 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
 
 
 class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
+
   def __init__(self, state, output, *args, **kwargs):
     """Constructor.
 
@@ -656,7 +679,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
         if sys.stdin in rd:
           data = sys.stdin.buffer.read()
           if not data:
-            self.send(json.dumps({"type": "stdin_close"}))
+            self.send(json.dumps({'type': 'stdin_close'}))
             break
           self.send(data, binary=True)
     except (KeyboardInterrupt, RuntimeError):
@@ -676,6 +699,7 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
 
 
 class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
+
   def __init__(self, state, sock, *args, **kwargs):
     super().__init__(state, *args, **kwargs)
     self._sock = sock
@@ -725,13 +749,17 @@ def Command(command, help_msg=None, args=None):
   """Decorator for adding argparse parameter for a method."""
   if args is None:
     args = []
+
   def WrapFunc(func):
+
     @functools.wraps(func)
     def Wrapped(*args, **kwargs):
       return func(*args, **kwargs)
+
     # pylint: disable=protected-access
     Wrapped.__arg_attr = {'command': command, 'help': help_msg, 'args': args}
     return Wrapped
+
   return WrapFunc
 
 
@@ -749,9 +777,15 @@ def ParseMethodSubCommands(cls):
 
 
 class FileEntry:
+
   """Class to represent a file entry with its metadata."""
 
-  def __init__(self, path, perm=0o644, is_symlink=False, link_target='', is_dir=False):
+  def __init__(self,
+               path,
+               perm=0o644,
+               is_symlink=False,
+               link_target='',
+               is_dir=False):
     self.path = path
     self.perm = perm
     self.is_symlink = is_symlink
@@ -759,7 +793,7 @@ class FileEntry:
     self.is_dir = is_dir
 
   def __repr__(self):
-    return f"{self.ftype} {self.path} {oct(self.perm)[2:]} {self.link_target}"
+    return f'{self.ftype} {self.path} {oct(self.perm)[2:]} {self.link_target}'
 
   @property
   def name(self):
@@ -771,8 +805,10 @@ class FileEntry:
       return 'd'
     return 'l' if self.is_symlink else 'f'
 
+
 @ParseMethodSubCommands
 class OverlordCliClient:
+
   """Overlord command line interface client."""
 
   SUBCOMMANDS = []
@@ -790,14 +826,22 @@ class OverlordCliClient:
                                             dest='subcommand')
     subparsers.required = True
 
-    root_parser.add_argument('-s', dest='selected_mid', action='store',
+    root_parser.add_argument('-s',
+                             dest='selected_mid',
+                             action='store',
                              default=None,
                              help='select target to execute command on')
-    root_parser.add_argument('-S', dest='select_mid_before_action',
-                             action='store_true', default=False,
+    root_parser.add_argument('-S',
+                             dest='select_mid_before_action',
+                             action='store_true',
+                             default=False,
                              help='select target before executing command')
-    root_parser.add_argument('-e', dest='escape', metavar='ESCAPE_CHAR',
-                             action='store', default=_ESCAPE, type=str,
+    root_parser.add_argument('-e',
+                             dest='escape',
+                             metavar='ESCAPE_CHAR',
+                             action='store',
+                             default=_ESCAPE,
+                             type=str,
                              help='set shell escape character, \'none\' to '
                              'disable escape completely')
 
@@ -867,7 +911,7 @@ class OverlordCliClient:
       os.makedirs(_CERT_DIR)
     except Exception:
       pass
-    with open(GetTLSCertPath(host), 'w') as f:
+    with open(GetTLSCertPath(host), 'w', encoding='utf-8') as f:
       f.write(cert_pem)
 
   def _HTTPPostFile(self, url, filename, progress=None):
@@ -886,8 +930,7 @@ class OverlordCliClient:
         '--' + boundary,
         'Content-Disposition: form-data; name="file"; '
         'filename="%s"' % os.path.basename(filename),
-        'Content-Type: application/octet-stream',
-        '', ''
+        'Content-Type: application/octet-stream', '', ''
     ]
     part_header = CRLF.join(part_headers)
     end_part = CRLF + '--' + boundary + '--' + CRLF
@@ -927,7 +970,7 @@ class OverlordCliClient:
 
     resp = h.getresponse()
     if resp.status != 200:
-      raise RuntimeError(f"Failed to upload file: {resp.read()}")
+      raise RuntimeError(f'Failed to upload file: {resp.read()}')
 
   def CheckDaemon(self):
     self._server = OverlordClientDaemon.GetRPCServer()
@@ -970,9 +1013,13 @@ class OverlordCliClient:
 
     p = subprocess.Popen([
         'ssh',
-        '-S', control_file,
-        '-O', 'check', host,
-    ], stderr=subprocess.PIPE)
+        '-S',
+        control_file,
+        '-O',
+        'check',
+        host,
+    ],
+                         stderr=subprocess.PIPE)
     unused_stdout, stderr = p.communicate()
 
     s = re.search(r'pid=(\d+)', stderr)
@@ -992,7 +1039,8 @@ class OverlordCliClient:
 
     if self._state.ssh_pid is not None:
       with subprocess.Popen(
-          ['kill', '-0', str(self._state.ssh_pid)], stdout=subprocess.PIPE,
+          ['kill', '-0', str(self._state.ssh_pid)],
+          stdout=subprocess.PIPE,
           stderr=subprocess.PIPE) as p:
         pass
       if p.returncode != 0:
@@ -1013,11 +1061,10 @@ class OverlordCliClient:
     bio = BytesIO()
     ws = ShellWebSocketClient(
         self._state, bio,
-        scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' % (
-            self._state.host, self._state.port,
-            urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(command),
-            urllib.parse.quote(self._state.jwt_token)))
+        scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' %
+        (self._state.host, self._state.port,
+         urllib.parse.quote(self._selected_mid), urllib.parse.quote(command),
+         urllib.parse.quote(self._state.jwt_token)))
     ws.connect()
     ws.run()
     return bio.getvalue().decode('utf-8')
@@ -1041,27 +1088,58 @@ class OverlordCliClient:
       print('Client %s selected.' % self._selected_mid)
 
   @Command('connect', 'connect to Overlord server', [
-      Arg('host', metavar='HOST', type=str, default='127.0.0.1',
+      Arg('host',
+          metavar='HOST',
+          type=str,
+          default='127.0.0.1',
           help='Overlord hostname/IP'),
-      Arg('port', metavar='PORT', type=int, nargs='?',
-          default=_DEFAULT_HTTPS_PORT, help='Overlord port'),
-      Arg('-f', '--forward', dest='ssh_forward', default=False,
+      Arg('port',
+          metavar='PORT',
+          type=int,
+          nargs='?',
+          default=_DEFAULT_HTTPS_PORT,
+          help='Overlord port'),
+      Arg('-f',
+          '--forward',
+          dest='ssh_forward',
+          default=False,
           action='store_true',
           help='connect with SSH forwarding to the host'),
-      Arg('-p', '--ssh-port', dest='ssh_port', default=22,
-          type=int, help='SSH server port for SSH forwarding'),
-      Arg('-l', '--ssh-login', dest='ssh_login', default='',
-          type=str, help='SSH server login name for SSH forwarding'),
-      Arg('-u', '--user', dest='user', default=None,
-          type=str, help='Overlord HTTP auth username'),
-      Arg('-w', '--passwd', dest='passwd', default=None, type=str,
+      Arg('-p',
+          '--ssh-port',
+          dest='ssh_port',
+          default=22,
+          type=int,
+          help='SSH server port for SSH forwarding'),
+      Arg('-l',
+          '--ssh-login',
+          dest='ssh_login',
+          default='',
+          type=str,
+          help='SSH server login name for SSH forwarding'),
+      Arg('-u',
+          '--user',
+          dest='user',
+          default=None,
+          type=str,
+          help='Overlord HTTP auth username'),
+      Arg('-w',
+          '--passwd',
+          dest='passwd',
+          default=None,
+          type=str,
           help='Overlord HTTP auth password'),
-      Arg('--ssl-no-verify', dest='ssl_verify',
-          default=True, action='store_false',
+      Arg('--ssl-no-verify',
+          dest='ssl_verify',
+          default=True,
+          action='store_false',
           help='Ignore SSL cert verification'),
-      Arg('--ssl-no-check-hostname', dest='ssl_check_hostname',
-          default=True, action='store_false',
-          help='Ignore SSL cert hostname check')])
+      Arg('--ssl-no-check-hostname',
+          dest='ssl_check_hostname',
+          default=True,
+          action='store_false',
+          help='Ignore SSL cert hostname check')
+  ])
   def Connect(self, args):
     ssh_pid = None
     host = args.host
@@ -1085,13 +1163,14 @@ class OverlordCliClient:
           args.passwd = getpass.getpass('Password: ')
 
         ret = self._server.Connect(host, args.port, ssh_pid, args.user,
-                                   args.passwd, orig_host,
-                                   args.ssl_verify, args.ssl_check_hostname)
+                                   args.passwd, orig_host, args.ssl_verify,
+                                   args.ssl_check_hostname)
         if isinstance(ret, list):
+          fp_text = ''
           if ret[0].startswith('SSL'):
             cert_pem = ret[1]
             fp = GetTLSCertificateSHA1Fingerprint(cert_pem)
-            fp_text = ':'.join([fp[i:i+2] for i in range(0, len(fp), 2)])
+            fp_text = ':'.join([fp[i:i + 2] for i in range(0, len(fp), 2)])
 
           if ret[0] == 'SSLCertificateChanged':
             print(_TLS_CERT_CHANGED_WARNING % (fp_text, GetTLSCertPath(host)))
@@ -1165,18 +1244,22 @@ class OverlordCliClient:
     if size_in_bytes < 1024:
       unit = 'B'
       value = size_in_bytes
-    elif size_in_bytes < 1024 ** 2:
+    elif size_in_bytes < 1024**2:
       unit = 'KiB'
       value = size_in_bytes / 1024
-    elif size_in_bytes < 1024 ** 3:
+    elif size_in_bytes < 1024**3:
       unit = 'MiB'
-      value = size_in_bytes / (1024 ** 2)
-    elif size_in_bytes < 1024 ** 4:
+      value = size_in_bytes / (1024**2)
+    elif size_in_bytes < 1024**4:
       unit = 'GiB'
-      value = size_in_bytes / (1024 ** 3)
+      value = size_in_bytes / (1024**3)
+    else:
+      unit = 'TiB'
+      value = size_in_bytes / (1024**4)
     return '%6.1f %3s' % (value, unit)
 
   def _FilterClients(self, clients, prop_filters, mid=None):
+
     def _ClientPropertiesMatch(client, key, regex):
       try:
         return bool(re.search(regex, client['properties'][key]))
@@ -1199,12 +1282,19 @@ class OverlordCliClient:
     return clients
 
   @Command('ls', 'list clients', [
-      Arg('-f', '--filter', default=[], dest='filters', action='append',
+      Arg('-f',
+          '--filter',
+          default=[],
+          dest='filters',
+          action='append',
           help=('Conditions to filter clients by properties. '
                 'Should be in form "key=regex", where regex is the regular '
                 'expression that should be found in the value. '
                 'Multiple --filter arguments would be ANDed.')),
-      Arg('-v', '--verbose', default=False, action='store_true',
+      Arg('-v',
+          '--verbose',
+          default=False,
+          action='store_true',
           help='Print properties of each client.')
   ])
   def ListClients(self, args):
@@ -1216,12 +1306,17 @@ class OverlordCliClient:
         print(client['mid'])
 
   @Command('select', 'select default client', [
-      Arg('-f', '--filter', default=[], dest='filters', action='append',
+      Arg('-f',
+          '--filter',
+          default=[],
+          dest='filters',
+          action='append',
           help=('Conditions to filter clients by properties. '
                 'Should be in form "key=regex", where regex is the regular '
                 'expression that should be found in the value. '
                 'Multiple --filter arguments would be ANDed.')),
-      Arg('mid', metavar='mid', nargs='?', default=None)])
+      Arg('mid', metavar='mid', nargs='?', default=None)
+  ])
   def SelectClient(self, args=None, store=True):
     mid = args.mid if args is not None else None
     filters = args.filters if args is not None else []
@@ -1251,8 +1346,9 @@ class OverlordCliClient:
       self._server.SelectClient(mid)
       print('Client %s selected' % mid)
 
-  @Command('shell', 'open a shell or execute a shell command', [
-      Arg('command', metavar='CMD', nargs='?', help='command to execute')])
+  @Command(
+      'shell', 'open a shell or execute a shell command',
+      [Arg('command', metavar='CMD', nargs='?', help='command to execute')])
   def Shell(self, command=None):
     if command is None:
       command = []
@@ -1263,18 +1359,17 @@ class OverlordCliClient:
       cmd = ' '.join(command)
       ws = ShellWebSocketClient(
           self._state, sys.stdout.buffer,
-          scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' % (
-              self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid),
-              urllib.parse.quote(cmd),
-              urllib.parse.quote(self._state.jwt_token)))
+          scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' %
+          (self._state.host, self._state.port,
+           urllib.parse.quote(self._selected_mid), urllib.parse.quote(cmd),
+           urllib.parse.quote(self._state.jwt_token)))
     else:
       ws = TerminalWebSocketClient(
           self._state, self._selected_mid, self._escape,
-          scheme + '%s:%d/api/agents/%s/tty?token=%s' % (
-              self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid),
-              urllib.parse.quote(self._state.jwt_token)))
+          scheme + '%s:%d/api/agents/%s/tty?token=%s' %
+          (self._state.host, self._state.port,
+           urllib.parse.quote(
+               self._selected_mid), urllib.parse.quote(self._state.jwt_token)))
     try:
       ws.connect()
       ws.run()
@@ -1300,8 +1395,7 @@ class OverlordCliClient:
       RuntimeError: If the API call fails.
     """
     url = ('/api/agents/%s/fs?op=lstree&path=%s' %
-           (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(path)))
+           (urllib.parse.quote(self._selected_mid), urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
       data = json.loads(response.read().decode('utf-8')).get('data', [])
@@ -1326,13 +1420,12 @@ class OverlordCliClient:
       is_symlink = entry.get('is_symlink', False)
       link_target = entry.get('link_target', '')
 
-      entries.append(FileEntry(
-        path=file_path,
-        perm=perm,
-        is_symlink=is_symlink,
-        link_target=link_target,
-        is_dir=is_dir
-      ))
+      entries.append(
+          FileEntry(path=file_path,
+                    perm=perm,
+                    is_symlink=is_symlink,
+                    link_target=link_target,
+                    is_dir=is_dir))
 
     return entries
 
@@ -1349,8 +1442,7 @@ class OverlordCliClient:
       RuntimeError: If the API call fails.
     """
     url = ('/api/agents/%s/fs?op=fstat&path=%s' %
-           (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(path)))
+           (urllib.parse.quote(self._selected_mid), urllib.parse.quote(path)))
     try:
       response = UrlOpen(self._state, url)
       return json.loads(response.read().decode('utf-8'))['data']
@@ -1369,9 +1461,8 @@ class OverlordCliClient:
       RuntimeError: If the API call fails.
     """
     url = ('/api/agents/%s/fs/directories?path=%s&perm=%d' %
-           (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(path),
-            perm))
+           (urllib.parse.quote(
+               self._selected_mid), urllib.parse.quote(path), perm))
     try:
       UrlOpen(self._state, url, method='POST')
     except urllib.error.HTTPError as e:
@@ -1399,9 +1490,8 @@ class OverlordCliClient:
       pbar.End()
       return
 
-    url = ('/api/agents/%s/file?filename=%s' %
-           (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(entry.path)))
+    url = ('/api/agents/%s/file?filename=%s' % (urllib.parse.quote(
+        self._selected_mid), urllib.parse.quote(entry.path)))
     try:
       h = UrlOpen(self._state, url)
     except urllib.error.HTTPError as e:
@@ -1421,8 +1511,7 @@ class OverlordCliClient:
         if not data:
           break
         downloaded_size += len(data)
-        pbar.SetProgress(downloaded_size * 100 / total_size,
-                         downloaded_size)
+        pbar.SetProgress(downloaded_size * 100 / total_size, downloaded_size)
         f.write(data)
 
       os.fchmod(f.fileno(), entry.perm)
@@ -1431,7 +1520,8 @@ class OverlordCliClient:
 
   @Command('pull', 'pull a file or directory from remote', [
       Arg('src', metavar='SOURCE'),
-      Arg('dst', metavar='DESTINATION', default='.', nargs='?')])
+      Arg('dst', metavar='DESTINATION', default='.', nargs='?')
+  ])
   def Pull(self, args):
     self.CheckClient()
 
@@ -1493,34 +1583,33 @@ class OverlordCliClient:
 
       url = ('/api/agents/%s/fs/symlinks?target=%s&dest=%s' %
              (urllib.parse.quote(self._selected_mid),
-              urllib.parse.quote(link_path),
-              urllib.parse.quote(dst)))
+              urllib.parse.quote(link_path), urllib.parse.quote(dst)))
 
       try:
         UrlOpen(self._state, url, method='POST')
       except urllib.error.HTTPError as e:
         msg = json.loads(e.read()).get('data', 'unknown error')
-        raise RuntimeError(f'push: {msg}')
+        raise RuntimeError(f'push: {msg}') from e
 
       pbar.End()
       return
 
     mode = '0%o' % (0x1FF & os.stat(src).st_mode)
-    url = ('/api/agents/%s/file?dest=%s&perm=%s' %
-           (urllib.parse.quote(self._selected_mid),
-            urllib.parse.quote(dst),
-            mode))
+    url = (
+        '/api/agents/%s/file?dest=%s&perm=%s' %
+        (urllib.parse.quote(self._selected_mid), urllib.parse.quote(dst), mode))
 
     pbar = ProgressBar(src_base)
     try:
       self._HTTPPostFile(url, src, pbar.SetProgress)
     except Exception as e:
-      raise RuntimeError(f'push: {str(e)}')
+      raise RuntimeError(f'push: {str(e)}') from e
     pbar.End()
 
   @Command('push', 'push a file or directory to remote', [
       Arg('srcs', nargs='+', metavar='SOURCE'),
-      Arg('dst', metavar='DESTINATION')])
+      Arg('dst', metavar='DESTINATION')
+  ])
   def Push(self, args):
     self.CheckClient()
 
@@ -1530,13 +1619,9 @@ class OverlordCliClient:
         base_dir_name = os.path.basename(src)
 
         # Use the API to check if the destination exists and is a directory
-        try:
-          stat_info = self._Fstat(dst)
-          dst_exists = stat_info.get('exists', False)
-          dst_is_dir = stat_info.get('is_dir', False) if dst_exists else False
-        except RuntimeError as e:
-          # Some error occurred
-          raise
+        stat_info = self._Fstat(dst)
+        dst_exists = stat_info.get('exists', False)
+        dst_is_dir = stat_info.get('is_dir', False) if dst_exists else False
 
         if dst_exists and not dst_is_dir:
           raise RuntimeError('push: %s: Not a directory' % dst)
@@ -1572,27 +1657,38 @@ class OverlordCliClient:
           raise RuntimeError('push: %s: Not a directory' % args.dst)
       except RuntimeError as e:
         # If we can't stat it, it's not a directory or doesn't exist
-        raise RuntimeError('push: %s: No such file or directory' % args.dst)
+        raise RuntimeError('push: %s: No such file or directory' %
+                           args.dst) from e
 
     for src in args.srcs:
       if not os.path.exists(src):
-        raise RuntimeError('push: can not stat "%s": no such file or directory'
-                           % src)
+        raise RuntimeError(
+            'push: can not stat "%s": no such file or directory' % src)
       if not os.access(src, os.R_OK):
         raise RuntimeError('push: can not open "%s" for reading' % src)
 
       _Push(src, args.dst)
 
   @Command('forward', 'forward remote port to local port', [
-      Arg('--list', dest='list_all', action='store_true', default=False,
+      Arg('--list',
+          dest='list_all',
+          action='store_true',
+          default=False,
           help='list all port forwarding sessions'),
-      Arg('--remove', metavar='LOCAL_PORT', dest='remove', type=int,
+      Arg('--remove',
+          metavar='LOCAL_PORT',
+          dest='remove',
+          type=int,
           default=None,
           help='remove port forwarding for local port LOCAL_PORT'),
-      Arg('--remove-all', dest='remove_all', action='store_true',
-          default=False, help='remove all port forwarding'),
+      Arg('--remove-all',
+          dest='remove_all',
+          action='store_true',
+          default=False,
+          help='remove all port forwarding'),
       Arg('remote', metavar='[HOST:]REMOTE_PORT', type=str, nargs='?'),
-      Arg('local_port', metavar='LOCAL_PORT', type=int, nargs='?')])
+      Arg('local_port', metavar='LOCAL_PORT', type=int, nargs='?')
+  ])
   def Forward(self, args):
     if args.list_all:
       max_len = 10
@@ -1623,8 +1719,8 @@ class OverlordCliClient:
       try:
         remote_host = '127.0.0.1'
         remote_port = int(remote_parts[0])
-      except ValueError:
-        raise RuntimeError('invalid remote port')
+      except ValueError as exc:
+        raise RuntimeError('invalid remote port') from exc
     elif len(remote_parts) == 2:
       remote_host = remote_parts[0]
       remote_port = int(remote_parts[1])
@@ -1634,17 +1730,14 @@ class OverlordCliClient:
     if args.local_port is None:
       args.local_port = remote_port
 
-    remote = remote_port
-
     def HandleConnection(conn):
       scheme = 'ws%s://' % ('s' if self._state.ssl else '')
       ws = ForwarderWebSocketClient(
           self._state, conn,
-          scheme + '%s:%d/api/agents/%s/forward?host=%s&port=%d&token=%s' % (
-              self._state.host, self._state.port,
-              urllib.parse.quote(self._selected_mid),
-              remote_host, remote_port,
-              urllib.parse.quote(self._state.jwt_token)))
+          scheme + '%s:%d/api/agents/%s/forward?host=%s&port=%d&token=%s' %
+          (self._state.host, self._state.port,
+           urllib.parse.quote(self._selected_mid), remote_host, remote_port,
+           urllib.parse.quote(self._state.jwt_token)))
       try:
         ws.connect()
         ws.run()
@@ -1672,8 +1765,9 @@ class OverlordCliClient:
   def _LocalLsTree(self, path):
     """Get a recursive directory listing of local files.
 
-    This method recursively traverses a local directory and returns FileEntry objects
-    for all files and directories found, similar to os.walk but with a unified return format.
+    This method recursively traverses a local directory and returns
+    FileEntry objects for all files and directories found, similar to
+    os.walk but with a unified return format.
 
     Args:
       path: The local path to list.
@@ -1699,13 +1793,13 @@ class OverlordCliClient:
       is_symlink = os.path.islink(path)
       link_target = os.readlink(path) if is_symlink else ''
 
-      return [FileEntry(
-          path=path,
-          perm=perm,
-          is_symlink=is_symlink,
-          link_target=link_target,
-          is_dir=False
-      )]
+      return [
+          FileEntry(path=path,
+                    perm=perm,
+                    is_symlink=is_symlink,
+                    link_target=link_target,
+                    is_dir=False)
+      ]
 
     # For directories, walk the tree
     for root, dirs, files in os.walk(path):
@@ -1717,13 +1811,12 @@ class OverlordCliClient:
         is_symlink = os.path.islink(dir_path)
         link_target = os.readlink(dir_path) if is_symlink else ''
 
-        results.append(FileEntry(
-            path=dir_path,
-            perm=perm,
-            is_symlink=is_symlink,
-            link_target=link_target,
-            is_dir=False if is_symlink else True
-        ))
+        results.append(
+            FileEntry(path=dir_path,
+                      perm=perm,
+                      is_symlink=is_symlink,
+                      link_target=link_target,
+                      is_dir=False if is_symlink else True))
 
       # Add file entries
       for file_name in files:
@@ -1733,25 +1826,28 @@ class OverlordCliClient:
         is_symlink = os.path.islink(file_path)
         link_target = os.readlink(file_path) if is_symlink else ''
 
-        results.append(FileEntry(
-            path=file_path,
-            perm=perm,
-            is_symlink=is_symlink,
-            link_target=link_target,
-            is_dir=False
-        ))
+        results.append(
+            FileEntry(path=file_path,
+                      perm=perm,
+                      is_symlink=is_symlink,
+                      link_target=link_target,
+                      is_dir=False))
 
     return results
 
   @Command('admin', 'manage users and groups', [
-      Arg('action', metavar='ACTION',
-          choices=['list-users', 'add-user', 'del-user', 'change-password',
-                   'list-groups', 'add-group', 'del-group', 'add-user-to-group',
-                   'del-user-from-group', 'list-group-users'],
+      Arg('action',
+          metavar='ACTION',
+          choices=[
+              'list-users', 'add-user', 'del-user', 'change-password',
+              'list-groups', 'add-group', 'del-group', 'add-user-to-group',
+              'del-user-from-group', 'list-group-users'
+          ],
           help='admin action to perform: list-users, add-user, del-user, '
-               'change-password, list-groups, add-group, del-group, '
-               'add-user-to-group, del-user-from-group, list-group-users'),
-      Arg('args', metavar='ARGS', nargs='*', help='arguments for the action')])
+          'change-password, list-groups, add-group, del-group, '
+          'add-user-to-group, del-user-from-group, list-group-users'),
+      Arg('args', metavar='ARGS', nargs='*', help='arguments for the action')
+  ])
   def Admin(self, args):
     """Manage users and groups using the Overlord API."""
     self.CheckConnection()
@@ -1768,8 +1864,8 @@ class OverlordCliClient:
       username = action_args[0]
       password = action_args[1]
       is_admin = False
-      if (len(action_args) >= 3 and
-          action_args[2].lower() in ('true', 'yes', '1', 'y')):
+      if (len(action_args) >= 3
+          and action_args[2].lower() in ('true', 'yes', '1', 'y')):
         is_admin = True
       self._AdminAddUser(username, password, is_admin)
     elif action == 'del-user':
@@ -1800,7 +1896,8 @@ class OverlordCliClient:
       self._AdminAddUserToGroup(action_args[0], action_args[1])
     elif action == 'del-user-from-group':
       if len(action_args) < 2:
-        raise RuntimeError('Usage: admin del-user-from-group USERNAME GROUP_NAME')
+        raise RuntimeError(
+            'Usage: admin del-user-from-group USERNAME GROUP_NAME')
       self._AdminDelUserFromGroup(action_args[0], action_args[1])
     elif action == 'list-group-users':
       if len(action_args) < 1:
@@ -1822,9 +1919,9 @@ class OverlordCliClient:
       try:
         error_data = json.loads(e.read().decode('utf-8'))
         error_msg = error_data.get('data', str(e))
-      except:
+      except Exception:
         error_msg = str(e)
-      raise RuntimeError(error_msg)
+      raise RuntimeError(error_msg) from e
 
   def _AdminListUsers(self):
     """List all users."""
@@ -1832,21 +1929,17 @@ class OverlordCliClient:
 
     # Format output as a table
     print(f"{'USERNAME':<20} {'ADMIN':<10} {'GROUPS'}")
-    print("-" * 50)
+    print('-' * 50)
 
     for user in users:
       username = user.get('username', '')
       is_admin = 'Yes' if user.get('is_admin', False) else 'No'
       groups = ', '.join(user.get('groups', []))
-      print(f"{username:<20} {is_admin:<10} {groups}")
+      print(f'{username:<20} {is_admin:<10} {groups}')
 
   def _AdminAddUser(self, username, password, is_admin=False):
     """Add a new user."""
-    data = {
-      'username': username,
-      'password': password,
-      'is_admin': is_admin
-    }
+    data = {'username': username, 'password': password, 'is_admin': is_admin}
     self._AdminApiCall('/api/users', method='POST', data=data)
     print(f"User '{username}' created successfully")
 
@@ -1862,7 +1955,8 @@ class OverlordCliClient:
   def _AdminChangePassword(self, username, new_password):
     """Change a user's password."""
     data = {'password': new_password}
-    self._AdminApiCall(f'/api/users/{username}/password', method='PUT',
+    self._AdminApiCall(f'/api/users/{username}/password',
+                       method='PUT',
                        data=data)
     print(f"Password for user '{username}' updated successfully")
 
@@ -1872,12 +1966,12 @@ class OverlordCliClient:
 
     # Format output as a table
     print(f"{'GROUP NAME':<20} {'USER COUNT'}")
-    print("-" * 30)
+    print('-' * 30)
 
     for group in groups:
       name = group.get('name', '')
       user_count = group.get('user_count', 0)
-      print(f"{name:<20} {user_count}")
+      print(f'{name:<20} {user_count}')
 
   def _AdminAddGroup(self, group_name):
     """Add a new group."""
@@ -1893,7 +1987,8 @@ class OverlordCliClient:
   def _AdminAddUserToGroup(self, username, group_name):
     """Add a user to a group."""
     data = {'username': username}
-    self._AdminApiCall(f'/api/groups/{group_name}/users', method='POST',
+    self._AdminApiCall(f'/api/groups/{group_name}/users',
+                       method='POST',
                        data=data)
     print(f"User '{username}' added to group '{group_name}' successfully")
 
@@ -1913,7 +2008,7 @@ class OverlordCliClient:
 
     print(f"Users in group '{group_name}':")
     for username in users:
-      print(f"  - {username}")
+      print(f'  - {username}')
 
 
 def main():
