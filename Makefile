@@ -39,7 +39,7 @@ endif
 	build build-go build-py build-apps \
 	ghost ghost-all overlordd \
 	go-fmt go-lint \
-	py-lint py-format \
+	py-lint py-format py-format-check \
 	clean clean-apps \
 	install
 
@@ -187,6 +187,11 @@ py-lint:
 py-format:
 	$(call cmd_msg,YAPF,$(PY_FILES))
 	@yapf -i $(PY_FILES)
+
+py-format-check:
+	$(call cmd_msg,YAPF-CHECK,$(PY_FILES))
+	@yapf --diff $(PY_FILES) | tee /tmp/yapf.diff && test ! -s /tmp/yapf.diff || \
+		(echo "Python files need formatting. Run 'make py-format' locally." && exit 1)
 
 # Pattern rule for building individual apps
 $(DIST_APPS_DIR)/%:

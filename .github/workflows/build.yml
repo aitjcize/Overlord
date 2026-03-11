@@ -30,8 +30,7 @@ jobs:
       - name: py-lint
         run: |
           source .venv/bin/activate
-          make py-format
-          git diff --exit-code -- '*.py' || (echo "Python files need formatting. Run 'make py-format' locally." && exit 1)
+          make py-format-check
           make py-lint
       - name: test
         run: go test -v ./...
