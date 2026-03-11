@@ -78,11 +78,17 @@ $(BIN)/ghost.darwin.%.sha1: $(BIN)/ghost.darwin.%
 	$(call cmd_msg,SHA1,$(notdir $<))
 	@cd $(BIN) && sha1sum $(notdir $<) | awk '{ print $$1 }' > $(notdir $@)
 
+# Map Go GOARCH to osxcross CC prefix
+OSXCROSS_CC_amd64=o64-clang
+OSXCROSS_CXX_amd64=o64-clang++
+OSXCROSS_CC_arm64=oa64-clang
+OSXCROSS_CXX_arm64=oa64-clang++
+
 $(BIN)/ghost.darwin.%:
 	$(call cmd_msg,GO,$(notdir $@))
 	@PATH="/osxcross/bin:$$PATH" \
 	LD_LIBRARY_PATH="/osxcross/lib:$$LD_LIBRARY_PATH" \
-	CC=o64-clang CXX=o64-clang++  \
+	CC=$(OSXCROSS_CC_$*) CXX=$(OSXCROSS_CXX_$*) \
 	MACOSX_DEPLOYMENT_TARGET=10.8 \
 	CGO_ENABLED=1 \
 	GOOS=darwin GOARCH=$* $(GO) build $(LDFLAGS) -o $@ $(CURDIR)/cmd/ghost

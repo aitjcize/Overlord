@@ -1,6 +1,6 @@
 # Build go app.
 
-FROM crazymax/osxcross:latest-alpine AS osxcross
+FROM --platform=linux/amd64 crazymax/osxcross:15.5-alpine AS osxcross
 FROM golang:alpine AS gobuilder
 
 RUN mkdir -p /src
