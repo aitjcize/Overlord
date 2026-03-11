@@ -1205,7 +1205,7 @@ func (ghost *Ghost) SpawnTTYServer(res *Response) error {
 		}
 		// Kill the PTY process if it exists
 		if cmd != nil && cmd.Process != nil {
-			if err := cmd.Process.Kill(); err != nil {
+			if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 				log.Printf("Failed to kill process: %v", err)
 			}
 		}
@@ -1293,11 +1293,11 @@ func (ghost *Ghost) cleanupShellProcess(cmd *exec.Cmd) {
 	// the process, then wait for 1 second.  Send another SIGKILL to make sure
 	// the process is terminated.
 	if err != nil {
-		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			log.Printf("Failed to send SIGTERM: %v", err)
 		}
 		time.Sleep(time.Second)
-		if err := cmd.Process.Kill(); err != nil {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			log.Printf("Failed to kill process: %v", err)
 		}
 		if err := cmd.Wait(); err != nil {
