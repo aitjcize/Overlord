@@ -657,7 +657,10 @@ func (ovl *Overlord) serveFileHTTP(w http.ResponseWriter, c *ConnServer) {
 	}()
 	c.SendClearToDownload()
 
-	dispose := fmt.Sprintf("attachment; filename=\"%s\"", c.Download.Name)
+	// Sanitize filename: strip path components and remove quotes to prevent
+	// Content-Disposition header injection.
+	safeName := strings.ReplaceAll(filepath.Base(c.Download.Name), "\"", "")
+	dispose := fmt.Sprintf("attachment; filename=\"%s\"", safeName)
 	w.Header().Set("Content-Disposition", dispose)
 	w.Header().Set("Content-Length", strconv.FormatInt(c.Download.Size, 10))
 
@@ -736,8 +739,18 @@ func (ovl *Overlord) sessionFileDownloadHandler(w http.ResponseWriter, r *http.R
 	vars := mux.Vars(r)
 	sid := vars["sid"]
 
+	username, ok := GetUserFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	isAdmin, ok := GetAdminStatusFromContext(r.Context())
+	if !ok {
+		ResponseError(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var c *ConnServer
-	var ok bool
 
 	ovl.downloadsMu.Lock()
 	if c, ok = ovl.downloads[sid]; !ok {
@@ -746,6 +759,16 @@ func (ovl *Overlord) sessionFileDownloadHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 	ovl.downloadsMu.Unlock()
+
+	// Verify the requesting user has access to the agent that owns this download
+	ovl.agentsMu.Lock()
+	agent, exists := ovl.agents[c.Mid]
+	ovl.agentsMu.Unlock()
+	if exists && !ovl.checkAllowlist(username, isAdmin, agent) {
+		ResponseError(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
 	ovl.serveFileHTTP(w, c)
 }
 
@@ -1071,7 +1094,11 @@ func (ovl *Overlord) registerRoutes() *mux.Router {
 
 	// These routes need authentication but not allowlist check
 	apiRouter.HandleFunc("/agents", ovl.agentsListHandler).Methods("GET")
-	apiRouter.HandleFunc("/agents/upgrade", ovl.agentsUpgradeHandler).Methods("POST")
+
+	// Upgrade requires admin privileges — it pushes new binaries to all agents
+	adminAgentRoutes := apiRouter.PathPrefix("/agents").Subrouter()
+	adminAgentRoutes.Use(ovl.adminRequired)
+	adminAgentRoutes.HandleFunc("/upgrade", ovl.agentsUpgradeHandler).Methods("POST")
 
 	// Other authenticated routes
 	apiRouter.HandleFunc("/apps", ovl.appsListHandler).Methods("GET")
