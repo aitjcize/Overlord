@@ -143,9 +143,13 @@ func Install() error {
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<key>StandardOutPath</key>
+	<string>%s/Library/Logs/ghost.log</string>
+	<key>StandardErrorPath</key>
+	<string>%s/Library/Logs/ghost.log</string>
 </dict>
 </plist>
-`, argsXML, getUserShell(), homeDir)
+`, argsXML, getUserShell(), homeDir, homeDir, homeDir)
 
 	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
 	plistFilePath := filepath.Join(launchAgentsDir, "com.overlord.ghost.plist")
