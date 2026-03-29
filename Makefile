@@ -38,8 +38,9 @@ endif
 .PHONY: all \
 	build build-go build-py build-apps \
 	ghost ghost-all overlordd \
-	go-fmt go-lint \
+	go-fmt go-lint go-test \
 	py-lint py-format py-format-check \
+	pre-submit \
 	clean clean-apps \
 	install
 
@@ -208,6 +209,8 @@ $(DIST_APPS_DIR)/%:
 
 build-apps: $(APP_TARGETS)
 	@cp $(DIST_APPS_DIR)/dashboard/index.html $(WEBROOT_DIR)
+
+pre-submit: go-fmt go-lint go-test py-format-check py-lint
 
 clean-apps:
 	$(call cmd_msg,RM,apps)
