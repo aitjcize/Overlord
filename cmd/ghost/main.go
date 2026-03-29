@@ -15,7 +15,7 @@ import (
 
 var mid = flag.String("mid", "", "machine ID to set")
 var randMid = flag.Bool("rand-mid", false, "use random machine ID")
-var noLanDisc = flag.Bool("no-lan-disc", false, "disable LAN discovery")
+var lanDisc = flag.Bool("lan-disc", false, "enable LAN discovery")
 var noRPCServer = flag.Bool("no-rpc-server", false, "disable RPC server")
 var propFile = flag.String("prop-file", "",
 	"file containing the JSON representation of client properties")
@@ -76,6 +76,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	overlord.StartGhost(args, finalMid, *noLanDisc, *noRPCServer, *tlsCertFile,
+	overlord.StartGhost(args, finalMid, *lanDisc, *noRPCServer, *tlsCertFile,
 		!*tlsNoVerify, *allowlist, *propFile, *download, *reset, *status, tlsMode)
 }

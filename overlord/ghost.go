@@ -1957,7 +1957,7 @@ fail:
 }
 
 // StartGhost starts the Ghost client.
-func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
+func StartGhost(args []string, mid string, lanDisc bool, noRPCServer bool,
 	tlsCertFile string, verify bool, allowlist string, propFile string,
 	download string, reset bool, status bool, tlsMode int) {
 	var addrs []string
@@ -2026,7 +2026,7 @@ func StartGhost(args []string, mid string, noLanDisc bool, noRPCServer bool,
 		SetAllowlist(allowlist).
 		SetPropFile(propFile).
 		SetTLSMode(tlsMode)
-	go g.Start(!noLanDisc, !noRPCServer)
+	go g.Start(lanDisc, !noRPCServer)
 
 	ticker := time.NewTicker(60 * time.Second)
 

@@ -1756,11 +1756,11 @@ def main():
                       action='store_const',
                       const=Ghost.RANDOM_MID,
                       help='use random machine ID')
-  parser.add_argument('--no-lan-disc',
+  parser.add_argument('--lan-disc',
                       dest='lan_disc',
-                      action='store_false',
-                      default=True,
-                      help='disable LAN discovery')
+                      action='store_true',
+                      default=False,
+                      help='enable LAN discovery')
   parser.add_argument('--no-rpc-server',
                       dest='rpc_server',
                       action='store_false',
