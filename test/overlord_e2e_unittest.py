@@ -107,7 +107,6 @@ class TestOverlord(unittest.TestCase):
     self.goghost = subprocess.Popen([
         '%s/ghost' % bindir,
         '-mid=go',
-        '-no-lan-disc',
         '-no-rpc-server',
         '-tls=n',
         'localhost:%d' % overlord_http_port
@@ -117,7 +116,6 @@ class TestOverlord(unittest.TestCase):
     self.pyghost = subprocess.Popen([
         '%s/ghost.py' % scriptdir,
         '--mid=python',
-        '--no-lan-disc',
         '--no-rpc-server',
         '--tls=n',
         'localhost:%d' % overlord_http_port
