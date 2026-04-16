@@ -217,7 +217,7 @@ func (c *ConnServer) handleOverlordRequest(obj interface{}) {
 	log.Printf("Received %T command from overlord\n", obj)
 	switch v := obj.(type) {
 	case SpawnTerminalCmd:
-		c.SpawnTerminal(v.Sid, v.TtyDevice)
+		c.SpawnTerminal(v.Sid, v.TtyDevice, v.Cols, v.Rows)
 	case SpawnShellCmd:
 		c.SpawnShell(v.Sid, v.Command)
 	case ListTreeCmd:
@@ -478,12 +478,18 @@ func (c *ConnServer) getHandler(name string) func(res *Response) error {
 // sid is the session ID, which will be used as the session ID of the new ghost.
 // ttyDevice is the target terminal device to open. If it's an empty string, a
 // pseudo terminal will be open instead.
-func (c *ConnServer) SpawnTerminal(sid, ttyDevice string) {
+func (c *ConnServer) SpawnTerminal(sid, ttyDevice string, cols, rows int) {
 	params := map[string]interface{}{"sid": sid}
 	if ttyDevice != "" {
 		params["tty_device"] = ttyDevice
 	} else {
 		params["tty_device"] = nil
+	}
+	if cols > 0 {
+		params["cols"] = cols
+	}
+	if rows > 0 {
+		params["rows"] = rows
 	}
 	req := NewRequest("terminal", params)
 	if err := c.SendRequest(req, c.getHandler("SpawnTerminal")); err != nil {

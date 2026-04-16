@@ -557,6 +557,7 @@ const checkMobileMinimizedView = () => {
 // Store event handler references for cleanup
 let terminalStateChangedHandler = null;
 let resizeHandler = null;
+let containerResizeObserver = null;
 let terminalChangeHandler = null;
 let unwatch = null;
 
@@ -745,13 +746,23 @@ const setupTerminal = () => {
       bindDragAndDropEvents();
     });
 
-    // Fit terminal to container and get initial size
+    // Fit terminal to container to get initial dimensions (used in WS URL)
     try {
       fitAddon.fit();
-      const { cols, rows } = xterm;
-      sendTerminalResize(cols, rows);
     } catch (error) {
       console.error("Error during terminal fit:", error);
+    }
+
+    // Watch container size changes to keep terminal dimensions in sync
+    if (terminalContainer.value) {
+      let resizeDebounce = null;
+      containerResizeObserver = new ResizeObserver(() => {
+        if (resizeDebounce) clearTimeout(resizeDebounce);
+        resizeDebounce = setTimeout(() => {
+          terminalUtils.fit();
+        }, 16);
+      });
+      containerResizeObserver.observe(terminalContainer.value);
     }
 
     // Reconnect WebSocket if needed
@@ -785,21 +796,28 @@ const setupWebSocket = () => {
     return null;
   }
 
-  // Create a new WebSocket connection with token
+  // Create a new WebSocket connection with token and initial terminal size
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/api/agents/${props.terminal.mid}/tty?token=${encodeURIComponent(token)}`;
+  let wsUrl = `${protocol}//${window.location.host}/api/agents/${props.terminal.mid}/tty?token=${encodeURIComponent(token)}`;
+  if (xterm) {
+    wsUrl += `&cols=${xterm.cols}&rows=${xterm.rows}`;
+  }
   const newWs = new WebSocket(wsUrl);
 
   newWs.onopen = () => {
-    if (fitAddon && xterm) {
-      try {
-        fitAddon.fit();
-        const { cols, rows } = xterm;
-        sendTerminalResize(cols, rows);
-      } catch (error) {
-        console.error("Error during WebSocket open terminal fit:", error);
-      }
-    }
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        if (fitAddon && xterm) {
+          try {
+            fitAddon.fit();
+            const { cols, rows } = xterm;
+            sendTerminalResize(cols, rows);
+          } catch (error) {
+            console.error("Error during WebSocket open terminal fit:", error);
+          }
+        }
+      });
+    });
   };
 
   newWs.onmessage = (event) => {
@@ -1143,6 +1161,12 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  // Cleanup ResizeObserver
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
+
   // Cleanup event listeners
   window.removeEventListener("resize", resizeHandler);
   window.removeEventListener("terminal-restored", handleTerminalRestored);

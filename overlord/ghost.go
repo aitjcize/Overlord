@@ -208,6 +208,8 @@ type Ghost struct {
 	readErrChan     chan error             // The incoming data error channel
 	pauseLanDisc    bool                   // Stop LAN discovery
 	ttyDevice       string                 // Terminal device to open
+	initialCols     int                    // Initial terminal columns
+	initialRows     int                    // Initial terminal rows
 	shellCommand    string                 // Shell command to execute
 	fileOp          fileOperation          // File operation name
 	downloadQueue   chan downloadInfo      // Download queue
@@ -272,6 +274,13 @@ func (ghost *Ghost) SetPropFile(propFile string) *Ghost {
 // SetTtyDevice sets the TTY device name to open.
 func (ghost *Ghost) SetTtyDevice(ttyDevice string) *Ghost {
 	ghost.ttyDevice = ttyDevice
+	return ghost
+}
+
+// SetInitialSize sets the initial terminal dimensions for PTY creation.
+func (ghost *Ghost) SetInitialSize(cols, rows int) *Ghost {
+	ghost.initialCols = cols
+	ghost.initialRows = rows
 	return ghost
 }
 
@@ -529,6 +538,8 @@ func (ghost *Ghost) handleTerminalRequest(req *Request) error {
 	type RequestPayload struct {
 		Sid       string `json:"sid"`
 		TtyDevice string `json:"tty_device"`
+		Cols      int    `json:"cols,omitempty"`
+		Rows      int    `json:"rows,omitempty"`
 	}
 
 	var params RequestPayload
@@ -544,7 +555,8 @@ func (ghost *Ghost) handleTerminalRequest(req *Request) error {
 		g := NewGhost(addrs, ghost.tls, ModeTerminal, RandomMID).
 			SetSid(params.Sid).
 			SetAllowlist(ghost.allowlist).
-			SetTtyDevice(params.TtyDevice)
+			SetTtyDevice(params.TtyDevice).
+			SetInitialSize(params.Cols, params.Rows)
 		g.Start(false, false)
 	}()
 
@@ -1037,7 +1049,18 @@ func (ghost *Ghost) setupPTYEnvironment() (string, string) {
 
 func (ghost *Ghost) startPTYProcess(shell string) (*os.File, *exec.Cmd, error) {
 	cmd := exec.Command(shell)
-	tty, err := pty.Start(cmd)
+
+	var tty *os.File
+	var err error
+	if ghost.initialCols > 0 && ghost.initialRows > 0 {
+		sz := &pty.Winsize{
+			Cols: uint16(ghost.initialCols),
+			Rows: uint16(ghost.initialRows),
+		}
+		tty, err = pty.StartWithSize(cmd, sz)
+	} else {
+		tty, err = pty.Start(cmd)
+	}
 	if err != nil {
 		return nil, nil, errors.New(`SpawnTTYServer: Cannot start "` + shell + `", abort`)
 	}

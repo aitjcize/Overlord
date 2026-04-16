@@ -41,6 +41,8 @@ const (
 type SpawnTerminalCmd struct {
 	Sid       string // Session ID
 	TtyDevice string // Termainl device to open
+	Cols      int    // Initial terminal columns (0 = default)
+	Rows      int    // Initial terminal rows (0 = default)
 }
 
 // SpawnShellCmd is an overlord intend to launch a shell command.
@@ -600,16 +602,23 @@ func (ovl *Overlord) agentTtyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ttyDevice string
+	var cols, rows int
 
 	vars := mux.Vars(r)
 	mid := vars["mid"]
 	if _ttyDevice, ok := r.URL.Query()["tty_device"]; ok {
 		ttyDevice = _ttyDevice[0]
 	}
+	if v := r.URL.Query().Get("cols"); v != "" {
+		cols, _ = strconv.Atoi(v)
+	}
+	if v := r.URL.Query().Get("rows"); v != "" {
+		rows, _ = strconv.Atoi(v)
+	}
 
 	wc := newWebsocketContext(conn)
 	ovl.addWebsocketContext(wc)
-	ovl.spawnAgentCommand(conn, mid, SpawnTerminalCmd{wc.Sid, ttyDevice})
+	ovl.spawnAgentCommand(conn, mid, SpawnTerminalCmd{wc.Sid, ttyDevice, cols, rows})
 }
 
 // Shell command request handler.
