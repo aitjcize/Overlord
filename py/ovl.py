@@ -59,6 +59,13 @@ _HTTP_BOUNDARY_MAGIC = '9246f080c855a69012707ab53489b921'
 _SSH_CONTROL_SOCKET_PREFIX = os.path.join(tempfile.gettempdir(),
                                           'ovl-ssh-control-')
 
+_SHELL_SOCK_ENV = 'OVL_SHELL_SOCK'
+_SHELL_SOCK_PREFIX = os.path.join(tempfile.gettempdir(), 'ovl-shell-')
+# Frame tags for the local Unix-socket protocol between `ovl shell -p` and
+# `ovl exec`.
+_SHELL_FRAME_OUT = b'O'
+_SHELL_FRAME_EXIT = b'E'
+
 _TLS_CERT_FAILED_WARNING = """
 @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 @ WARNING: REMOTE HOST VERIFICATION HAS FAILED! @
@@ -191,6 +198,20 @@ def AutoRetry(action_name, retries):
     return Loop
 
   return Wrap
+
+
+def _RecvExact(sock, n):
+  """Read exactly n bytes from sock; return None on EOF."""
+  buf = b''
+  while len(buf) < n:
+    try:
+      chunk = sock.recv(n - len(buf))
+    except OSError:
+      return None
+    if not chunk:
+      return None
+    buf += chunk
+  return buf
 
 
 def JWTAuthHeader(token):
@@ -698,6 +719,113 @@ class ShellWebSocketClient(SSLEnabledWebSocketBaseClient):
       self._output.flush()
 
 
+class PersistentShellWebSocketClient(SSLEnabledWebSocketBaseClient):
+
+  """Holds one long-lived /bin/sh on the ghost over a single WS.
+
+  Commands are framed by appending a per-command sentinel printf that emits
+  `\\n__OVL_END_<nonce>:<exit>\\n` after the user command, so the merged
+  stdout/stderr stream can be parsed without a fresh shell per call.
+  """
+
+  def __init__(self, state, *args, **kwargs):
+    super().__init__(state, *args, **kwargs)
+    self._opened = threading.Event()
+    self._cmd_mutex = threading.Lock()  # serializes RunCommand callers
+    self._cv = threading.Condition()
+    self._buf = b''
+    self._active_nonce = None  # bytes
+    self._active_writer = None
+    self._exit_code = None
+    self._died = False
+
+  def handshake_ok(self):
+    pass
+
+  def opened(self):
+    self._opened.set()
+
+  def closed(self, code, reason=None):
+    del code, reason
+    with self._cv:
+      self._died = True
+      self._cv.notify_all()
+
+  def received_message(self, message):
+    if not message.is_binary:
+      return
+    with self._cv:
+      self._buf += message.data
+      if self._active_nonce is None:
+        # Idle stream noise: drop it.
+        self._buf = b''
+        return
+      sentinel = b'\n__OVL_END_' + self._active_nonce + b':'
+      idx = self._buf.find(sentinel)
+      if idx == -1:
+        # Forward everything except a tail that might be a split sentinel.
+        keep = len(sentinel) - 1
+        if len(self._buf) > keep:
+          chunk = self._buf[:-keep] if keep else self._buf
+          self._buf = self._buf[len(chunk):]
+          if self._active_writer and chunk:
+            self._active_writer(chunk)
+        return
+      if idx > 0 and self._active_writer:
+        self._active_writer(self._buf[:idx])
+      tail = self._buf[idx + len(sentinel):]
+      nl = tail.find(b'\n')
+      if nl == -1:
+        # Sentinel found but exit code not yet complete; wait for more.
+        self._buf = self._buf[idx:]
+        return
+      try:
+        self._exit_code = int(tail[:nl])
+      except ValueError:
+        self._exit_code = -1
+      # Drop any trailing bytes after the sentinel newline; a well-behaved
+      # session has nothing there until the next RunCommand.
+      self._buf = b''
+      self._cv.notify_all()
+
+  def WaitReady(self, timeout=10):
+    if not self._opened.wait(timeout):
+      raise RuntimeError('persistent shell: WebSocket did not open')
+
+  def RunCommand(self, cmd, writer):
+    """Run `cmd` on the remote shell, streaming bytes to `writer`.
+
+    Returns the command's exit code, or -1 if the shell died.
+    """
+    self.WaitReady()
+    nonce = os.urandom(16).hex().encode()
+    with self._cmd_mutex:
+      with self._cv:
+        if self._died:
+          return -1
+        self._active_nonce = nonce
+        self._active_writer = writer
+        self._exit_code = None
+        self._buf = b''
+      # `$?` after `cmd` is the exit of `cmd`'s last statement, matching
+      # normal shell semantics (e.g. `cd a && make` -> make's exit).
+      wrapper = (cmd.encode() + b'\n' + b"printf '\\n__OVL_END_" + nonce +
+                 b":%d\\n' \"$?\"\n")
+      try:
+        self.send(wrapper, binary=True)
+      except Exception:
+        with self._cv:
+          self._died = True
+        return -1
+      with self._cv:
+        while self._exit_code is None and not self._died:
+          self._cv.wait()
+        code = -1 if self._died and self._exit_code is None else self._exit_code
+        self._active_nonce = None
+        self._active_writer = None
+        return code
+
+
 class ForwarderWebSocketClient(SSLEnabledWebSocketBaseClient):
 
   def __init__(self, state, sock, *args, **kwargs):
@@ -854,14 +982,19 @@ class OverlordCliClient:
     return root_parser
 
   def Main(self):
-    # We want to pass the rest of arguments after shell command directly to the
-    # function without parsing it.
-    try:
-      index = sys.argv.index('shell')
-    except ValueError:
+    # We want to pass the rest of arguments after `shell` / `exec` directly to
+    # the function without parsing it.
+    passthrough_idx = None
+    for keyword in ('shell', 'exec'):
+      try:
+        passthrough_idx = sys.argv.index(keyword)
+        break
+      except ValueError:
+        continue
+    if passthrough_idx is None:
       args = self._parser.parse_args()
     else:
-      args = self._parser.parse_args(sys.argv[1:index + 1])
+      args = self._parser.parse_args(sys.argv[1:passthrough_idx + 1])
 
     command = args.which
     self._selected_mid = args.selected_mid
@@ -895,8 +1028,18 @@ class OverlordCliClient:
     elif command == 'ls':
       self.ListClients(args)
     elif command == 'shell':
-      command = sys.argv[sys.argv.index('shell') + 1:]
-      self.Shell(command)
+      rest = sys.argv[sys.argv.index('shell') + 1:]
+      if rest and rest[0] in ('-p', '--persistent'):
+        if len(rest) > 1:
+          sys.stderr.write('ovl shell -p: persistent mode takes no command; '
+                           'use `ovl exec <cmd>` to dispatch commands\n')
+          sys.exit(2)
+        self.ShellPersistent()
+      else:
+        self.Shell(rest)
+    elif command == 'exec':
+      rest = sys.argv[sys.argv.index('exec') + 1:]
+      self.Exec(rest)
     elif command == 'push':
       self.Push(args)
     elif command == 'pull':
@@ -1347,8 +1490,13 @@ class OverlordCliClient:
       print('Client %s selected' % mid)
 
   @Command(
-      'shell', 'open a shell or execute a shell command',
-      [Arg('command', metavar='CMD', nargs='?', help='command to execute')])
+      'shell',
+      'open a shell, run a command, or start a persistent shell daemon (-p)', [
+          Arg('command',
+              metavar='CMD',
+              nargs='?',
+              help='command to execute; pass -p to start a persistent daemon')
+      ])
   def Shell(self, command=None):
     if command is None:
       command = []
@@ -1378,6 +1526,175 @@ class OverlordCliClient:
         pass
       else:
         raise
+
+  def _ShellSockPath(self, mid):
+    safe_mid = re.sub(r'[^A-Za-z0-9._-]', '_', mid)
+    return '%s%d-%s.sock' % (_SHELL_SOCK_PREFIX, os.getuid(), safe_mid)
+
+  def ShellPersistent(self):
+    """Run a persistent shell daemon and listen on a Unix socket.
+
+    `ovl exec <cmd>` (or any other consumer) connects to the socket and
+    streams commands into the long-lived /bin/sh on the ghost.
+    """
+    self.CheckClient()
+    scheme = 'ws%s://' % ('s' if self._state.ssl else '')
+    url = (
+        scheme + '%s:%d/api/agents/%s/shell?command=%s&token=%s' %
+        (self._state.host, self._state.port,
+         urllib.parse.quote(self._selected_mid), urllib.parse.quote('/bin/sh'),
+         urllib.parse.quote(self._state.jwt_token)))
+    ws = PersistentShellWebSocketClient(self._state, url)
+    ws.connect()
+    ws_thread = threading.Thread(target=ws.run, daemon=True)
+    ws_thread.start()
+    try:
+      ws.WaitReady()
+    except RuntimeError as e:
+      sys.stderr.write('ovl shell -p: %s\n' % e)
+      return
+
+    sock_path = self._ShellSockPath(self._selected_mid)
+    try:
+      os.unlink(sock_path)
+    except FileNotFoundError:
+      pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(sock_path)
+    os.chmod(sock_path, 0o600)
+    srv.listen(8)
+
+    print('Persistent shell ready for %s' % self._selected_mid)
+    print('%s=%s' % (_SHELL_SOCK_ENV, sock_path))
+    print('Use `ovl exec <cmd>` in another terminal. Ctrl-C to stop.')
+    sys.stdout.flush()
+
+    stop = threading.Event()
+
+    def _handle(conn):
+      try:
+        hdr = _RecvExact(conn, 4)
+        if hdr is None:
+          return
+        (nbytes,) = struct.unpack('>I', hdr)
+        body = _RecvExact(conn, nbytes)
+        if body is None:
+          return
+        try:
+          req = json.loads(body)
+          cmd = req['cmd']
+        except (ValueError, KeyError):
+          return
+
+        def write_out(data):
+          try:
+            conn.sendall(_SHELL_FRAME_OUT + struct.pack('>I', len(data)) + data)
+          except OSError:
+            pass
+
+        code = ws.RunCommand(cmd, write_out)
+        try:
+          conn.sendall(_SHELL_FRAME_EXIT + struct.pack('>i', code))
+        except OSError:
+          pass
+      finally:
+        try:
+          conn.close()
+        except OSError:
+          pass
+
+    def _accept_loop():
+      while not stop.is_set():
+        try:
+          conn, _ = srv.accept()
+        except OSError:
+          return
+        threading.Thread(target=_handle, args=(conn,), daemon=True).start()
+
+    accept_thread = threading.Thread(target=_accept_loop, daemon=True)
+    accept_thread.start()
+
+    try:
+      while ws_thread.is_alive():
+        ws_thread.join(0.5)
+    except KeyboardInterrupt:
+      pass
+    finally:
+      stop.set()
+      try:
+        ws.close()
+      except Exception:
+        pass
+      try:
+        srv.close()
+      except OSError:
+        pass
+      try:
+        os.unlink(sock_path)
+      except FileNotFoundError:
+        pass
+
+  @Command('exec',
+           'execute a command on a persistent remote shell (ovl shell -p)', [
+               Arg('command',
+                   metavar='CMD',
+                   nargs='?',
+                   help='command to execute (joined with spaces)')
+           ])
+  def Exec(self, command=None):
+    if not command:
+      sys.stderr.write('ovl exec: missing command\n')
+      sys.exit(2)
+    cmd = ' '.join(command)
+
+    sock_path = os.environ.get(_SHELL_SOCK_ENV)
+    if not sock_path:
+      mid = self._selected_mid or (self._state.selected_mid
+                                   if self._state else None)
+      if not mid:
+        sys.stderr.write(
+            'ovl exec: no selected client; run `ovl select` or set %s\n' %
+            _SHELL_SOCK_ENV)
+        sys.exit(2)
+      sock_path = self._ShellSockPath(mid)
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+      s.connect(sock_path)
+    except (FileNotFoundError, ConnectionRefusedError, OSError) as e:
+      sys.stderr.write(
+          'ovl exec: no shell at %s (start with `ovl shell -p`): %s\n' %
+          (sock_path, e))
+      sys.exit(2)
+
+    body = json.dumps({'cmd': cmd}).encode()
+    s.sendall(struct.pack('>I', len(body)) + body)
+
+    out = sys.stdout.buffer
+    while True:
+      tag = _RecvExact(s, 1)
+      if tag is None:
+        sys.stderr.write('ovl exec: daemon closed connection\n')
+        sys.exit(1)
+      if tag == _SHELL_FRAME_OUT:
+        ln_bytes = _RecvExact(s, 4)
+        if ln_bytes is None:
+          sys.exit(1)
+        (ln,) = struct.unpack('>I', ln_bytes)
+        data = _RecvExact(s, ln)
+        if data is None:
+          sys.exit(1)
+        out.write(data)
+        out.flush()
+      elif tag == _SHELL_FRAME_EXIT:
+        code_bytes = _RecvExact(s, 4)
+        if code_bytes is None:
+          sys.exit(1)
+        (code,) = struct.unpack('>i', code_bytes)
+        sys.exit(code)
+      else:
+        sys.stderr.write('ovl exec: unexpected frame tag %r\n' % tag)
+        sys.exit(1)
 
   def _LsTree(self, path):
     """Get a recursive directory listing using the Overlord API.

@@ -122,6 +122,30 @@ Besides from the web interface, a command line interface is also provided.  The 
    $ ovl shell
    localhost ~ # _
 
+   Run a single command::
+
+       $ ovl shell ls /tmp
+
+   Persistent shell mode (recommended for agents firing many commands):
+
+.. code-block:: bash
+
+   # Terminal 1: hold one long-lived /bin/sh on the remote and listen on a
+   # local Unix socket. Each call eliminates the JWT handshake and the
+   # per-command shell fork on the remote.
+   $ ovl shell -p
+   Persistent shell ready for myclient
+   OVL_SHELL_SOCK=/tmp/ovl-shell-501-myclient.sock
+   Use `ovl exec <cmd>` in another terminal. Ctrl-C to stop.
+
+   # Terminal 2: dispatch commands. Shell state (cwd, env, functions)
+   # persists across calls; exit codes propagate.
+   $ ovl exec 'cd /var/log'
+   $ ovl exec 'pwd'
+   /var/log
+   $ ovl exec 'false'; echo $?
+   1
+
 5. File transfer
 
 .. code-block:: bash
