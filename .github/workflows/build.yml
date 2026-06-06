@@ -25,7 +25,7 @@ jobs:
         run: git config --global --add safe.directory $PWD
       - name: go-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.0
           make go-lint
       - name: py-lint
         run: |

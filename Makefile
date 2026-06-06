@@ -179,8 +179,8 @@ go-fmt:
 
 go-lint:
 	$(call cmd_msg,GOLANGCI-LINT,$(GO_DIRS))
-	@which golangci-lint > /dev/null || (echo "Installing latest golangci-lint..." && \
-		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin latest)
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint v1.62.0..." && \
+		curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin v1.62.0)
 	@golangci-lint run ./overlord/... ./cmd/...
 
 go-test:
