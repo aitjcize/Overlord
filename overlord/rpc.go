@@ -227,7 +227,7 @@ func (rpc *RPCCore) StopConn() {
 	for {
 		select {
 		case <-rpc.readChan:
-		case <-rpc.readErrChan:
+		case <-rpc.readErrChan: //nolint:errcheck // drained on purpose; errors after Close are irrelevant
 		default:
 			return
 		}
