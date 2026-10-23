@@ -1,8 +1,8 @@
 module github.com/aitjcize/Overlord
 
-go 1.24.0
+go 1.27.0
 
-toolchain go1.24.5
+toolchain go1.27.3
 
 require (
 	github.com/creack/pty v1.1.24
