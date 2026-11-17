@@ -628,27 +628,38 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
       self.send(f'\x1b[8;{rows};{cols}t')
 
       READY, ENTER_PRESSED, ESCAPE_PRESSED = range(3)
+      escape = ord(self._escape) if self._escape else None
 
       try:
         state = READY
         while True:
-          ch = sys.stdin.read(1)
+          # Read whatever is available and send it as one frame. Sending a
+          # byte per frame splits multi-byte sequences (arrow keys, mouse
+          # reports such as ESC [ < 35;47;45 M) across frames; the remote
+          # line editor then times out after the lone ESC and inserts the
+          # rest as literal text.
+          data = os.read(self._stdin_fd, 4096)
+          if not data:
+            break
 
-          # Scan for escape sequence
-          if self._escape:
-            if state == READY:
-              state = ENTER_PRESSED if ch == chr(0x0d) else READY
-            elif state == ENTER_PRESSED:
-              state = ESCAPE_PRESSED if ch == self._escape else READY
-            elif state == ESCAPE_PRESSED:
-              if ch == '.':
-                self.close()
-                break
-            else:
-              state = READY
+          # Scan for the <Enter><escape>. disconnect sequence.
+          if escape is not None:
+            for i, b in enumerate(data):
+              if state == READY:
+                state = ENTER_PRESSED if b == 0x0d else READY
+              elif state == ENTER_PRESSED:
+                state = ESCAPE_PRESSED if b == escape else (
+                    ENTER_PRESSED if b == 0x0d else READY)
+              elif state == ESCAPE_PRESSED:
+                if b == ord('.'):
+                  if i > 0:
+                    self.send(data[:i], binary=True)
+                  self.close()
+                  return
+                state = ENTER_PRESSED if b == 0x0d else READY
 
-          self.send(ch)
-      except (KeyboardInterrupt, RuntimeError):
+          self.send(data, binary=True)
+      except (KeyboardInterrupt, RuntimeError, OSError):
         pass
 
     t = threading.Thread(target=_FeedInput)
@@ -662,7 +673,15 @@ class TerminalWebSocketClient(SSLEnabledWebSocketBaseClient):
   def closed(self, code, reason=None):
     del code, reason  # Unused.
     # Restore original terminal settings
-    termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
+    if self._old_termios is not None:
+      termios.tcsetattr(self._stdin_fd, termios.TCSANOW, self._old_termios)
+    # A remote program that exits abnormally (or a dropped connection) can
+    # leave mouse tracking and bracketed paste enabled on the local terminal,
+    # which then keeps emitting reports like `<35;47;45M` into the next
+    # program. Turn those modes off.
+    sys.stdout.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l'
+                     '\x1b[?1006l\x1b[?1015l\x1b[?2004l')
+    sys.stdout.flush()
     # Restore original signal handler
     if self._old_sigwinch_handler:
       signal.signal(signal.SIGWINCH, self._old_sigwinch_handler)
